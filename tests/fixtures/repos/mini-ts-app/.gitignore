@@ -1,0 +1,10 @@
+# Mini-ts-app fixture local artifacts. The fixture source itself is
+# committed so cognis tests have a stable repo to index. Do NOT add
+# `src/` to this file.
+node_modules/
+dist/
+coverage/
+*.log
+.env
+.env.*
+!.env.example

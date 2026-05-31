@@ -1,0 +1,392 @@
+{
+  "version": 1,
+  "language": "typescript",
+  "fixture": "mini-ts-app",
+  "symbols": [
+    {
+      "qualified_name": "ts:src/app.ts:createApp",
+      "kind": "function",
+      "file_path": "src/app.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/app.ts:CreateAppOptions",
+      "kind": "interface",
+      "file_path": "src/app.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/app.ts:AppHandle",
+      "kind": "interface",
+      "file_path": "src/app.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/auth/jwt.ts:validate",
+      "kind": "function",
+      "file_path": "src/auth/jwt.ts",
+      "exported": true,
+      "tags": ["planted-bug", "auth-timeout"]
+    },
+    {
+      "qualified_name": "ts:src/auth/jwt.ts:sign",
+      "kind": "function",
+      "file_path": "src/auth/jwt.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/auth/jwt.ts:signRefresh",
+      "kind": "function",
+      "file_path": "src/auth/jwt.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/auth/jwt.ts:decode",
+      "kind": "function",
+      "file_path": "src/auth/jwt.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/auth/jwt.ts:isExpired",
+      "kind": "function",
+      "file_path": "src/auth/jwt.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/auth/jwt.ts:JwtError",
+      "kind": "class",
+      "file_path": "src/auth/jwt.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/auth/jwt.ts:AccessTokenClaims",
+      "kind": "interface",
+      "file_path": "src/auth/jwt.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/auth/jwt.ts:ValidationContext",
+      "kind": "interface",
+      "file_path": "src/auth/jwt.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/middleware/auth.ts:requireAuth",
+      "kind": "function",
+      "file_path": "src/middleware/auth.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/middleware/auth.ts:requireRole",
+      "kind": "function",
+      "file_path": "src/middleware/auth.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/middleware/auth.ts:attachUserIfPresent",
+      "kind": "function",
+      "file_path": "src/middleware/auth.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/middleware/auth.ts:extractBearer",
+      "kind": "function",
+      "file_path": "src/middleware/auth.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/middleware/errorHandler.ts:errorHandler",
+      "kind": "function",
+      "file_path": "src/middleware/errorHandler.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/middleware/errorHandler.ts:notFoundHandler",
+      "kind": "function",
+      "file_path": "src/middleware/errorHandler.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/middleware/errorHandler.ts:asyncHandler",
+      "kind": "function",
+      "file_path": "src/middleware/errorHandler.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/middleware/errorHandler.ts:classifyError",
+      "kind": "function",
+      "file_path": "src/middleware/errorHandler.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/middleware/errorHandler.ts:HttpError",
+      "kind": "class",
+      "file_path": "src/middleware/errorHandler.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/middleware/errorHandler.ts:ValidationError",
+      "kind": "class",
+      "file_path": "src/middleware/errorHandler.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/middleware/logging.ts:requestLogger",
+      "kind": "function",
+      "file_path": "src/middleware/logging.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/middleware/logging.ts:requestIdOnly",
+      "kind": "function",
+      "file_path": "src/middleware/logging.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/middleware/logging.ts:resolveRequestId",
+      "kind": "function",
+      "file_path": "src/middleware/logging.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/middleware/logging.ts:safeQuery",
+      "kind": "function",
+      "file_path": "src/middleware/logging.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/routes/index.ts:registerRoutes",
+      "kind": "function",
+      "file_path": "src/routes/index.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/routes/login.ts:postLogin",
+      "kind": "function",
+      "file_path": "src/routes/login.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/routes/login.ts:buildLoginRouter",
+      "kind": "function",
+      "file_path": "src/routes/login.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/routes/login.ts:comparePassword",
+      "kind": "function",
+      "file_path": "src/routes/login.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/routes/users.ts:getMe",
+      "kind": "function",
+      "file_path": "src/routes/users.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/routes/users.ts:patchMe",
+      "kind": "function",
+      "file_path": "src/routes/users.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/routes/users.ts:listUsers",
+      "kind": "function",
+      "file_path": "src/routes/users.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/routes/users.ts:buildUsersRouter",
+      "kind": "function",
+      "file_path": "src/routes/users.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/routes/health.ts:healthRouter",
+      "kind": "function",
+      "file_path": "src/routes/health.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/db/userRepo.ts:UserRepo",
+      "kind": "class",
+      "file_path": "src/db/userRepo.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/db/userRepo.ts:buildSeedRepo",
+      "kind": "function",
+      "file_path": "src/db/userRepo.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/db/userRepo.ts:UserNotFoundError",
+      "kind": "class",
+      "file_path": "src/db/userRepo.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/db/userRepo.ts:DuplicateUserError",
+      "kind": "class",
+      "file_path": "src/db/userRepo.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/utils/secrets.ts:loadConfig",
+      "kind": "function",
+      "file_path": "src/utils/secrets.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/utils/secrets.ts:redactBearer",
+      "kind": "function",
+      "file_path": "src/utils/secrets.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/utils/secrets.ts:redactConfig",
+      "kind": "function",
+      "file_path": "src/utils/secrets.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/utils/secrets.ts:looksLikeSecret",
+      "kind": "function",
+      "file_path": "src/utils/secrets.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/utils/secrets.ts:scrubSecrets",
+      "kind": "function",
+      "file_path": "src/utils/secrets.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/utils/logger.ts:createLogger",
+      "kind": "function",
+      "file_path": "src/utils/logger.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/utils/logger.ts:timed",
+      "kind": "function",
+      "file_path": "src/utils/logger.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/utils/logger.ts:levelFromString",
+      "kind": "function",
+      "file_path": "src/utils/logger.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/utils/time.ts:nowMs",
+      "kind": "function",
+      "file_path": "src/utils/time.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/utils/time.ts:monotonicMs",
+      "kind": "function",
+      "file_path": "src/utils/time.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/utils/time.ts:nowSeconds",
+      "kind": "function",
+      "file_path": "src/utils/time.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/utils/time.ts:sleep",
+      "kind": "function",
+      "file_path": "src/utils/time.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/utils/time.ts:withTimeout",
+      "kind": "function",
+      "file_path": "src/utils/time.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/utils/time.ts:TimeoutError",
+      "kind": "class",
+      "file_path": "src/utils/time.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/utils/time.ts:formatDuration",
+      "kind": "function",
+      "file_path": "src/utils/time.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/utils/time.ts:ONE_DAY_MS",
+      "kind": "const",
+      "file_path": "src/utils/time.ts",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "ts:src/utils/time.ts:secondsToMs",
+      "kind": "function",
+      "file_path": "src/utils/time.ts",
+      "exported": true,
+      "tags": []
+    }
+  ]
+}

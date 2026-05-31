@@ -1,0 +1,205 @@
+{
+  "name": "cognis-vscode",
+  "displayName": "Cognis",
+  "description": "Managed Cognis setup for AI semantic search, MCP wiring, and live indexing across MCP-capable editors.",
+  "version": "0.1.17",
+  "publisher": "ToanBui",
+  "license": "Apache-2.0",
+  "icon": "media/icon.png",
+  "author": { "name": "ToanBui", "email": "buimanhtoan.it@gmail.com" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/buimanhtoan-it/cognis.git",
+    "directory": "apps/cognis-vscode"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning"
+  ],
+  "keywords": [
+    "mcp",
+    "ai",
+    "semantic search",
+    "code search",
+    "rag",
+    "cursor",
+    "copilot",
+    "code intelligence"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "workspaceContains:.cognis/config.yaml"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cognis",
+          "title": "Cognis",
+          "icon": "media/sidebar.png"
+        }
+      ]
+    },
+    "views": {
+      "cognis": [
+        {
+          "type": "webview",
+          "id": "cognis.controlPanel",
+          "name": "Overview",
+          "icon": "media/sidebar.png"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "cognis.setupForAi",
+        "title": "Cognis: Set Up for AI",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.repairSetup",
+        "title": "Cognis: Repair Setup",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.clearAndReindex",
+        "title": "Cognis: Clear Index & Re-index",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.showHealth",
+        "title": "Cognis: Show Health",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.openPanel",
+        "title": "Cognis: Open Overview",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.showOutput",
+        "title": "Cognis: Show Output",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      }
+    ],
+    "configuration": {
+      "title": "Cognis",
+      "properties": {
+        "cognis.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Python executable for cognis CLI/daemons. Empty uses the active interpreter."
+        },
+        "cognis.autoManageOnActivate": {
+          "type": "boolean",
+          "default": true,
+          "description": "On activation, inspect the workspace, refresh Cognis config, and let cognis-indexd rebuild or watch as needed."
+        },
+        "cognis.autoStartLiveIndexing": {
+          "type": "boolean",
+          "default": true,
+          "description": "During auto-manage, start cognis-indexd when the workspace needs indexing or file watching."
+        },
+        "cognis.autoIndexOnFileChange": {
+          "type": "boolean",
+          "default": true,
+          "description": "When saved files change and live indexing is not running, automatically start cognis-indexd for this workspace."
+        },
+        "cognis.promptBeforeMcpWrite": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask once before writing global MCP client configuration during auto-manage."
+        },
+        "cognis.autoBootstrapOnOpen": {
+          "type": "boolean",
+          "default": false,
+          "markdownDeprecationMessage": "Use **cognis.autoManageOnActivate** instead.",
+          "description": "Deprecated. Run bootstrap when a workspace opens and .cognis is missing."
+        },
+        "cognis.mcpHost": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "cursor",
+            "vscode",
+            "claude"
+          ],
+          "default": "auto",
+          "description": "MCP config target host. Use auto to detect the current editor."
+        },
+        "cognis.pollHealthSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "description": "Health poll interval when live indexing is active."
+        },
+        "cognis.mcpSoftTimeoutSeconds": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Override COGNIS_MCP_SOFT_TIMEOUT_S in generated MCP config. 0 keeps Cognis defaults; generated Windows configs use a safer automatic value."
+        },
+        "cognis.mcpHardTimeoutSeconds": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Override COGNIS_MCP_HARD_TIMEOUT_S in generated MCP config. 0 keeps Cognis defaults; generated Windows configs use a safer automatic value."
+        },
+        "cognis.mcpDiscoverSemanticTimeoutSeconds": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Override COGNIS_MCP_DISCOVER_SEMANTIC_TIMEOUT_S in generated MCP config. 0 keeps Cognis defaults; generated Windows configs use a safer automatic value."
+        },
+        "cognis.mcpSemanticCooldownSeconds": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Override COGNIS_MCP_SEMANTIC_COOLDOWN_S in generated MCP config. 0 keeps the Cognis default."
+        },
+        "cognis.mcpConfigScope": {
+          "type": "string",
+          "enum": [
+            "workspace",
+            "global"
+          ],
+          "default": "global",
+          "description": "Where to write MCP client config. global merges cognis-<repo-slug> entries into ~/.cursor/mcp.json so multiple indexed repos can stay connected at once. workspace writes to .cursor/mcp.json inside the target repository."
+        },
+        "cognis.mcpWarmSemanticOnStartup": {
+          "type": "boolean",
+          "default": true,
+          "description": "When true, generated MCP config sets COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP=1 so the embedder preloads on MCP server start and avoids first-query timeouts."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "postinstall": "npm run compile",
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "test": "npm run compile && node --test out/test/*.test.js",
+    "lint": "tsc -p ./ --noEmit"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.17.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^3.9.1",
+    "mocha": "^10.8.2",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,41 @@
+# pre-commit hooks for cognis. Install with: `pre-commit install`.
+# Hook versions move forward via `pre-commit autoupdate`; CI pins them via lockfile.
+
+minimum_pre_commit_version: "3.7.0"
+
+default_language_version:
+  python: python3.11
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+        exclude: ^tests/fixtures/
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-added-large-files
+        args: ["--maxkb=512"]
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff-format
+      - id: ruff
+        args: ["--fix"]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        # Strict-typing scope per Task 1 — start narrow on packages/core.
+        files: ^packages/core/
+        args:
+          - --config-file=pyproject.toml
+        additional_dependencies:
+          - pydantic>=2.7
+          - types-PyYAML

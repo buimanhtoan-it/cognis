@@ -1,0 +1,8 @@
+{
+  "schema_version": "1",
+  "description": "Phase 1 golden-set gates for nightly eval regression (self-hosted v1).",
+  "strategy": "hybrid",
+  "k": 10,
+  "recall_at_k_min": 0.70,
+  "mrr_min": 0.50
+}

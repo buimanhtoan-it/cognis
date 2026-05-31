@@ -1,0 +1,91 @@
+name: nightly-eval
+
+# Indexes fixture repos, runs live hybrid eval, and gates against eval-baselines/phase1.json.
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+env:
+  PYTHONUNBUFFERED: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  EVAL_REGRESSION_MODE: fail
+  COGNIS_DB_PATH: .cognis/uckg.db
+
+jobs:
+  eval:
+    name: nightly eval (live retrieval)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Cache tree-sitter grammars
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/tree_sitter
+            ~/.cache/tree-sitter
+            ./build-tree-sitter
+          key: tree-sitter-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            tree-sitter-${{ runner.os }}-
+
+      - name: Install cognis (production extras)
+        uses: ./.github/actions/install-prod
+
+      - name: Index fixture repos
+        run: bash scripts/ci_index_fixtures.sh
+
+      - name: Compute report directory
+        id: outdir
+        run: |
+          ts="$(date -u +%Y%m%dT%H%M%SZ)"
+          echo "ts=${ts}" >> "$GITHUB_OUTPUT"
+          echo "dir=eval-reports/${ts}" >> "$GITHUB_OUTPUT"
+
+      - name: Run eval harness (hybrid strategy)
+        run: |
+          python scripts/run_eval.py \
+            --golden tests/fixtures/eval/golden.jsonl \
+            --out "${{ steps.outdir.outputs.dir }}" \
+            --k 10
+
+      - name: Gate against phase1 baseline
+        if: env.EVAL_REGRESSION_MODE == 'fail'
+        run: |
+          python scripts/compare_eval_baseline.py \
+            "${{ steps.outdir.outputs.dir }}/report.json"
+
+      - name: Upload eval report artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-reports-${{ steps.outdir.outputs.ts }}
+          path: eval-reports/
+          if-no-files-found: ignore
+
+      - name: Append summary
+        if: always()
+        run: |
+          {
+            echo "# Nightly eval"
+            echo
+            if [ -f "${{ steps.outdir.outputs.dir }}/summary.md" ]; then
+              cat "${{ steps.outdir.outputs.dir }}/summary.md"
+            else
+              echo "No eval report produced."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

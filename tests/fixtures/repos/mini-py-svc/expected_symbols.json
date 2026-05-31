@@ -1,0 +1,287 @@
+{
+  "version": 1,
+  "language": "python",
+  "fixture": "mini-py-svc",
+  "symbols": [
+    {
+      "qualified_name": "py:src/app/main.py:create_app",
+      "kind": "function",
+      "file_path": "src/app/main.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/app/main.py:lifespan",
+      "kind": "function",
+      "file_path": "src/app/main.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/app/startup.py:on_startup",
+      "kind": "function",
+      "file_path": "src/app/startup.py",
+      "exported": true,
+      "tags": ["planted-secret-comment"]
+    },
+    {
+      "qualified_name": "py:src/app/startup.py:on_shutdown",
+      "kind": "function",
+      "file_path": "src/app/startup.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/app/startup.py:liveness_probe",
+      "kind": "function",
+      "file_path": "src/app/startup.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/app/startup.py:readiness_probe",
+      "kind": "function",
+      "file_path": "src/app/startup.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/app/config.py:Settings",
+      "kind": "class",
+      "file_path": "src/app/config.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/app/config.py:load_settings",
+      "kind": "function",
+      "file_path": "src/app/config.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/app/config.py:load_secret",
+      "kind": "function",
+      "file_path": "src/app/config.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/app/security.py:JWT_SECRET",
+      "kind": "const",
+      "file_path": "src/app/security.py",
+      "exported": true,
+      "tags": ["planted-secret"]
+    },
+    {
+      "qualified_name": "py:src/app/security.py:JWT_FALLBACK_SECRET",
+      "kind": "const",
+      "file_path": "src/app/security.py",
+      "exported": true,
+      "tags": ["planted-secret"]
+    },
+    {
+      "qualified_name": "py:src/app/security.py:PAYLOAD_PEPPER",
+      "kind": "const",
+      "file_path": "src/app/security.py",
+      "exported": true,
+      "tags": ["planted-secret"]
+    },
+    {
+      "qualified_name": "py:src/app/security.py:JwtError",
+      "kind": "class",
+      "file_path": "src/app/security.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/app/security.py:JwtClaims",
+      "kind": "class",
+      "file_path": "src/app/security.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/app/security.py:encode_jwt",
+      "kind": "function",
+      "file_path": "src/app/security.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/app/security.py:decode_jwt",
+      "kind": "function",
+      "file_path": "src/app/security.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/app/security.py:is_token_expired",
+      "kind": "function",
+      "file_path": "src/app/security.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/app/security.py:hash_password",
+      "kind": "function",
+      "file_path": "src/app/security.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/app/security.py:verify_password",
+      "kind": "function",
+      "file_path": "src/app/security.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/db/connection.py:get_engine",
+      "kind": "function",
+      "file_path": "src/db/connection.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/db/connection.py:dispose_engine",
+      "kind": "function",
+      "file_path": "src/db/connection.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/db/connection.py:ping_engine",
+      "kind": "function",
+      "file_path": "src/db/connection.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/db/connection.py:reset_engine_cache",
+      "kind": "function",
+      "file_path": "src/db/connection.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/db/users_repo.py:User",
+      "kind": "class",
+      "file_path": "src/db/users_repo.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/db/users_repo.py:get_user",
+      "kind": "function",
+      "file_path": "src/db/users_repo.py",
+      "exported": true,
+      "tags": ["sql-literal"]
+    },
+    {
+      "qualified_name": "py:src/db/users_repo.py:get_user_by_username",
+      "kind": "function",
+      "file_path": "src/db/users_repo.py",
+      "exported": true,
+      "tags": ["sql-literal"]
+    },
+    {
+      "qualified_name": "py:src/db/users_repo.py:list_users",
+      "kind": "function",
+      "file_path": "src/db/users_repo.py",
+      "exported": true,
+      "tags": ["sql-literal"]
+    },
+    {
+      "qualified_name": "py:src/db/users_repo.py:upsert_user",
+      "kind": "function",
+      "file_path": "src/db/users_repo.py",
+      "exported": true,
+      "tags": ["sql-literal"]
+    },
+    {
+      "qualified_name": "py:src/db/users_repo.py:delete_user",
+      "kind": "function",
+      "file_path": "src/db/users_repo.py",
+      "exported": true,
+      "tags": ["sql-literal"]
+    },
+    {
+      "qualified_name": "py:src/db/users_repo.py:update_user_password",
+      "kind": "function",
+      "file_path": "src/db/users_repo.py",
+      "exported": true,
+      "tags": ["sql-literal"]
+    },
+    {
+      "qualified_name": "py:src/db/users_repo.py:count_users",
+      "kind": "function",
+      "file_path": "src/db/users_repo.py",
+      "exported": true,
+      "tags": ["sql-literal"]
+    },
+    {
+      "qualified_name": "py:src/db/users_repo.py:count_users_by_role",
+      "kind": "function",
+      "file_path": "src/db/users_repo.py",
+      "exported": true,
+      "tags": ["sql-literal"]
+    },
+    {
+      "qualified_name": "py:src/db/orders_repo.py:Order",
+      "kind": "class",
+      "file_path": "src/db/orders_repo.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/db/orders_repo.py:OrderItem",
+      "kind": "class",
+      "file_path": "src/db/orders_repo.py",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "py:src/db/orders_repo.py:get_order",
+      "kind": "function",
+      "file_path": "src/db/orders_repo.py",
+      "exported": true,
+      "tags": ["sql-literal"]
+    },
+    {
+      "qualified_name": "py:src/db/orders_repo.py:list_orders_for_user",
+      "kind": "function",
+      "file_path": "src/db/orders_repo.py",
+      "exported": true,
+      "tags": ["sql-literal"]
+    },
+    {
+      "qualified_name": "py:src/db/orders_repo.py:insert_order",
+      "kind": "function",
+      "file_path": "src/db/orders_repo.py",
+      "exported": true,
+      "tags": ["sql-literal"]
+    },
+    {
+      "qualified_name": "py:src/db/orders_repo.py:set_order_status",
+      "kind": "function",
+      "file_path": "src/db/orders_repo.py",
+      "exported": true,
+      "tags": ["sql-literal"]
+    },
+    {
+      "qualified_name": "py:src/db/orders_repo.py:delete_order",
+      "kind": "function",
+      "file_path": "src/db/orders_repo.py",
+      "exported": true,
+      "tags": ["sql-literal"]
+    },
+    {
+      "qualified_name": "py:src/db/orders_repo.py:sum_orders_for_user",
+      "kind": "function",
+      "file_path": "src/db/orders_repo.py",
+      "exported": true,
+      "tags": ["sql-literal"]
+    }
+  ]
+}

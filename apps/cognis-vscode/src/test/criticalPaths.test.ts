@@ -1,0 +1,153 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  getGlobalMcpConfigPath,
+  getWorkspaceMcpConfigPath,
+  resolveMcpConfigPath,
+} from "../mcpConfigPaths";
+import { envMatchesExpected, envMatchesRepo } from "../mcpEnv";
+import {
+  deriveMcpServerName,
+  isCognisMcpServerName,
+} from "../mcpServerName";
+import { buildRepairPlan } from "../repairPlan";
+import type { HealthReport } from "../types";
+
+function makeHealth(
+  overall: "ok" | "warn" | "fail",
+  overrides?: Partial<HealthReport["checks"]>
+): HealthReport {
+  const ok = { status: "ok", message: "ok" };
+  return {
+    runtime_version: "0.1.17",
+    overall,
+    checks: {
+      config: ok,
+      db: ok,
+      index: ok,
+      vector: ok,
+      embedder: ok,
+      version: ok,
+      ...overrides,
+    },
+  };
+}
+
+test("deriveMcpServerName builds cognis-<slug> from repo folder", () => {
+  assert.equal(deriveMcpServerName("D:/PROGRAMING/cognis"), "cognis-cognis");
+  assert.equal(
+    deriveMcpServerName("D:/PROGRAMING/edittruyentranh/edittruyentranh"),
+    "cognis-edittruyentranh"
+  );
+  assert.equal(deriveMcpServerName("D:/work/My App"), "cognis-my-app");
+});
+
+test("isCognisMcpServerName recognizes legacy and named servers", () => {
+  assert.equal(isCognisMcpServerName("cognis"), true);
+  assert.equal(isCognisMcpServerName("cognis-cognis"), true);
+  assert.equal(isCognisMcpServerName("brave-search"), false);
+});
+
+test("getWorkspaceMcpConfigPath targets repo-local Cursor and VS Code files", () => {
+  const repoRoot = "D:/repo";
+  assert.equal(
+    getWorkspaceMcpConfigPath(repoRoot, "cursor"),
+    "D:\\repo\\.cursor\\mcp.json"
+  );
+  assert.equal(
+    getWorkspaceMcpConfigPath(repoRoot, "vscode"),
+    "D:\\repo\\.vscode\\mcp.json"
+  );
+  assert.equal(getWorkspaceMcpConfigPath(repoRoot, "claude"), undefined);
+});
+
+test("resolveMcpConfigPath prefers workspace scope for Cursor", () => {
+  const repoRoot = "D:/repo";
+  const homeDir = "C:/Users/test";
+  assert.equal(
+    resolveMcpConfigPath("cursor", repoRoot, "workspace", homeDir),
+    "D:\\repo\\.cursor\\mcp.json"
+  );
+  assert.equal(
+    resolveMcpConfigPath("cursor", repoRoot, "global", homeDir),
+    getGlobalMcpConfigPath("cursor", homeDir)
+  );
+});
+
+test("envMatchesRepo accepts minimal env with only COGNIS_DB_PATH", () => {
+  const repoRoot = "D:/repo";
+  assert.equal(
+    envMatchesRepo(repoRoot, {
+      COGNIS_DB_PATH: "D:/repo/.cognis/uckg.db",
+    }),
+    true
+  );
+});
+
+test("envMatchesRepo rejects missing or mismatched repo wiring", () => {
+  const repoRoot = "D:/repo";
+  assert.equal(
+    envMatchesRepo(repoRoot, {
+      COGNIS_REPO_ROOT: "D:/other",
+      COGNIS_DB_PATH: "D:/repo/.cognis/uckg.db",
+    }),
+    false
+  );
+  assert.equal(
+    envMatchesRepo(repoRoot, {
+      COGNIS_DB_PATH: "D:/repo/.cognis/other.db",
+    }),
+    false
+  );
+});
+
+test("envMatchesExpected compares only the expected subset", () => {
+  assert.equal(
+    envMatchesExpected(
+      {
+        COGNIS_DB_PATH: "D:/repo/.cognis/uckg.db",
+        COGNIS_MCP_SOFT_TIMEOUT_S: "30",
+      },
+      {
+        COGNIS_DB_PATH: "D:/repo/.cognis/uckg.db",
+      }
+    ),
+    true
+  );
+});
+
+test("buildRepairPlan flags bootstrap and MCP repair for missing setup", () => {
+  const plan = buildRepairPlan({
+    configExists: false,
+    mcpConfigured: false,
+    health: undefined,
+    stateLiveIndexing: true,
+    liveIndexingRunning: false,
+  });
+
+  assert.deepEqual(plan, {
+    needsBootstrap: true,
+    needsReindex: false,
+    needsMcp: true,
+    needsLiveIndexing: true,
+    health: undefined,
+  });
+});
+
+test("buildRepairPlan stays quiet for a healthy configured workspace", () => {
+  const plan = buildRepairPlan({
+    configExists: true,
+    mcpConfigured: true,
+    health: makeHealth("ok"),
+    stateLiveIndexing: false,
+    liveIndexingRunning: false,
+  });
+
+  assert.deepEqual(plan, {
+    needsBootstrap: false,
+    needsReindex: false,
+    needsMcp: false,
+    needsLiveIndexing: false,
+    health: makeHealth("ok"),
+  });
+});

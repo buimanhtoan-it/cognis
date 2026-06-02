@@ -23,6 +23,7 @@ help:
 	@echo "  make format      # ruff format (writes changes)"
 	@echo "  make typecheck   # mypy (strict on $(MYPY_STRICT_PATHS))"
 	@echo "  make test        # pytest unit + property tests"
+	@echo "  make e2e         # full cross-app end-to-end flow (CLI+indexd+mcpd)"
 	@echo "  make bench       # pytest --benchmark-only"
 	@echo "  make eval        # cognis-cli eval (golden-set runner)"
 	@echo "  make clean       # remove build / cache artifacts"
@@ -57,7 +58,11 @@ typecheck:
 
 .PHONY: test
 test:
-	$(PYTEST) -m "not benchmark and not eval" $(PYTEST_ARGS)
+	$(PYTEST) -m "not benchmark and not eval and not e2e" $(PYTEST_ARGS)
+
+.PHONY: e2e
+e2e:
+	$(PYTEST) -m e2e $(PYTEST_ARGS)
 
 .PHONY: bench
 bench:

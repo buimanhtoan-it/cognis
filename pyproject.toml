@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 # ---------------------------------------------------------------------------
 [project]
 name = "cognis"
-version = "0.1.17"
+version = "0.2.0"
 description = "Software Cognition Engine — MCP-native context capsules for LLM coding agents."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -231,6 +231,7 @@ addopts = [
 markers = [
     "unit: fast in-process tests (default).",
     "integration: cross-process or fixture-repo tests.",
+    "e2e: full cross-app flow over real process boundaries (CLI + indexd + mcpd).",
     "eval: slow eval-harness tests, run nightly.",
     "pbt: hypothesis property-based tests (CP-1..CP-12 in design.md).",
     "benchmark: pytest-benchmark performance assertions.",

@@ -28,6 +28,7 @@ import signal
 import sys
 import time
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -123,12 +124,35 @@ def _resolve_status_path(repo_root: Path) -> Path:
 
 
 def _write_status_file(path: Path, payload: dict[str, Any]) -> None:
-    """Write the daemon status snapshot atomically."""
+    """Write the daemon status snapshot atomically.
+
+    The status file is polled concurrently by IDE integrations (the VS Code
+    extension reads it on a timer). On Windows, ``os.replace`` raises
+    ``PermissionError`` (WinError 5 / 32) if the destination is momentarily
+    open by such a reader. That is a transient sharing violation, not a real
+    failure, so retry the rename a few times with a short backoff before giving
+    up. Crashing the writer here would take down the whole indexer daemon over
+    a cosmetic status update.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     tmp_path = path.with_name(f"{path.name}.tmp")
     tmp_path.write_text(text, encoding="utf-8")
-    tmp_path.replace(path)
+
+    last_error: OSError | None = None
+    for attempt in range(10):
+        try:
+            tmp_path.replace(path)
+            return
+        except PermissionError as exc:
+            # A concurrent reader holds the destination open; back off briefly.
+            last_error = exc
+            time.sleep(0.02 * (attempt + 1))
+    # Could not swap atomically after retries. Drop this snapshot rather than
+    # crashing the daemon; the next tick will publish a fresh one.
+    logger.debug("status file replace failed after retries: %s", last_error)
+    with contextlib.suppress(OSError):
+        tmp_path.unlink()
 
 
 def _relative_paths(paths: Sequence[Path], repo_root: Path, *, limit: int = 8) -> list[str]:
@@ -243,6 +267,17 @@ async def run_daemon(
 
     loop = asyncio.get_running_loop()
 
+    # All pipeline DB work runs on a single dedicated worker thread. This
+    # matches the design's "dedicated writer" intent (serialized SQLite writes,
+    # no cross-thread connection sharing) and — crucially — gives us a thread
+    # whose cached connection we can close deterministically on shutdown,
+    # instead of leaking it into asyncio's shared default executor pool.
+    index_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="cognis-indexd-writer")
+
+    def _close_executor_db_connection() -> None:
+        """Release the worker thread's cached SQLite connection (runs on it)."""
+        db.close_thread_connection()
+
     # Run a full rebuild when explicitly requested, or cold-index when the DB
     # is empty. Done synchronously inside an executor so the event loop can
     # serve a SIGINT during the (potentially long) walk.
@@ -270,7 +305,7 @@ async def run_daemon(
             repo_root,
         )
         full_stats = await loop.run_in_executor(
-            None, lambda: pipeline.index_repo(repo_root, full=True)
+            index_executor, lambda: pipeline.index_repo(repo_root, full=True)
         )
         logger.info(
             "full index complete: files=%d symbols=%d edges=%d errors=%d in %.2fs",
@@ -298,7 +333,7 @@ async def run_daemon(
         )
         logger.info("DB populated — running incremental sweep")
         sweep_stats = await loop.run_in_executor(
-            None, lambda: pipeline.index_repo(repo_root, full=False)
+            index_executor, lambda: pipeline.index_repo(repo_root, full=False)
         )
         logger.info(
             "sweep complete: processed=%d skipped=%d errors=%d in %.2fs",
@@ -366,6 +401,7 @@ async def run_daemon(
                 repo_root=repo_root,
                 loop=loop,
                 runtime_status=runtime_status,
+                executor=index_executor,
             )
     except Exception:
         runtime_status.update(
@@ -390,7 +426,18 @@ async def run_daemon(
         stop_event.set()
         await status_task
         await watcher.stop()
+        # ``pipeline.close()`` releases the writer's cached connection on *this*
+        # (loop) thread — the same handle ``_db_is_empty`` opened above.
         pipeline.close()
+        # The pipeline's actual DB writes ran on the dedicated worker thread, so
+        # close that thread's cached connection on the thread itself, then drain
+        # the executor. Without this the connection would only be finalized at
+        # interpreter exit, leaking a file handle (and tripping SQLite's
+        # same-thread close guard) on a long-lived host.
+        with contextlib.suppress(Exception):
+            await loop.run_in_executor(index_executor, _close_executor_db_connection)
+        index_executor.shutdown(wait=True)
+        db.close_thread_connection()
 
     return exit_code
 
@@ -403,11 +450,16 @@ async def _handle_event_batch(
     repo_root: Path,
     loop: asyncio.AbstractEventLoop,
     runtime_status: dict[str, Any],
+    executor: ThreadPoolExecutor,
 ) -> None:
     """Drain *queue* for up to ``_BATCH_WINDOW_S`` seconds then dispatch.
 
     Branch-change events bypass batching: a ref switch can invalidate a large
     portion of the index, so we kick off a re-walk immediately.
+
+    All pipeline DB work is dispatched onto *executor* — the daemon's single
+    dedicated writer thread — so SQLite writes stay serialized on one thread
+    whose connection is closed deterministically at shutdown.
     """
     if isinstance(first, BranchChangeEvent):
         runtime_status.update(
@@ -418,7 +470,7 @@ async def _handle_event_batch(
             last_error=None,
         )
         logger.info("branch change %s -> %s; re-walking repo", first.old_ref, first.new_ref)
-        await loop.run_in_executor(None, lambda: pipeline.index_repo(repo_root, full=False))
+        await loop.run_in_executor(executor, lambda: pipeline.index_repo(repo_root, full=False))
         runtime_status.update(
             phase="watching",
             message="Watching for file changes.",
@@ -475,7 +527,7 @@ async def _handle_event_batch(
             recent_files=_relative_paths(deletes, repo_root),
             last_error=None,
         )
-        await loop.run_in_executor(None, pipeline.remove_file, abs_path, repo_root)
+        await loop.run_in_executor(executor, pipeline.remove_file, abs_path, repo_root)
 
     if changes:
         change_paths = _relative_paths(changes, repo_root)
@@ -488,7 +540,7 @@ async def _handle_event_batch(
             last_error=None,
         )
         stats = await loop.run_in_executor(
-            None, lambda: pipeline.index_changed_files(changes, repo_root)
+            executor, lambda: pipeline.index_changed_files(changes, repo_root)
         )
         logger.info(
             "incremental: files=%d symbols=%d edges=%d errors=%d",
@@ -513,7 +565,7 @@ async def _handle_event_batch(
             last_error=None,
         )
         logger.info("branch change observed during batch window; re-walking")
-        await loop.run_in_executor(None, lambda: pipeline.index_repo(repo_root, full=False))
+        await loop.run_in_executor(executor, lambda: pipeline.index_repo(repo_root, full=False))
     runtime_status.update(
         phase="watching",
         message="Watching for file changes.",

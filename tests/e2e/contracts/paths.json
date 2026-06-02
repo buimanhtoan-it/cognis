@@ -1,0 +1,20 @@
+{
+  "audit_log_path": "str",
+  "capsule_cache_dir": "str",
+  "cognis_dir": "str",
+  "commands": {
+    "cognis_cli": "NoneType",
+    "cognis_cli_module": "str",
+    "cognis_indexd": "NoneType",
+    "cognis_indexd_module": "str",
+    "cognis_mcpd": "NoneType",
+    "cognis_mcpd_module": "str",
+    "python": "str"
+  },
+  "config_path": "str",
+  "db_path": "str",
+  "golden_set_path": "str",
+  "indexd_status_path": "str",
+  "repo_root": "str",
+  "runtime_version": "str"
+}

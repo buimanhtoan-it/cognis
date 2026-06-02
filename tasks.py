@@ -51,14 +51,20 @@ def typecheck(ctx: Context, paths: str = _MYPY_STRICT_PATHS) -> None:
 
 @task(help={"args": "Extra args forwarded to pytest."})
 def test(ctx: Context, args: str = "") -> None:
-    """Run unit + property-based tests (skips benchmark/eval markers)."""
+    """Run unit + property-based tests (skips benchmark/eval/e2e markers)."""
     _py(
         ctx,
         "-m",
         "pytest",
-        '-m "not benchmark and not eval"',
+        '-m "not benchmark and not eval and not e2e"',
         args,
     )
+
+
+@task(help={"args": "Extra args forwarded to pytest."})
+def e2e(ctx: Context, args: str = "") -> None:
+    """Run the full cross-app end-to-end suite (CLI + indexd + mcpd over real processes)."""
+    _py(ctx, "-m", "pytest", "-m e2e", args)
 
 
 @task(help={"args": "Extra args forwarded to pytest."})

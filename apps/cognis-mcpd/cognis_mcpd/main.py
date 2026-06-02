@@ -11,15 +11,58 @@ from __future__ import annotations
 import logging
 import os
 import sys
-import threading
+
+
+def _warm_db_on_startup(logger: logging.Logger) -> None:
+    """Open the UCKG ``Database`` on the main thread before serving.
+
+    Why this matters: ``Database.__init__`` probes for the optional
+    ``sqlite-vec`` extension, which lazily imports ``sqlite_vec`` → ``numpy``.
+    If that import first happens inside a tool call — which FastMCP runs on an
+    anyio *worker thread* — it can deadlock on the CPython import lock against
+    the main serve loop (observed on Python 3.14 + Windows: the tool call hangs
+    forever and the MCP client times out).
+
+    Touching the DB here forces every heavy, import-locking dependency to load
+    on the main thread up front, so the first ``symbol_lookup``/``symbol_search``
+    over stdio responds immediately instead of hanging.
+
+    Best-effort: a missing DB or probe failure must never stop the server from
+    starting, so all errors are swallowed with a debug log.
+    """
+    try:
+        import os
+
+        from cognis.db import Database
+
+        db_path = os.environ.get("COGNIS_DB_PATH", ".cognis/uckg.db")
+        # Construction runs _probe_vec_support → imports sqlite_vec/numpy now.
+        Database(db_path)
+    except Exception:
+        logger.debug("db warm-up skipped", exc_info=True)
 
 
 def _warm_semantic_layer_on_startup(logger: logging.Logger) -> None:
-    """Best-effort background warm-up for the shared semantic layer.
+    """Warm the shared semantic layer **on the main thread** before serving.
 
-    Loading sentence-transformers can take several seconds on the first request,
-    especially on Windows. Warm in the background so the MCP server can accept
-    stdio traffic immediately while the model is loading.
+    This must run on the main thread, synchronously, for a critical reason:
+    importing/initializing ``torch`` (via ``sentence-transformers``) for the
+    first time on a non-main thread can hang indefinitely inside the MCP server
+    process. FastMCP runs each tool on an anyio worker thread, and our tools
+    further offload semantic work to a spawned daemon thread via
+    ``_run_with_deadline``. If the embedder's first load happens there, torch's
+    one-time global initialization deadlocks while the main thread sits in the
+    asyncio/anyio serve loop — the tool call then blocks until the MCP deadline
+    fires and ``semantic_search`` returns a TIMEOUT to the agent.
+
+    Doing the first (and only) cold load here, on the main thread, means every
+    subsequent tool call reuses the cached singleton and returns immediately.
+
+    Disabled by ``COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP=0`` for environments that
+    never use semantic tools (lexical/structural retrieval still work), but note
+    that disabling it re-exposes the off-main-thread first-load hang the moment
+    a semantic tool is called. Best-effort: a load failure is logged and never
+    blocks startup.
     """
     if os.environ.get("COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP", "1").lower() in {
         "0",
@@ -28,20 +71,12 @@ def _warm_semantic_layer_on_startup(logger: logging.Logger) -> None:
     }:
         return
 
-    def _warm() -> None:
-        try:
-            from cognis_mcpd.embedder_pool import get_shared_semantic_layer
+    try:
+        from cognis_mcpd.embedder_pool import get_shared_semantic_layer
 
-            get_shared_semantic_layer()
-        except Exception:
-            logger.debug("semantic warm-up skipped", exc_info=True)
-
-    thread = threading.Thread(
-        target=_warm,
-        name="cognis-mcpd-semantic-warmup",
-        daemon=True,
-    )
-    thread.start()
+        get_shared_semantic_layer()
+    except Exception:
+        logger.debug("semantic warm-up skipped", exc_info=True)
 
 
 def main() -> int:
@@ -71,6 +106,11 @@ def main() -> int:
             )
             return 1
 
+        # Force import-locking, heavy deps (sqlite_vec/numpy via the DB probe)
+        # to load on the main thread before serving. Otherwise the first tool
+        # call triggers that import on an anyio worker thread and can deadlock
+        # against the serve loop's import lock (Python 3.14 / Windows).
+        _warm_db_on_startup(logger)
         _warm_semantic_layer_on_startup(logger)
 
         # Run with stdio transport (MVP).

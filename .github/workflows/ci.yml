@@ -88,3 +88,7 @@ jobs:
           npm ci 2>/dev/null || npm install
           npm run compile
           npm run lint
+
+      - name: Extension unit + contract-parity tests
+        working-directory: apps/cognis-vscode
+        run: npm test

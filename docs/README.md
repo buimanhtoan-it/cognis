@@ -39,4 +39,4 @@ This directory contains user, operator, and maintainer documentation for
 | [eval/phase1-baseline.md](eval/phase1-baseline.md) | Eval baseline and acceptance criteria |
 | [eval/swe-bench-methodology.md](eval/swe-bench-methodology.md) | SWE-bench Lite evaluation method |
 
-Release notes: [release-notes-v0.1.17.md](release-notes-v0.1.17.md).
+Release notes: [release-notes-v0.2.0.md](release-notes-v0.2.0.md) (latest), [release-notes-v0.1.17.md](release-notes-v0.1.17.md).

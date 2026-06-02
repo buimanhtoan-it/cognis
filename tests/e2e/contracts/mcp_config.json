@@ -1,0 +1,37 @@
+{
+  "config": {
+    "mcpServers": {
+      "cognis-workspace": {
+        "args": [
+          "str"
+        ],
+        "command": "str",
+        "env": {
+          "COGNIS_DB_PATH": "str",
+          "COGNIS_MCP_DISCOVER_SEMANTIC_TIMEOUT_S": "str",
+          "COGNIS_MCP_HARD_TIMEOUT_S": "str",
+          "COGNIS_MCP_SOFT_TIMEOUT_S": "str",
+          "COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP": "str"
+        }
+      }
+    }
+  },
+  "config_paths": {
+    "claude_macos": "str",
+    "claude_windows": "str",
+    "cursor_user": "str",
+    "cursor_workspace": "str",
+    "vscode_workspace": "str"
+  },
+  "env": {
+    "COGNIS_DB_PATH": "str",
+    "COGNIS_MCP_DISCOVER_SEMANTIC_TIMEOUT_S": "str",
+    "COGNIS_MCP_HARD_TIMEOUT_S": "str",
+    "COGNIS_MCP_SOFT_TIMEOUT_S": "str",
+    "COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP": "str"
+  },
+  "format": "str",
+  "host": "str",
+  "repo_root": "str",
+  "server_name": "str"
+}

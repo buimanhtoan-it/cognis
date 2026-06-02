@@ -6,6 +6,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-06-02
+
+### Fixed
+
+- **`semantic_search` (and the semantic stage of `retrieve_context_capsule`)
+  no longer hang / time out on first use over MCP stdio.** The embedder
+  (`sentence-transformers`/`torch`) was being loaded for the first time on a
+  spawned worker thread inside the server; first-time torch initialization off
+  the main thread hangs, so the tool blocked until the MCP deadline fired and
+  returned a `TIMEOUT`. `cognis-mcpd` now warms the shared semantic layer
+  **synchronously on the main thread** before serving, so every tool call
+  reuses the cached singleton. Disable with
+  `COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP=0` (re-exposes the off-main-thread
+  first-load hang for semantic tools).
+- `cognis-mcpd` warms the UCKG `Database` (and the optional `sqlite-vec`/`numpy`
+  import) on the main thread before serving, avoiding an import-lock deadlock
+  when the first tool call would otherwise trigger that import on a FastMCP
+  worker thread (observed on Python 3.14 / Windows).
+- `cognis-indexd` releases its SQLite connections on shutdown (dedicated
+  single-thread writer executor) and writes its status file atomically with a
+  retry, fixing a Windows `os.replace` sharing-violation crash when an IDE polls
+  the status file concurrently.
+
+### Added
+
+- Cross-app **end-to-end test suite** (`tests/e2e/`, marker `e2e`) that drives
+  the real `cognis-cli`, `cognis-indexd`, and `cognis-mcpd` over process
+  boundaries (CLI JSON, the live status file, and MCP stdio), plus committed
+  JSON **contract snapshots** verified against the VS Code extension's
+  TypeScript interfaces (`apps/cognis-vscode/src/test/contractParity.test.ts`).
+  Includes a regression test that indexes with embeddings and asserts
+  `semantic_search` returns over stdio instead of hanging. See
+  `docs/e2e-testing.md`.
+
 ## [0.1.17] — 2026-05-31
 
 ### Added
@@ -74,7 +108,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cold-start model loads no longer fail with a follow-up soft-timeout after the
   semantic stage already completed.
 
-[Unreleased]: https://github.com/buimanhtoan-it/cognis/compare/v0.1.17...HEAD
+[Unreleased]: https://github.com/buimanhtoan-it/cognis/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/buimanhtoan-it/cognis/compare/v0.1.17...v0.2.0
 [0.1.17]: https://github.com/buimanhtoan-it/cognis/compare/v0.1.0...v0.1.17
 
 ---

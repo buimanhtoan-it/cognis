@@ -1,0 +1,10 @@
+{
+  "checks": {
+    "<check>": {
+      "message": "str",
+      "status": "str"
+    }
+  },
+  "overall": "str",
+  "runtime_version": "str"
+}

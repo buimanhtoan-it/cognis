@@ -40,7 +40,7 @@ Edit `pyproject.toml`:
 
 ```toml
 [project]
-version = "0.1.17"
+version = "0.2.0"
 ```
 
 ### 2. Update the changelog
@@ -64,8 +64,8 @@ Expected outputs:
 Build and push the container image:
 
 ```bash
-docker build -t cognis:0.1.17 -t cognis:latest .
-docker push ghcr.io/buimanhtoan-it/cognis:0.1.17
+docker build -t cognis:0.2.0 -t cognis:latest .
+docker push ghcr.io/buimanhtoan-it/cognis:0.2.0
 docker push ghcr.io/buimanhtoan-it/cognis:latest
 ```
 
@@ -85,17 +85,17 @@ See [.github/workflows/release.yml](../.github/workflows/release.yml).
 
 ```bash
 git add -A
-git commit -m "chore: release v0.1.17"
-git tag -a v0.1.17 -m "Release v0.1.17"
+git commit -m "chore: release v0.2.0"
+git tag -a v0.2.0 -m "Release v0.2.0"
 git push origin main --tags
 ```
 
 ### 6. Create GitHub Release
 
 ```bash
-gh release create v0.1.17 \
-    --title "cognis v0.1.17" \
-    --notes-file docs/release-notes-v0.1.17.md \
+gh release create v0.2.0 \
+    --title "cognis v0.2.0" \
+    --notes-file docs/release-notes-v0.2.0.md \
     dist/*.tar.gz dist/*.whl
 ```
 
@@ -105,9 +105,9 @@ The Dockerfile is at the project root. Images are published to:
 `ghcr.io/buimanhtoan-it/cognis:<version>`
 
 ```bash
-docker build -t ghcr.io/buimanhtoan-it/cognis:0.1.17 .
+docker build -t ghcr.io/buimanhtoan-it/cognis:0.2.0 .
 echo $GITHUB_TOKEN | docker login ghcr.io -u USERNAME --password-stdin
-docker push ghcr.io/buimanhtoan-it/cognis:0.1.17
+docker push ghcr.io/buimanhtoan-it/cognis:0.2.0
 ```
 
 ## Post-Release
@@ -121,6 +121,6 @@ docker push ghcr.io/buimanhtoan-it/cognis:0.1.17
 
 If a critical bug is found post-release:
 
-1. Yank the PyPI release: `pip install twine && twine upload --skip-existing dist/* && twine yank cognis==0.1.17`
-2. Retract the Docker image: `docker manifest rm ghcr.io/buimanhtoan-it/cognis:0.1.17`
-3. Fix the bug, increment patch version, re-release as `0.1.18`
+1. Yank the PyPI release: `pip install twine && twine upload --skip-existing dist/* && twine yank cognis==0.2.0`
+2. Retract the Docker image: `docker manifest rm ghcr.io/buimanhtoan-it/cognis:0.2.0`
+3. Fix the bug, increment patch version, re-release as `0.2.1`

@@ -8,7 +8,7 @@
 
 > **Software Cognition Engine** for MCP clients and coding agents.
 >
-> **Status: v0.1.17 beta** — see [CHANGELOG.md](CHANGELOG.md) and [docs/release-notes-v0.1.17.md](docs/release-notes-v0.1.17.md).
+> **Status: v0.2.0 beta** — see [CHANGELOG.md](CHANGELOG.md) and [docs/release-notes-v0.2.0.md](docs/release-notes-v0.2.0.md).
 
 `cognis` is a local indexing and retrieval system for source code. It builds a
 workspace database from your repository and exposes structured queries such as
@@ -90,7 +90,7 @@ cognis/
 | LSP resolver | Detection only; heuristic fallback for edges |
 | PyPI publish | Not yet — install from source |
 
-Full release notes: [docs/release-notes-v0.1.17.md](docs/release-notes-v0.1.17.md).
+Full release notes: [docs/release-notes-v0.2.0.md](docs/release-notes-v0.2.0.md).
 
 ## Quick start
 

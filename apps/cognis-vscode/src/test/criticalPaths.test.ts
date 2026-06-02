@@ -19,7 +19,7 @@ function makeHealth(
 ): HealthReport {
   const ok = { status: "ok", message: "ok" };
   return {
-    runtime_version: "0.1.17",
+    runtime_version: "0.2.0",
     overall,
     checks: {
       config: ok,

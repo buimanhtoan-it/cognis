@@ -32,4 +32,4 @@ __all__ = ["Config", "__version__"]
 
 # Single source of truth for runtime version. PEP 621 metadata in pyproject is
 # the canonical tag; this constant tracks it for display in ``cognis-cli health``.
-__version__: str = "0.2.0"
+__version__: str = "0.3.0"

@@ -50,7 +50,7 @@ try:
     from numpy.typing import NDArray
 except ImportError as _np_err:  # pragma: no cover
     raise ImportError(
-        "numpy is required for the embedder. Install it via: pip install cognis[embed-local]"
+        "numpy is required for the embedder. Install it via: pip install cognis-engine[embed-local]"
     ) from _np_err
 
 if TYPE_CHECKING:
@@ -264,7 +264,7 @@ class LocalEmbedder:
         except ImportError as exc:
             raise ImportError(
                 "sentence-transformers is required for LocalEmbedder. "
-                "Install it via: pip install cognis[embed-local]"
+                "Install it via: pip install cognis-engine[embed-local]"
             ) from exc
 
         self._model: object = _load_sentence_transformer(SentenceTransformer, model_name, device)

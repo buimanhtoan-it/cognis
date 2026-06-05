@@ -216,7 +216,7 @@ export interface HealthDescriptor {
 const okCheck: HealthCheck = { status: "ok", message: "ok" };
 
 export const HEALTHY: HealthDescriptor = {
-  runtime_version: "0.2.0",
+  runtime_version: "0.3.0",
   overall: "ok",
   checks: {
     config: okCheck,
@@ -230,7 +230,7 @@ export const HEALTHY: HealthDescriptor = {
 
 /** A fresh repo whose semantic index is still being built in the background. */
 export const FRESH_INDEXING: HealthDescriptor = {
-  runtime_version: "0.2.0",
+  runtime_version: "0.3.0",
   overall: "warn",
   checks: {
     config: okCheck,
@@ -249,13 +249,46 @@ interface SpawnBehavior {
   initExitCode: number;
   /** Exit code for `cognis paths` (the Python preflight check). */
   pathsExitCode: number;
+  /** When false, `cognis doctor` reports a required prerequisite as missing. */
+  prerequisitesReady: boolean;
 }
 
 const spawnBehavior: SpawnBehavior = {
   health: HEALTHY,
   initExitCode: 0,
   pathsExitCode: 0,
+  prerequisitesReady: true,
 };
+
+function generateDoctor(): Record<string, unknown> {
+  const ready = spawnBehavior.prerequisitesReady;
+  const indexerStatus = ready ? "ok" : "missing";
+  return {
+    python: "python",
+    ready,
+    combined_install_target: ready ? "" : ".[indexer]",
+    items: [
+      {
+        id: "indexer",
+        label: "Code parsers (tree-sitter)",
+        description: "Parses TypeScript, Python, and Go.",
+        status: indexerStatus,
+        required: true,
+        install_target: ".[indexer]",
+        detail: ready ? "Installed." : "Not installed: missing tree_sitter",
+      },
+      {
+        id: "mcp",
+        label: "MCP server (fastmcp)",
+        description: "Serves Cognis tools over MCP.",
+        status: "ok",
+        required: true,
+        install_target: ".[mcp]",
+        detail: "Installed.",
+      },
+    ],
+  };
+}
 
 const spawnRecords: SpawnRecord[] = [];
 /** Fake long-lived daemon processes, so tests can tear them down. */
@@ -365,6 +398,8 @@ function fakeSpawn(command: string, args: string[]): FakeChildProcess {
   // Everything else is a one-shot `cognis` CLI invocation.
   if (args.includes("mcp-config")) {
     finishCli(proc, JSON.stringify(generateMcpConfig(repoRoot, args)), 0);
+  } else if (args.includes("doctor")) {
+    finishCli(proc, JSON.stringify(generateDoctor()), 0);
   } else if (args.includes("health")) {
     finishCli(proc, JSON.stringify(spawnBehavior.health), 0);
   } else if (args.includes("paths")) {
@@ -434,6 +469,8 @@ export interface ConfigureOptions {
   pathsExitCode?: number;
   appName?: string;
   config?: Record<string, Record<string, unknown>>;
+  /** When false, `cognis doctor` reports a required prerequisite as missing. */
+  prerequisitesReady?: boolean;
 }
 
 /**
@@ -467,6 +504,7 @@ export function resetHarness(repoRoot: string, options: ConfigureOptions = {}): 
   spawnBehavior.health = options.health ?? HEALTHY;
   spawnBehavior.initExitCode = options.initExitCode ?? 0;
   spawnBehavior.pathsExitCode = options.pathsExitCode ?? 0;
+  spawnBehavior.prerequisitesReady = options.prerequisitesReady ?? true;
   spawnRecords.length = 0;
 }
 

@@ -6,8 +6,8 @@ build-backend = "hatchling.build"
 # Project metadata
 # ---------------------------------------------------------------------------
 [project]
-name = "cognis"
-version = "0.2.0"
+name = "cognis-engine"
+version = "0.3.0"
 description = "Software Cognition Engine — MCP-native context capsules for LLM coding agents."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -213,6 +213,13 @@ module = [
     "sentence_transformers.*",
     "fastmcp.*",
     "watchdog.*",
+    # Optional upstream MCP conformance harness; imported lazily behind a
+    # find_spec guard in cognis-cli, not a hard dependency.
+    "mcp_conformance.*",
+    "tiktoken.*",
+    # PyYAML ships no inline types and CI does not install types-PyYAML;
+    # treat it as untyped so `make typecheck` does not require the stub pkg.
+    "yaml",
 ]
 ignore_missing_imports = true
 

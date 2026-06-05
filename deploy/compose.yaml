@@ -8,7 +8,7 @@
 
 services:
   mcpd:
-    image: ghcr.io/buimanhtoan-it/cognis:0.2.0
+    image: ghcr.io/buimanhtoan-it/cognis-engine:0.3.0
     build:
       context: ..
       dockerfile: Dockerfile
@@ -39,7 +39,7 @@ services:
       retries: 3
 
   indexd:
-    image: ghcr.io/buimanhtoan-it/cognis:0.2.0
+    image: ghcr.io/buimanhtoan-it/cognis-engine:0.3.0
     build:
       context: ..
       dockerfile: Dockerfile

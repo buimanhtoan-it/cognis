@@ -32,7 +32,7 @@ def build_server() -> FastMCP | None:
     """
     if not _FASTMCP_AVAILABLE or FastMCP is None:
         logger.warning(
-            "fastmcp is not installed; install it via `pip install 'cognis[mcp]'`. "
+            "fastmcp is not installed; install it via `pip install 'cognis-engine[mcp]'`. "
             "The MCP server will not be available."
         )
         return None

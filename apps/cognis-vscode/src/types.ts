@@ -91,6 +91,28 @@ export interface RepairPlan {
   health?: HealthReport;
 }
 
+/** One row in the setup prerequisite checklist (from `cognis-cli doctor`). */
+export interface PrerequisiteItem {
+  id: string;
+  label: string;
+  description: string;
+  status: "ok" | "missing";
+  required: boolean;
+  /** pip target that installs this item, e.g. ".[embed-local]". */
+  install_target: string;
+  detail: string;
+}
+
+/** JSON from `cognis-cli doctor --json`. */
+export interface PrerequisiteReport {
+  python: string;
+  /** True when every required item is installed. */
+  ready: boolean;
+  items: PrerequisiteItem[];
+  /** Single pip target installing all missing items, or "" when none. */
+  combined_install_target: string;
+}
+
 /** Outcome of the end-to-end Set Up for AI flow. */
 export interface SetupResult {
   bootstrap: BootstrapPayload;

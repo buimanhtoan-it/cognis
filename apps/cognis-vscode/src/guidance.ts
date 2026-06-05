@@ -38,6 +38,11 @@ const REPAIR_ACTION: GuidanceAction = {
   command: "cognis.repairSetup",
 };
 
+const INSTALL_BACKEND_ACTION: GuidanceAction = {
+  label: "Install backend",
+  command: "cognis.installBackend",
+};
+
 const SETUP_ACTION: GuidanceAction = {
   label: "Set Up for AI",
   command: "cognis.setupForAi",
@@ -48,32 +53,25 @@ const HEALTH_ACTION: GuidanceAction = {
   command: "cognis.showHealth",
 };
 
-function openPythonSettingsAction(): GuidanceAction {
-  return {
-    label: "Open Python Settings",
-    command: "workbench.action.openSettings",
-  };
-}
-
 export function pythonMissingGuidance(pythonPath: string): UserGuidance {
   return {
-    title: "Python not found",
+    title: "Cognis backend not ready",
     message:
-      "Cognis could not run Python. Select the interpreter where you installed cognis, or set cognis.pythonPath in Settings.",
+      "Cognis couldn't start its backend. Click Install backend and Cognis will set it up for you automatically.",
     severity: "error",
-    actions: [openPythonSettingsAction(), OUTPUT_ACTION],
+    actions: [INSTALL_BACKEND_ACTION, OUTPUT_ACTION],
     technicalDetail: `Python executable: ${pythonPath}`,
   };
 }
 
 export function cognisNotInstalledGuidance(pythonPath: string): UserGuidance {
   return {
-    title: "Cognis not installed",
+    title: "Cognis backend not installed",
     message:
-      "Python is available, but the cognis package is missing. Install it in the selected environment, then run Repair Setup.",
+      "The Cognis backend isn't installed yet. Click Install backend and Cognis will set it up for you — no terminal needed.",
     severity: "error",
-    actions: [REPAIR_ACTION, OUTPUT_ACTION],
-    technicalDetail: `Install with: ${pythonPath} -m pip install -e \".[indexer,embed-local,vector,tokenizers,mcp]\"`,
+    actions: [INSTALL_BACKEND_ACTION, OUTPUT_ACTION],
+    technicalDetail: `Backend Python: ${pythonPath}`,
   };
 }
 
@@ -82,11 +80,11 @@ export function pythonMisconfiguredGuidance(
   detail: string
 ): UserGuidance {
   return {
-    title: "Python misconfigured",
+    title: "Cognis backend not ready",
     message:
-      "Cognis could not use the configured Python interpreter. Confirm cognis.pythonPath matches the environment where cognis is installed.",
+      "Cognis couldn't use its backend. Reinstall it in one click, or run Troubleshoot if the problem continues.",
     severity: "error",
-    actions: [openPythonSettingsAction(), REPAIR_ACTION, OUTPUT_ACTION],
+    actions: [INSTALL_BACKEND_ACTION, REPAIR_ACTION, OUTPUT_ACTION],
     technicalDetail: `Python: ${pythonPath}\n${detail.trim()}`,
   };
 }

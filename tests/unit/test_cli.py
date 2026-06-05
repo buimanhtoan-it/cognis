@@ -439,6 +439,58 @@ def test_paths_emits_json_workspace_layout(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_doctor_reports_prerequisite_checklist(tmp_path: Path) -> None:
+    """``cognis-cli doctor`` returns a structured prerequisite checklist."""
+    runner = CliRunner()
+    result = _invoke(runner, tmp_path, "doctor")
+    assert result.exit_code == 0, result.output  # type: ignore[attr-defined]
+    payload = json.loads(result.output)  # type: ignore[attr-defined]
+
+    # Top-level contract the extension's PrerequisiteReport type depends on.
+    assert isinstance(payload["ready"], bool)
+    assert "combined_install_target" in payload
+    assert isinstance(payload["items"], list) and payload["items"]
+
+    ids = {item["id"] for item in payload["items"]}
+    # The required-for-setup groups must always be present in the checklist.
+    assert {"indexer", "embed_local", "mcp"} <= ids
+
+    for item in payload["items"]:
+        assert item["status"] in {"ok", "missing"}
+        assert isinstance(item["required"], bool)
+        assert item["install_target"].startswith(".[")
+        assert item["label"] and item["description"] and item["detail"]
+
+
+@pytest.mark.unit
+def test_doctor_flags_missing_required_module(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When a required module is unimportable, doctor marks the item missing."""
+    import importlib.util as importlib_util
+
+    real_find_spec = importlib_util.find_spec
+
+    def fake_find_spec(name: str, *args: object, **kwargs: object) -> object:
+        if name == "fastmcp":
+            return None  # simulate MCP server not installed
+        return real_find_spec(name, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("cognis.cli.main.importlib.util.find_spec", fake_find_spec)
+
+    runner = CliRunner()
+    result = _invoke(runner, tmp_path, "doctor")
+    assert result.exit_code == 0, result.output  # type: ignore[attr-defined]
+    payload = json.loads(result.output)  # type: ignore[attr-defined]
+
+    assert payload["ready"] is False
+    mcp_item = next(item for item in payload["items"] if item["id"] == "mcp")
+    assert mcp_item["status"] == "missing"
+    assert "fastmcp" in mcp_item["detail"]
+    assert "mcp" in payload["combined_install_target"]
+
+
+@pytest.mark.unit
 def test_mcp_config_emits_mcp_servers_block(tmp_path: Path) -> None:
     """``cognis-cli mcp-config`` returns mcpServers JSON for IDE hosts."""
     runner = CliRunner()
@@ -507,7 +559,10 @@ def test_mcp_config_applies_windows_timeout_defaults(
     """Generated MCP config should include safer semantic timeouts on Windows."""
     runner = CliRunner()
     _invoke(runner, tmp_path, "init")
-    monkeypatch.setattr("cognis.cli.main.sys.platform", "win32", raising=False)
+    # Simulate Windows for MCP-config generation only — patch the platform
+    # indirection rather than the global sys.platform, which would otherwise
+    # break subprocess/shutil on the (Linux/macOS) host running this test.
+    monkeypatch.setattr("cognis.cli.main._current_platform", lambda: "win32")
     for key in (
         "COGNIS_MCP_SOFT_TIMEOUT_S",
         "COGNIS_MCP_HARD_TIMEOUT_S",
@@ -572,3 +627,60 @@ def test_index_rejects_missing_path(tmp_path: Path) -> None:
     bogus = tmp_path / "does-not-exist"
     result = _invoke(runner, tmp_path, "index", "--skip-embeddings", str(bogus))
     assert result.exit_code != 0  # type: ignore[attr-defined]
+
+
+@pytest.mark.unit
+def test_diagnose_empty_index_blames_unfinished_run_when_source_exists(
+    tmp_path: Path,
+) -> None:
+    """When indexable source exists, the empty-index diagnosis must NOT blame ignore rules.
+
+    Regression: a populated repo whose index DB is empty (interrupted run or a
+    stalled embedder) previously got a misleading "all excluded by .gitignore"
+    message even though plenty of source is indexable.
+    """
+    from cognis.cli.main import _diagnose_empty_index
+
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "mod.py").write_text("def alpha():\n    return 1\n", encoding="utf-8")
+
+    lines = _diagnose_empty_index(tmp_path)
+    text = "\n".join(lines)
+
+    # Must acknowledge indexable files were found and point at re-running index.
+    assert "indexable file" in text
+    assert "did not finish" in text or "index --full" in text
+    # Must NOT wrongly accuse ignore rules when source is clearly indexable.
+    assert "excluded by ignore rules" not in text
+
+
+@pytest.mark.unit
+def test_health_empty_db_points_to_index_not_gitignore(tmp_path: Path) -> None:
+    """Health on a present-but-empty DB guides to running index, not exclusion.
+
+    The repo has real source, so when the UCKG exists but holds no file rows
+    (an interrupted index run), the check must say "build the index" rather than
+    asserting the source was excluded by ignore rules.
+    """
+    from cognis.db import Database
+
+    (tmp_path / "mod.py").write_text("def beta():\n    return 2\n", encoding="utf-8")
+    runner = CliRunner()
+    _invoke(runner, tmp_path, "init")
+
+    # Create the UCKG with schema but no indexed files (the interrupted-run
+    # state). ``Database.connect`` runs migrations, so the file/symbol tables
+    # exist but are empty.
+    db_path = tmp_path / CONFIG_DIR_NAME / "uckg.db"
+    db = Database(str(db_path))
+    db.connect()
+    db.close_thread_connection()
+
+    result = _invoke(runner, tmp_path, "health", "--json")
+    payload = json.loads(result.output)  # type: ignore[attr-defined]
+    index_check = payload["checks"]["index"]
+    assert index_check["status"] == "fail"
+    message = index_check["message"]
+    # Accurate guidance: run the index. Must not assert source was excluded.
+    assert "index --full" in message or "no indexed files" in message
+    assert "no TypeScript/Python/Go source was found" not in message

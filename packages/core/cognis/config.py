@@ -197,7 +197,7 @@ def _migrate_raw_config(
     revision_from: int,
 ) -> tuple[dict[str, Any], list[str]]:
     """Apply additive config migrations to raw YAML data."""
-    migrated = cast(dict[str, Any], deepcopy(raw))
+    migrated: dict[str, Any] = deepcopy(raw)
     changes: list[str] = []
 
     if revision_from < 1:
@@ -434,11 +434,15 @@ class Config(BaseModel):
 
     def to_yaml(self) -> str:
         """Serialize to a YAML document. Round-trip safe with :meth:`from_yaml_str`."""
-        return yaml.safe_dump(
-            self.to_dict(),
-            sort_keys=False,
-            default_flow_style=False,
-            allow_unicode=True,
+        # ``yaml.safe_dump`` is untyped (no stubs), so it returns ``Any``;
+        # ``str(...)`` keeps the strict ``-> str`` contract honest for mypy.
+        return str(
+            yaml.safe_dump(
+                self.to_dict(),
+                sort_keys=False,
+                default_flow_style=False,
+                allow_unicode=True,
+            )
         )
 
     def write(self, path: str | Path) -> Path:

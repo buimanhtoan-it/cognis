@@ -2,7 +2,7 @@
   "name": "cognis-vscode",
   "displayName": "Cognis",
   "description": "Managed Cognis setup for AI semantic search, MCP wiring, and live indexing across MCP-capable editors.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "ToanBui",
   "license": "Apache-2.0",
   "icon": "media/icon.png",
@@ -62,14 +62,32 @@
         "icon": "media/command.png"
       },
       {
+        "command": "cognis.installBackend",
+        "title": "Cognis: Install Backend",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
         "command": "cognis.repairSetup",
-        "title": "Cognis: Repair Setup",
+        "title": "Cognis: Troubleshoot & Repair",
         "category": "Cognis",
         "icon": "media/command.png"
       },
       {
         "command": "cognis.clearAndReindex",
-        "title": "Cognis: Clear Index & Re-index",
+        "title": "Cognis: Rebuild Index",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.removeFromWorkspace",
+        "title": "Cognis: Remove from Workspace",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.prepareUninstall",
+        "title": "Cognis: Remove Everything (Prepare for Uninstall)",
         "category": "Cognis",
         "icon": "media/command.png"
       },
@@ -86,6 +104,18 @@
         "icon": "media/command.png"
       },
       {
+        "command": "cognis.refreshPrerequisites",
+        "title": "Cognis: Re-check Prerequisites",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.installAllPrerequisites",
+        "title": "Cognis: Install Missing Prerequisites",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
         "command": "cognis.showOutput",
         "title": "Cognis: Show Output",
         "category": "Cognis",
@@ -98,7 +128,12 @@
         "cognis.pythonPath": {
           "type": "string",
           "default": "",
-          "description": "Python executable for cognis CLI/daemons. Empty uses the active interpreter."
+          "description": "Optional: use your own Python environment for the Cognis backend. Leave empty to let Cognis install and manage its own backend automatically."
+        },
+        "cognis.backendPackageSpec": {
+          "type": "string",
+          "default": "cognis-engine[indexer,embed-local,vector,tokenizers,mcp]",
+          "description": "pip requirement Cognis installs for its backend. Change only if you need a specific version or feature set."
         },
         "cognis.autoManageOnActivate": {
           "type": "boolean",

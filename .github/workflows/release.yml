@@ -15,16 +15,19 @@ permissions:
 env:
   PYTHONUNBUFFERED: "1"
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  # The GitHub repo is named "cognis", but the published artifact is
+  # "cognis-engine" (the PyPI distribution name), so pin the image name
+  # explicitly instead of deriving it from github.repository.
+  IMAGE_NAME: ${{ github.repository_owner }}/cognis-engine
 
 jobs:
   build-python:
     name: build wheel + sdist
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -44,7 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-python
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: docker/login-action@v3
         with:
@@ -73,7 +76,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-python, docker]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/download-artifact@v4
         with:
@@ -90,15 +93,29 @@ jobs:
     name: PyPI publish (optional)
     runs-on: ubuntu-latest
     needs: build-python
-    if: ${{ secrets.PYPI_API_TOKEN }}
+    # NOTE: the `secrets` context is NOT available in a job-level `if`, so we
+    # cannot gate the whole job on the token. Instead we expose it as an env var
+    # (allowed at job level) and gate the publish step on that — the job runs
+    # but the upload is skipped cleanly when the secret is unset.
+    env:
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
     steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
       - uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
 
       - name: Publish to PyPI
+        if: ${{ env.PYPI_API_TOKEN != '' }}
         env:
           TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+          TWINE_PASSWORD: ${{ env.PYPI_API_TOKEN }}
         run: python -m pip install twine && twine upload dist/*
+
+      - name: Skipped notice
+        if: ${{ env.PYPI_API_TOKEN == '' }}
+        run: echo "PYPI_API_TOKEN secret not set — skipping PyPI publish."

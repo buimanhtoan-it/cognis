@@ -100,6 +100,18 @@ export async function reconcileWorkspaceOnActivate(
 
   await rehydrateWorkspaceState();
 
+  // Do NOT provision an unconfigured workspace on activation. Creating
+  // ``.cognis/`` (config, DB, caches) is a deliberate action the user takes by
+  // clicking "Set Up for AI". On activation we only *manage* a workspace that
+  // is already configured — otherwise we leave the repo untouched so opening a
+  // folder never writes files the user didn't ask for.
+  if (!isWorkspaceConfigured(repoRoot)) {
+    channel.appendLine(
+      "[reconcile] Workspace not set up yet; leaving it untouched until the user runs Set Up for AI."
+    );
+    return;
+  }
+
   progress.report({ message: "Checking Python environment…" });
   const pythonCheck = await verifyPythonEnvironment(repoRoot);
   if (!pythonCheck.ok) {

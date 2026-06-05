@@ -102,7 +102,7 @@ def main() -> int:
         if mcp is None:
             sys.stderr.write(
                 "cognis-mcpd: fastmcp is not installed.\n"
-                "Install it with: pip install 'cognis[mcp]'\n"
+                "Install it with: pip install 'cognis-engine[mcp]'\n"
             )
             return 1
 

@@ -206,9 +206,19 @@ def _build_workspace_paths(repo_root: Path, *, python_exe: str | None = None) ->
     }
 
 
+def _current_platform() -> str:
+    """Return the active platform string.
+
+    Indirection over ``sys.platform`` so tests can simulate a different OS for
+    MCP-config generation without monkeypatching the global ``sys.platform``
+    (which would poison ``subprocess``/``shutil`` on the host running the test).
+    """
+    return sys.platform
+
+
 def _default_mcp_timeout_env(target_platform: str | None = None) -> dict[str, str]:
     """Return platform-tuned MCP timeout defaults for generated client config."""
-    platform = (target_platform or sys.platform).lower()
+    platform = (target_platform or _current_platform()).lower()
     if platform.startswith("win"):
         return dict(_WINDOWS_MCP_TIMEOUT_DEFAULTS)
     return {}
@@ -480,7 +490,7 @@ def _check_embedder(cfg: Config) -> HealthCheck:
                 "status": "warn",
                 "message": (
                     "local backend selected but `sentence-transformers` is not installed "
-                    "(install extras: `pip install cognis[embed-local]`)"
+                    "(install extras: `pip install cognis-engine[embed-local]`)"
                 ),
             }
         return {
@@ -606,14 +616,19 @@ def _check_index(repo_root: Path) -> HealthCheck:
             conn.close()
     if count == 0:
         if file_count == 0:
-            # No files were indexed at all — almost always means the walk found
-            # no supported source, or ignore rules excluded everything.
+            # No file rows: either indexing never completed for this DB, or the
+            # walk genuinely found no supported source. Lead with the common
+            # cause (index not built / interrupted) rather than asserting
+            # exclusion — a populated repo with plenty of source lands here too
+            # when a prior `index` run was interrupted or the embedder stalled.
             return {
                 "status": "fail",
                 "message": (
-                    f"{db_path} indexed 0 files — no TypeScript/Python/Go source was found "
-                    "(or all of it is excluded by .gitignore / repo.ignore). "
-                    "Run `cognis-cli index --clear .` to see a diagnosis."
+                    f"{db_path} has no indexed files yet. Run `cognis-cli index --full .` "
+                    "to build the index (add --skip-embeddings if the embedder is slow). "
+                    "If it still reports 0 files, run `cognis-cli index --clear .` for a "
+                    "diagnosis of whether source was found or excluded by .gitignore / "
+                    "repo.ignore."
                 ),
             }
         if file_count is None:
@@ -650,7 +665,7 @@ def _check_vector(repo_root: Path) -> HealthCheck:
             "status": "warn",
             "message": (
                 "sqlite-vec not loaded; embeddings stored but KNN queries unavailable "
-                "(install `pip install cognis[vector]`)"
+                "(install `pip install cognis-engine[vector]`)"
             ),
         }
     except Exception as exc:
@@ -974,6 +989,153 @@ def cmd_paths(ctx: click.Context, python_exe: str | None) -> None:
     click.echo(json.dumps(payload, indent=2, sort_keys=True))
 
 
+# --- doctor (extension prerequisite checklist) ------------------------------
+
+
+class PrerequisiteItem(TypedDict):
+    """One installable prerequisite reported by ``cognis-cli doctor``."""
+
+    id: str
+    label: str
+    description: str
+    # "ok" when importable/present, "missing" when the user must install it.
+    status: Literal["ok", "missing"]
+    # True when setup/index cannot proceed without this item.
+    required: bool
+    # The pip extra (e.g. ``cognis-engine[embed-local]``) install target, or "".
+    install_target: str
+    detail: str
+
+
+# Probe table: each entry maps a user-facing prerequisite to the import that
+# proves it is installed and the pip extra that installs it. Kept in one place
+# so the extension checklist and the CLI stay in lockstep with pyproject extras.
+_PREREQUISITE_PROBES: Final[tuple[tuple[str, str, str, str, tuple[str, ...], bool], ...]] = (
+    (
+        "indexer",
+        "Code parsers (tree-sitter)",
+        "Parses TypeScript, Python, and Go so the workspace can be indexed.",
+        "indexer",
+        ("tree_sitter", "tree_sitter_python", "tree_sitter_typescript", "tree_sitter_go"),
+        True,
+    ),
+    (
+        "embed_local",
+        "Local embeddings (sentence-transformers)",
+        "Generates semantic vectors locally so semantic search works offline.",
+        "embed-local",
+        ("sentence_transformers", "numpy"),
+        True,
+    ),
+    (
+        "vector",
+        "Vector search (sqlite-vec)",
+        "Enables fast on-disk KNN over embeddings. Without it, semantic search degrades.",
+        "vector",
+        ("sqlite_vec",),
+        False,
+    ),
+    (
+        "mcp",
+        "MCP server (fastmcp)",
+        "Serves Cognis tools to your AI agent over the Model Context Protocol.",
+        "mcp",
+        ("fastmcp",),
+        True,
+    ),
+    (
+        "tokenizers",
+        "Token estimation (tiktoken)",
+        "Estimates capsule token budgets accurately. Falls back to a word-count heuristic.",
+        "tokenizers",
+        ("tiktoken",),
+        False,
+    ),
+)
+
+
+def _missing_modules(modules: tuple[str, ...]) -> list[str]:
+    """Return the subset of *modules* that cannot be imported."""
+    missing: list[str] = []
+    for module in modules:
+        if importlib.util.find_spec(module) is None:
+            missing.append(module)
+    return missing
+
+
+def _build_prerequisites(python_exe: str | None = None) -> dict[str, object]:
+    """Probe installable prerequisites for the extension's setup checklist."""
+    py = python_exe or sys.executable
+    items: list[PrerequisiteItem] = []
+    for item_id, label, description, extra, modules, required in _PREREQUISITE_PROBES:
+        missing = _missing_modules(modules)
+        status: Literal["ok", "missing"] = "missing" if missing else "ok"
+        install_target = f".[{extra}]"
+        detail = "Installed." if status == "ok" else "Not installed: missing " + ", ".join(missing)
+        items.append(
+            {
+                "id": item_id,
+                "label": label,
+                "description": description,
+                "status": status,
+                "required": required,
+                "install_target": install_target,
+                "detail": detail,
+            }
+        )
+
+    required_missing = [item for item in items if item["required"] and item["status"] == "missing"]
+    # A single combined install command covers every missing item in one shot.
+    missing_extras = sorted(
+        {item["install_target"].strip(".[]") for item in items if item["status"] == "missing"}
+    )
+    combined_target = f".[{','.join(missing_extras)}]" if missing_extras else ""
+
+    return {
+        "python": py,
+        "ready": len(required_missing) == 0,
+        "items": items,
+        "combined_install_target": combined_target,
+    }
+
+
+@cli.command("doctor")
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    default=True,
+    help="Emit machine-readable JSON (default: true).",
+)
+@click.option(
+    "--python",
+    "python_exe",
+    default=None,
+    help="Python executable used to resolve module invocations.",
+)
+@click.pass_context
+def cmd_doctor(ctx: click.Context, as_json: bool, python_exe: str | None) -> None:
+    """Report installable prerequisites for the IDE setup checklist (JSON).
+
+    Probes each optional dependency group (parsers, local embeddings, vector
+    search, MCP server, tokenizers) and reports whether it is installed plus the
+    pip target that installs it. The VS Code / Cursor extension consumes this to
+    render a checklist with per-item install buttons before running setup.
+    """
+    payload = _build_prerequisites(python_exe=python_exe)
+    if as_json:
+        click.echo(json.dumps(payload, indent=2, sort_keys=True))
+        return
+    items = payload["items"]
+    assert isinstance(items, list)
+    symbol_for = {"ok": "[OK]  ", "missing": "[MISS]"}
+    for item in items:
+        flag = "required" if item["required"] else "optional"
+        click.echo(f"{symbol_for[item['status']]} {item['label']} ({flag}) — {item['detail']}")
+    click.echo("")
+    click.echo("ready" if payload["ready"] else "prerequisites missing")
+
+
 # --- mcp-config (extension contract) ----------------------------------------
 
 
@@ -1102,6 +1264,16 @@ def _diagnose_empty_index(repo_root: Path) -> list[str]:
             f"  repo.ignore     = {list(cfg.repo.ignore)} "
             "(plus your .gitignore). Remove the over-broad pattern and re-run."
         )
+    else:
+        # Files ARE indexable but nothing landed in the DB. The walk/filter is
+        # fine — indexing did not complete (interrupted run, embedder stall, or
+        # a write error). Do NOT blame ignore rules here.
+        lines.append(
+            f"  hint            : {supported_after_ignore} indexable file(s) were found, "
+            "but the index is empty — a previous index run did not finish. "
+            "Re-run `cognis-cli index --full .` (add --skip-embeddings if the "
+            "embedder model download/load is slow), then check `cognis-cli health`."
+        )
     return lines
 
 
@@ -1198,7 +1370,7 @@ def cmd_index(
         except ImportError as exc:
             click.echo(
                 "error: embedder not installed. "
-                "Install with `pip install cognis[embed-local]` "
+                "Install with `pip install cognis-engine[embed-local]` "
                 "or rerun with --skip-embeddings.",
                 err=True,
             )

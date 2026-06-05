@@ -8,7 +8,7 @@
 
 > **Software Cognition Engine** for MCP clients and coding agents.
 >
-> **Status: v0.2.0 beta** — see [CHANGELOG.md](CHANGELOG.md) and [docs/release-notes-v0.2.0.md](docs/release-notes-v0.2.0.md).
+> **Status: v0.3.0 beta** — see [CHANGELOG.md](CHANGELOG.md) and [docs/release-notes-v0.3.0.md](docs/release-notes-v0.3.0.md).
 
 `cognis` is a local indexing and retrieval system for source code. It builds a
 workspace database from your repository and exposes structured queries such as
@@ -90,7 +90,7 @@ cognis/
 | LSP resolver | Detection only; heuristic fallback for edges |
 | PyPI publish | Not yet — install from source |
 
-Full release notes: [docs/release-notes-v0.2.0.md](docs/release-notes-v0.2.0.md).
+Full release notes: [docs/release-notes-v0.3.0.md](docs/release-notes-v0.3.0.md).
 
 ## Quick start
 
@@ -191,7 +191,7 @@ in a prebuilt native extension; installation is one command on all three
 supported platforms:
 
 ```bash
-pip install cognis[vector]
+pip install cognis-engine[vector]
 # or directly:
 pip install sqlite-vec
 ```

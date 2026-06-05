@@ -20,9 +20,11 @@ import {
   disableMcpForWorkspace,
   enableMcpForWorkspace,
   isCognisMcpConfiguredForRepo,
+  removeAllCognisMcpEntries,
   showMcpConfigPreview,
 } from "./mcpConfig";
 import { verifyPythonEnvironment } from "./python";
+import { fetchPrerequisites } from "./prerequisites";
 import type { PanelContext } from "./panel";
 import {
   deriveStatus,
@@ -193,6 +195,47 @@ async function ensurePythonReady(
   }
 }
 
+/**
+ * Block setup when a required prerequisite (parsers, local embeddings, MCP
+ * server) is missing. This runs *before* any ``.cognis/`` files are created so
+ * a fresh user is never left with a half-provisioned workspace that can't index
+ * or serve. Optional items (vector, tokenizers) never block.
+ */
+async function ensurePrerequisitesReady(
+  repoRoot: string,
+  progress: vscode.Progress<{ message?: string }>
+): Promise<void> {
+  progress.report({ message: "Checking prerequisites…" });
+  const report = await fetchPrerequisites(repoRoot);
+  if (!report) {
+    // doctor couldn't run — the Python check above already passed, so this is
+    // an unexpected CLI failure. Let setup proceed; downstream steps surface a
+    // concrete error if something is truly broken.
+    return;
+  }
+  if (report.ready) {
+    return;
+  }
+  const missing = report.items.filter(
+    (item) => item.required && item.status === "missing"
+  );
+  const names = missing.map((item) => item.label).join(", ");
+  throw new CognisGuidanceError({
+    title: "Install prerequisites first",
+    message:
+      `Cognis can't set up this workspace until required components are installed: ${names}. ` +
+      "Use the checklist in the Cognis panel to install them, then run Set Up for AI again.",
+    severity: "warning",
+    actions: [
+      { label: "Open Cognis Panel", command: "cognis.openPanel" },
+      { label: "Show Output", command: "cognis.showOutput" },
+    ],
+    technicalDetail: missing
+      .map((item) => `${item.label}: ${item.detail} (install: ${item.install_target})`)
+      .join("\n"),
+  });
+}
+
 function repairCancelledError(): CognisGuidanceError {
   return new CognisGuidanceError({
     title: "Cancelled",
@@ -272,6 +315,7 @@ export async function setupForAi(
   const repoRoot = folder.uri.fsPath;
 
   await ensurePythonReady(repoRoot, progress);
+  await ensurePrerequisitesReady(repoRoot, progress);
   const wasConfigured = isWorkspaceConfigured(repoRoot);
 
   progress.report({ message: "Step 1/4: Preparing workspace config…" });
@@ -639,6 +683,93 @@ export async function disableMcp(): Promise<void> {
   } else {
     vscode.window.showWarningMessage(`No cognis entry in ${configPath}.`);
   }
+}
+
+/**
+ * Tear Cognis out of the current workspace: stop the watcher, disconnect MCP,
+ * and delete the local ``.cognis/`` index directory. This is the lifecycle
+ * counterpart to Set Up for AI — the "remove the container" action — so a user
+ * can cleanly back out without hunting through config files. ``config.yaml`` is
+ * intentionally removed too (the whole ``.cognis/`` goes), since setup recreates
+ * it. Returns whether the directory was actually deleted.
+ *
+ * @param options.purgeAllMcp When true, also strip *every* ``cognis-*`` server
+ *   from the shared/global MCP host config — not just this repo's entry. This is
+ *   the "preparing to uninstall" path: MCP config is written globally by default,
+ *   so a per-workspace removal would leave orphaned entries the host keeps trying
+ *   to spawn after the extension is gone.
+ */
+export async function removeFromWorkspace(options?: {
+  purgeAllMcp?: boolean;
+}): Promise<{
+  configPath: string;
+  mcpRemoved: boolean;
+  cognisDirRemoved: boolean;
+  purgedConfigPaths: string[];
+}> {
+  const folder = requireWorkspaceFolder();
+  const repoRoot = folder.uri.fsPath;
+  const output = getOutputChannel();
+
+  // 1. Stop the live-indexing daemon so the DB handle is released (Windows
+  //    holds an exclusive SQLite lock while open) before we delete the dir.
+  try {
+    await stopLiveIndexing(repoRoot);
+  } catch (err) {
+    output.appendLine(
+      `[remove] stop indexing warning: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+  setLiveIndexing(repoRoot, false);
+  setIndexStatus(repoRoot, undefined);
+
+  // 2. Disconnect MCP wiring from the editor/host config.
+  let configPath = "";
+  let mcpRemoved = false;
+  const purgedConfigPaths: string[] = [];
+  try {
+    if (options?.purgeAllMcp) {
+      const touched = await removeAllCognisMcpEntries(repoRoot);
+      for (const entry of touched) {
+        purgedConfigPaths.push(entry.configPath);
+        output.appendLine(
+          `[remove] purged ${entry.serverNames.join(", ")} from ${entry.configPath}`
+        );
+      }
+      mcpRemoved = touched.length > 0;
+      configPath = touched[0]?.configPath ?? "";
+    } else {
+      const result = await disableMcpForWorkspace(repoRoot);
+      configPath = result.configPath;
+      mcpRemoved = result.removed;
+    }
+  } catch (err) {
+    output.appendLine(
+      `[remove] disable MCP warning: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+  setMcpEnabled(repoRoot, false);
+
+  // 3. Delete the local index directory.
+  const cognisDir = path.join(repoRoot, ".cognis");
+  let cognisDirRemoved = false;
+  try {
+    if (fs.existsSync(cognisDir)) {
+      fs.rmSync(cognisDir, { recursive: true, force: true });
+      cognisDirRemoved = true;
+    }
+  } catch (err) {
+    output.appendLine(
+      `[remove] delete .cognis warning: ${err instanceof Error ? err.message : String(err)}`
+    );
+    throw err;
+  }
+
+  // 4. Reset cached state so the panel falls back to "Not set up".
+  setLastHealth(repoRoot, undefined);
+  setAutoManaged(repoRoot, false);
+
+  return { configPath, mcpRemoved, cognisDirRemoved, purgedConfigPaths };
 }
 
 export async function refreshPanelContext(repoRoot: string): Promise<PanelContext> {

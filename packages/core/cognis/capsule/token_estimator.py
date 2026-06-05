@@ -25,7 +25,7 @@ implementation.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from cognis.capsule.models import ContextCapsule
@@ -36,11 +36,15 @@ logger = logging.getLogger(__name__)
 # tiktoken availability probe
 # ---------------------------------------------------------------------------
 
-_TIKTOKEN_ENCODING: object | None = None
+# Typed as ``Any``: tiktoken ships no type stubs, so the encoding object is
+# opaque to mypy. ``Any`` lets us call ``.encode(...)`` without an
+# ``attr-defined`` error and without a per-line ignore that mypy would flag as
+# unused on environments where tiktoken *is* importable.
+_TIKTOKEN_ENCODING: Any = None
 TIKTOKEN_AVAILABLE: bool = False
 
 try:
-    import tiktoken as _tiktoken  # type: ignore[import-not-found]
+    import tiktoken as _tiktoken
 
     _TIKTOKEN_ENCODING = _tiktoken.get_encoding("cl100k_base")
     TIKTOKEN_AVAILABLE = True
@@ -80,9 +84,6 @@ def estimate_tokens(text: str) -> int:
     raw: int
     if TIKTOKEN_AVAILABLE and _TIKTOKEN_ENCODING is not None:
         # tiktoken's Encoding.encode() returns a list of ints; we need len().
-        # We cannot import tiktoken types at mypy-time (not installed), so we
-        # use a Protocol-based approach: call encode via getattr to avoid the
-        # attr-defined error while keeping strict mode happy.
         encode = _TIKTOKEN_ENCODING.encode
         raw = len(encode(text))
     else:

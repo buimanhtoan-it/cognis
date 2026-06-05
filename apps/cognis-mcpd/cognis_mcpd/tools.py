@@ -1391,7 +1391,7 @@ def diffuse_context(
         except ImportError as exc:
             raise McpError(
                 EMBEDDER_UNAVAILABLE,
-                "numpy is required for CSAR diffusion; install cognis[embed-local].",
+                "numpy is required for CSAR diffusion; install cognis-engine[embed-local].",
                 retryable=False,
             ) from exc
 

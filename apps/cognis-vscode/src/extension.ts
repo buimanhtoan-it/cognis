@@ -1,6 +1,13 @@
 import * as vscode from "vscode";
 import { getOutputChannel } from "./cli";
 import {
+  initManagedBackend,
+  installManagedBackend,
+  isManagedBackendInstalled,
+  uninstallManagedBackend,
+  BackendInstallError,
+} from "./backend";
+import {
   presentGuidance,
   setupResultGuidance,
   showErrorGuidance,
@@ -17,6 +24,15 @@ import {
 } from "./panel";
 import { reconcileWorkspaceOnActivate } from "./reconcile";
 import {
+  addCognisToGitignore,
+  shouldRemindGitignore,
+} from "./gitignore";
+import {
+  fetchPrerequisites,
+  installAllMissing,
+  installPrerequisite,
+} from "./prerequisites";
+import {
   deriveStatus,
   getState,
   initStateStorage,
@@ -24,13 +40,14 @@ import {
   setIndexStatus,
   setLiveIndexing,
 } from "./state";
-import type { SetupResult } from "./types";
+import type { PrerequisiteReport, SetupResult } from "./types";
 import {
   getWorkspaceFolder,
   isWorkspaceConfigured,
   refreshPanelContext,
   rehydrateWorkspaceState,
   clearIndexAndReindex,
+  removeFromWorkspace,
   repairSetup,
   setupForAi,
   showHealthReport,
@@ -40,6 +57,9 @@ import {
 let statusBarItem: vscode.StatusBarItem;
 let panelProvider: CognisPanelProvider;
 let healthPollTimer: ReturnType<typeof setInterval> | undefined;
+let extensionContext: vscode.ExtensionContext | undefined;
+let lastPrerequisites: PrerequisiteReport | undefined;
+let backendAvailable: boolean | undefined;
 let indexingActive = false;
 let blockingIndexMessage: string | undefined;
 let autoIndexStartPromise: Promise<void> | undefined;
@@ -52,11 +72,40 @@ function buildIndexingContext(repoRoot: string): PanelContext {
     mcpEnabled: state.mcpEnabled,
     indexStatus: state.indexStatus,
     indexingMessage: blockingIndexMessage,
+    prerequisites: lastPrerequisites,
+    configured: isWorkspaceConfigured(repoRoot),
+    backendAvailable,
   };
 }
 
 async function fetchPanelContext(repoRoot: string): Promise<PanelContext> {
-  return refreshPanelContext(repoRoot);
+  const context = await refreshPanelContext(repoRoot);
+  return {
+    ...context,
+    prerequisites: lastPrerequisites,
+    configured: isWorkspaceConfigured(repoRoot),
+    backendAvailable,
+  };
+}
+
+/**
+ * Re-fetch the prerequisite checklist (via `cognis-cli doctor`) and refresh the
+ * panel. Cached so every panel render can show the checklist without re-running
+ * the CLI on each poll.
+ *
+ * A `doctor` report is also our cheapest proof that the Python backend is
+ * actually runnable: if it returns a report the backend is reachable; if it
+ * returns undefined the backend isn't installed yet (fresh machine), which the
+ * panel surfaces as "Install the Cognis backend".
+ */
+async function refreshPrerequisites(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    return;
+  }
+  lastPrerequisites = await fetchPrerequisites(folder.uri.fsPath);
+  backendAvailable = lastPrerequisites !== undefined;
+  await pollHealth();
 }
 
 function updateStatusBar(context: PanelContext): void {
@@ -189,10 +238,50 @@ async function runSetupForAi(): Promise<void> {
     );
     if (result) {
       startHealthPolling();
+      await maybeRemindGitignore();
       await reportSetupResult(result);
     }
   } catch (err) {
     await showErrorGuidance(err, "Set Up for AI");
+  }
+}
+
+/**
+ * After setup, keep ``.cognis/`` out of version control automatically.
+ *
+ * The directory holds the local index DB, caches, and audit log — machine
+ * specific files that should never be committed. Rather than asking, we just
+ * add the entry when we're inside a git repo and it isn't ignored yet, then
+ * show a non-blocking notice (with a quick way to view the change). Idempotent.
+ */
+async function maybeRemindGitignore(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    return;
+  }
+  const repoRoot = folder.uri.fsPath;
+  if (!shouldRemindGitignore(repoRoot)) {
+    return;
+  }
+  const written = addCognisToGitignore(repoRoot);
+  if (!written) {
+    getOutputChannel().appendLine(
+      "[gitignore] Could not update .gitignore automatically. Check file permissions."
+    );
+    return;
+  }
+  const choice = await vscode.window.showInformationMessage(
+    "Added `.cognis/` to .gitignore so the local index, caches, and audit log aren't committed.",
+    "View .gitignore"
+  );
+  if (choice === "View .gitignore") {
+    try {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(written));
+      await vscode.window.showTextDocument(doc);
+    } catch {
+      // Non-fatal: the entry is already written regardless of whether we can
+      // open the editor.
+    }
   }
 }
 
@@ -243,8 +332,153 @@ async function runClearAndReindex(): Promise<void> {
   }
 }
 
+/**
+ * Lifecycle "remove" action: stop indexing, disconnect MCP, and delete the
+ * local ``.cognis/`` directory after an explicit confirmation. Mirrors the
+ * "remove the container" mental model so users can cleanly back out.
+ *
+ * @param scope "workspace" removes only this repo's wiring; "all" also purges
+ *   every cognis-* entry from the shared global MCP config (uninstall prep).
+ */
+async function runRemoveFromWorkspace(scope: "workspace" | "all" = "workspace"): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    await showErrorGuidance(
+      new Error("Open a workspace folder before removing Cognis."),
+      "Remove from workspace"
+    );
+    return;
+  }
+  const purgeAllMcp = scope === "all";
+  const confirmMessage = purgeAllMcp
+    ? "Remove Cognis everywhere and prepare to uninstall? This stops live indexing, " +
+      "deletes this workspace's local .cognis index, removes EVERY cognis MCP server " +
+      "entry from your editor config (all repos), and uninstalls the Cognis backend that " +
+      "Cognis installed for you. Your source code is not touched."
+    : "Remove Cognis from this workspace? This stops live indexing, disconnects the " +
+      "MCP server from your editor, and deletes the local .cognis index directory " +
+      "(database, caches, audit log). Your source code is not touched. You can run " +
+      "Set Up for AI again later to recreate it.";
+  const confirmLabel = purgeAllMcp ? "Remove Everything" : "Remove";
+  const confirmation = await vscode.window.showWarningMessage(
+    confirmMessage,
+    { modal: true },
+    confirmLabel
+  );
+  if (confirmation !== confirmLabel) {
+    return;
+  }
+  try {
+    const result = await withProgress(
+      purgeAllMcp ? "Cognis: Prepare for uninstall" : "Cognis: Remove from workspace",
+      async () => removeFromWorkspace({ purgeAllMcp })
+    );
+    if (!result) {
+      return;
+    }
+    // Re-probe the backend/prereqs next poll instead of trusting stale state.
+    lastPrerequisites = undefined;
+    const parts: string[] = [];
+    if (result.cognisDirRemoved) {
+      parts.push("deleted the local .cognis index");
+    }
+    if (purgeAllMcp && result.purgedConfigPaths.length > 0) {
+      parts.push(
+        `removed all Cognis MCP entries from ${result.purgedConfigPaths.join(", ")}`
+      );
+    } else if (result.mcpRemoved) {
+      parts.push(`disconnected MCP from ${result.configPath}`);
+    }
+    // "Remove everything" also uninstalls the backend Cognis installed so the
+    // user gets a clean machine without touching a terminal.
+    if (purgeAllMcp) {
+      const userPythonPath = vscode.workspace
+        .getConfiguration("cognis")
+        .get<string>("pythonPath", "")
+        .trim();
+      try {
+        const backend = await uninstallManagedBackend({
+          userPythonPath: userPythonPath || undefined,
+        });
+        if (backend.mode !== "none") {
+          parts.push(
+            backend.mode === "managed-deleted"
+              ? "uninstalled the Cognis backend"
+              : "removed the cognis package from your Python"
+          );
+        }
+      } catch (err) {
+        getOutputChannel().appendLine(
+          `[remove] backend uninstall warning: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+    await refreshPrerequisites();
+    let summary =
+      parts.length > 0
+        ? `Removed Cognis: ${parts.join("; ")}. Reload your editor or MCP host to apply.`
+        : "Cognis was not configured for this workspace.";
+    if (purgeAllMcp) {
+      summary += " You can now uninstall the extension.";
+    }
+    await vscode.window.showInformationMessage(summary);
+    await pollHealth();
+  } catch (err) {
+    await showErrorGuidance(err, "Remove from workspace");
+  }
+}
+
+/**
+ * One-click backend install. Creates/refreshes the managed environment (or uses
+ * the user's own Python if cognis.pythonPath is set), installs the package, then
+ * re-probes so the panel advances on its own — no terminal, no manual steps.
+ */
+async function runInstallBackend(): Promise<void> {
+  const userPythonPath = vscode.workspace
+    .getConfiguration("cognis")
+    .get<string>("pythonPath", "")
+    .trim();
+  try {
+    const outcome = await withProgress("Cognis: Install backend", (p, t) =>
+      installManagedBackend(p, t, { userPythonPath: userPythonPath || undefined })
+    );
+    if (!outcome) {
+      return;
+    }
+    await refreshPrerequisites();
+    const where =
+      outcome.mode === "managed"
+        ? "in a private environment Cognis manages for you"
+        : "in your configured Python environment";
+    const next = await vscode.window.showInformationMessage(
+      `Cognis backend installed ${where}. Set up this workspace for AI now?`,
+      "Set Up for AI",
+      "Later"
+    );
+    if (next === "Set Up for AI") {
+      await runSetupForAi();
+    }
+  } catch (err) {
+    if (err instanceof BackendInstallError) {
+      const actions = err.canInstallPython ? ["Get Python", "Show Output"] : ["Show Output"];
+      const choice = await vscode.window.showErrorMessage(err.userMessage, ...actions);
+      if (choice === "Get Python") {
+        void vscode.env.openExternal(
+          vscode.Uri.parse("https://www.python.org/downloads/")
+        );
+      } else if (choice === "Show Output") {
+        void vscode.commands.executeCommand("cognis.showOutput");
+      }
+      return;
+    }
+    await showErrorGuidance(err, "Install backend");
+  }
+}
+
 export function activate(context: vscode.ExtensionContext): void {
+  extensionContext = context;
   initStateStorage(context);
+  initManagedBackend(context);
   panelProvider = new CognisPanelProvider(context.extensionUri);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
@@ -336,6 +570,24 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("cognis.installBackend", () =>
+      runInstallBackend()
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("cognis.removeFromWorkspace", () =>
+      runRemoveFromWorkspace("workspace")
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("cognis.prepareUninstall", () =>
+      runRemoveFromWorkspace("all")
+    )
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("cognis.showHealth", async () => {
       try {
         await showHealthReport();
@@ -348,6 +600,39 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("cognis.openPanel", () => {
       panelProvider.reveal();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("cognis.refreshPrerequisites", () =>
+      refreshPrerequisites()
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "cognis.installPrerequisite",
+      async (itemId?: string) => {
+        const folder = getWorkspaceFolder();
+        if (!folder || !itemId) {
+          return;
+        }
+        const item = lastPrerequisites?.items.find((i) => i.id === itemId);
+        if (!item) {
+          return;
+        }
+        installPrerequisite(folder.uri.fsPath, item.install_target);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("cognis.installAllPrerequisites", () => {
+      const folder = getWorkspaceFolder();
+      if (!folder || !lastPrerequisites) {
+        return;
+      }
+      installAllMissing(folder.uri.fsPath, lastPrerequisites.combined_install_target);
     })
   );
 
@@ -365,6 +650,9 @@ export function activate(context: vscode.ExtensionContext): void {
         });
       }
     }
+    // Populate the prerequisite checklist early so the panel can show it (and
+    // gate setup) before the user takes any action.
+    await refreshPrerequisites();
     await pollHealth();
     startHealthPolling();
 

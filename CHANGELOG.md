@@ -6,6 +6,85 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-06-05
+
+### Added
+
+- **One-click backend install/uninstall.** The VS Code / Cursor panel now
+  installs the Cognis Python backend for you — it creates a private environment
+  it manages (no terminal, no `pip`, no choosing a Python) and offers to set up
+  the workspace right after. The **Danger zone → Remove everything** action
+  reverses it, deleting that managed environment cleanly. If you bring your own
+  Python via `cognis.pythonPath`, install/uninstall operate on the `cognis`
+  package there and never touch your environment. New `cognis.installBackend`
+  command and `cognis.backendPackageSpec` setting.
+- **Lifecycle removal commands.** `cognis.removeFromWorkspace` stops indexing,
+  disconnects this repo's MCP entry, and deletes the local `.cognis/`.
+  `cognis.prepareUninstall` additionally strips every `cognis-*` server from the
+  shared MCP config and uninstalls the managed backend, so nothing is orphaned
+  after the extension is removed.
+- **Onboarding stepper.** The panel shows a fixed 4-step path
+  (Backend → Components → Index synced → AI connected) so a first-time user
+  always sees where they are and the single next action. A dedicated "Install
+  the Cognis backend" state guides fresh machines instead of failing setup with
+  a raw import error.
+
+### Changed
+
+- **`.cognis/` is added to `.gitignore` automatically** after setup when the
+  workspace is a git repo and the entry is missing (idempotent), with a
+  non-blocking notice — instead of a prompt with a "Don't ask again" choice.
+- **Plainer, behavior-based wording.** Removed the term "interpreter" from
+  user-facing copy; renamed **Repair Setup → Troubleshoot & Repair** and
+  **Clear Index & Re-index → Rebuild Index** (command IDs unchanged). The status
+  bar now uses a short, stable vocabulary (Indexing / Ready / Action needed /
+  Not set up).
+- The VS Code / Cursor panel's **Prerequisites checklist now collapses** once
+  every required component is installed, showing a one-line "Ready" summary
+  instead of the full list. It auto-expands when a required component is missing
+  so the install action stays obvious, and can be expanded manually any time to
+  re-check or install optional extras.
+
+### Fixed
+
+- **Live indexing from the extension now makes the workspace searchable in
+  seconds instead of appearing to fail.** The `cognis-indexd` cold rebuild
+  (spawned by the extension's "Set Up for AI" / live indexing) embedded *every*
+  symbol before writing any of them, so on a real repository the index DB stayed
+  empty — and the health panel reported `index: fail` ("0 files … excluded by
+  .gitignore") — for the entire multi-minute embed. The daemon now cold-indexes
+  in two phases: lexical + structural data first (fast, commits immediately so
+  search works and health flips to `ok`), then backfills semantic embeddings in
+  the background. Manual `cognis-cli index` was unaffected because operators
+  waited for it (or used `--skip-embeddings`); the failure only surfaced through
+  the daemon path.
+- `cognis-cli health` and the `index --clear` diagnosis no longer blame
+  `.gitignore` / `repo.ignore` when the real cause is an unfinished index run.
+  When indexable source exists but the DB is empty, they now point to running
+  `index --full` instead of asserting the source was excluded.
+
+## [0.2.1] — 2026-06-02
+
+### Added
+
+- **Prerequisite checklist in the VS Code / Cursor panel.** Before setup, the
+  panel now lists each installable backend component (parsers, local embeddings,
+  vector search, MCP server, tokenizers) with an installed/missing marker and a
+  per-item **Install** button (plus **Install all**). Backed by a new
+  `cognis-cli doctor --json` command. **Set Up for AI** is blocked until the
+  required components are installed, so a fresh user is never left with a
+  half-provisioned workspace.
+- **`.gitignore` reminder.** After setup, in a git repository, the extension
+  offers to add `.cognis/` to `.gitignore` (with a "Don't ask again" option) so
+  the local index database, caches, and audit log are never committed.
+
+### Changed
+
+- **The extension no longer auto-creates `.cognis/` on activation.** Opening a
+  folder leaves the repository untouched; `.cognis/` is created only when the
+  user explicitly runs **Set Up for AI**. Activation still auto-manages
+  workspaces that are already configured.
+
 ## [0.2.0] — 2026-06-02
 
 ### Fixed
@@ -108,7 +187,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cold-start model loads no longer fail with a follow-up soft-timeout after the
   semantic stage already completed.
 
-[Unreleased]: https://github.com/buimanhtoan-it/cognis/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/buimanhtoan-it/cognis/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/buimanhtoan-it/cognis/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/buimanhtoan-it/cognis/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/buimanhtoan-it/cognis/compare/v0.1.17...v0.2.0
 [0.1.17]: https://github.com/buimanhtoan-it/cognis/compare/v0.1.0...v0.1.17
 

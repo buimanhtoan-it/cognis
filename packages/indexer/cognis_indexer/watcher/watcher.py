@@ -46,7 +46,7 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError(
         "watchdog>=4.0 is required for cognis_indexer.watcher. "
-        "Install it with: pip install 'cognis[indexer]'"
+        "Install it with: pip install 'cognis-engine[indexer]'"
     ) from exc
 
 

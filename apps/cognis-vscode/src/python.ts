@@ -7,7 +7,24 @@ import {
   pythonMisconfiguredGuidance,
 } from "./guidance";
 
-/** Resolve Python executable: setting > VS Code interpreter > `python`. */
+/**
+ * Path to the extension-managed backend Python, set by backend.ts once the
+ * managed venv is known. Used as a fallback before the workspace Python so a
+ * one-click install "just works" without the user choosing anything.
+ */
+let managedPythonPath: string | undefined;
+
+export function setManagedPythonPath(pythonPath: string | undefined): void {
+  managedPythonPath = pythonPath;
+}
+
+/**
+ * Resolve the Python used to run the backend, in priority order:
+ *   1. cognis.pythonPath (user explicitly chose their own environment)
+ *   2. the extension-managed backend environment (one-click install)
+ *   3. the editor's selected workspace Python
+ *   4. the system `python` / `python3`
+ */
 export function resolvePythonExecutable(): string {
   const configured = vscode.workspace
     .getConfiguration("cognis")
@@ -15,6 +32,9 @@ export function resolvePythonExecutable(): string {
     .trim();
   if (configured) {
     return configured;
+  }
+  if (managedPythonPath) {
+    return managedPythonPath;
   }
   const interp = vscode.workspace
     .getConfiguration("python")

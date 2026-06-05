@@ -282,11 +282,12 @@ async def run_daemon(
     # is empty. Done synchronously inside an executor so the event loop can
     # serve a SIGINT during the (potentially long) walk.
     if force_full_rebuild or _db_is_empty(db):
+        was_empty = _db_is_empty(db)
         runtime_status.update(
-            phase="cold_index" if _db_is_empty(db) else "rebuild",
+            phase="cold_index" if was_empty else "rebuild",
             message=(
                 "Building initial index for this workspace…"
-                if _db_is_empty(db)
+                if was_empty
                 else "Rebuilding the semantic index for this workspace…"
             ),
             progress_percent=15.0,
@@ -304,17 +305,56 @@ async def run_daemon(
             "full rebuild requested" if force_full_rebuild else "DB empty",
             repo_root,
         )
-        full_stats = await loop.run_in_executor(
-            index_executor, lambda: pipeline.index_repo(repo_root, full=True)
+        # Two-phase cold index so the workspace becomes searchable in seconds
+        # instead of waiting minutes for embeddings.
+        #
+        # Phase A: index lexical + structural data with embeddings SKIPPED. This
+        # is fast (seconds) and commits every file/symbol, so health flips to
+        # "ok" and lexical/structural search works immediately. Embedding the
+        # whole repo up front (Pass 3 of index_repo embeds *all* symbols before
+        # any write) is what previously left the DB empty — and health reporting
+        # "0 files / fail" — for the entire multi-minute embed on a real repo.
+        lexical_stats = await loop.run_in_executor(
+            index_executor,
+            lambda: pipeline.index_repo(repo_root, full=True, skip_embeddings=True),
         )
         logger.info(
-            "full index complete: files=%d symbols=%d edges=%d errors=%d in %.2fs",
-            full_stats.files_processed,
-            full_stats.symbols_indexed,
-            full_stats.edges_resolved,
-            len(full_stats.errors),
-            full_stats.elapsed_s,
+            "lexical index complete: files=%d symbols=%d edges=%d errors=%d in %.2fs",
+            lexical_stats.files_processed,
+            lexical_stats.symbols_indexed,
+            lexical_stats.edges_resolved,
+            len(lexical_stats.errors),
+            lexical_stats.elapsed_s,
         )
+
+        # Phase B: backfill semantic embeddings. The index is already queryable;
+        # this only upgrades semantic search. Skipped automatically when no
+        # embedder is configured/available (index_repo no-ops the embed step).
+        embedder_available = getattr(pipeline, "embedder", None) is not None
+        if embedder_available:
+            runtime_status.update(
+                phase="embedding",
+                message="Index ready — generating semantic embeddings in the background…",
+                progress_percent=70.0,
+                inflight_files=[],
+                recent_files=[],
+                last_error=None,
+            )
+            await asyncio.to_thread(
+                _write_status_file,
+                status_path,
+                _compose_status_payload(watcher=None, runtime_status=runtime_status),
+            )
+            embed_stats = await loop.run_in_executor(
+                index_executor,
+                lambda: pipeline.index_repo(repo_root, full=True, skip_embeddings=False),
+            )
+            logger.info(
+                "embedding backfill complete: files=%d symbols=%d in %.2fs",
+                embed_stats.files_processed,
+                embed_stats.symbols_indexed,
+                embed_stats.elapsed_s,
+            )
     else:
         # On daemon restart with a populated DB, run a quick incremental walk
         # to catch any changes that landed while the daemon was down.

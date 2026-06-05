@@ -20,79 +20,52 @@ flow** of code that plain embedding search misses.
 Everything runs on your machine. Your code is never uploaded anywhere.
 
 > **This extension is the control panel.** The actual indexing/search engine is
-> a small Python backend you install once (one command). Follow the **Setup**
-> below — the extension cannot work without the backend.
+> a small Python backend — the extension installs and manages it for you in one
+> click. All you may need is Python 3.11+ on your machine.
 
 ---
 
 ## Setup (do this once)
 
-You need **two** things installed: this extension (done ✅) and the Cognis
-Python backend. Total time: ~3 minutes.
+The only thing you may need is **Python 3.11+** on your machine. Everything else
+is one click.
 
-### Step 1 — Install Python 3.11 or newer
-
-Check what you have:
+### Step 1 — Make sure Python 3.11+ is available
 
 ```bash
 python --version
 ```
 
-If it's below 3.11, install it from [python.org](https://www.python.org/downloads/)
-(on Windows, keep the default "Add Python to PATH" option checked).
+If it's missing or below 3.11, install it from
+[python.org](https://www.python.org/downloads/) (on Windows, keep the default
+"Add Python to PATH" option checked). Cognis will find it automatically.
 
-### Step 2 — Install the Cognis backend
+### Step 2 — Install the backend (one click)
 
-Open a terminal and create an isolated environment so Cognis doesn't touch your
-system Python:
+Open the **Cognis sidebar panel** and click **Install backend**. Cognis creates
+a private environment it manages for you and installs everything — no terminal,
+no `pip`, no choosing a Python environment. When it finishes the panel advances
+on its own.
 
-```bash
-# 1. create a virtual environment
-python -m venv ~/.cognis-venv
+> Want to use your own Python environment instead? Set `cognis.pythonPath` in
+> Settings and Cognis installs into that environment rather than a managed one.
 
-# 2. activate it
-#    macOS / Linux:
-source ~/.cognis-venv/bin/activate
-#    Windows PowerShell:
-#    & "$HOME\.cognis-venv\Scripts\Activate.ps1"
+### Step 3 — Set up the workspace
 
-# 3. install Cognis with all features
-pip install "cognis[indexer,embed-local,vector,tokenizers,mcp]"
-```
-
-That's the whole backend. Verify it:
-
-```bash
-cognis-cli --version
-```
-
-> Prefer Docker or installing from source? See the
-> [full install guide](https://github.com/buimanhtoan-it/cognis#quick-start).
-
-### Step 3 — Point the extension at that Python
-
-The extension runs the backend through a specific Python interpreter. Tell it
-which one:
-
-1. Open the folder/repo you want to index in VS Code or Cursor.
-2. Open **Settings** → search `cognis.pythonPath`.
-3. Set it to the interpreter from Step 2:
-   - macOS / Linux: `~/.cognis-venv/bin/python`
-   - Windows: `%USERPROFILE%\.cognis-venv\Scripts\python.exe`
-
-(If Cognis lives in your selected workspace interpreter already, you can leave
-this blank.)
-
-### Step 4 — Set up the workspace
-
-Run **Cognis: Set Up for AI** from the Command Palette
-(`Ctrl/Cmd+Shift+P`), or click **Set Up for AI** in the Cognis sidebar panel.
+Click **Set Up for AI** in the panel (Cognis also offers this right after the
+backend installs), or run **Cognis: Set Up for AI** from the Command Palette
+(`Ctrl/Cmd+Shift+P`).
 
 This single action:
 - creates the workspace config under `.cognis/`,
 - writes the MCP configuration for your editor,
 - starts indexing your code in the background,
 - and reports health when done.
+
+Cognis does **not** create `.cognis/` until you explicitly start setup — opening
+a folder never writes anything. After setup, in a git repo, it automatically
+adds `.cognis/` to your `.gitignore` (it holds the local index DB, caches, and
+audit log — files you shouldn't commit) and tells you it did.
 
 **Reload your editor / MCP host** once when prompted so the Cognis tools appear
 in your AI chat. You're done.
@@ -122,13 +95,13 @@ indexing now, and overall health.
 
 ---
 
-## Clear & Re-index
+## Rebuild Index
 
 Index looking stale or wrong (after a big branch switch, an upgrade, or a
 corrupted database)? Reset it:
 
-- Click **Clear & Re-index** in the sidebar panel's *Index Status* section, or
-- run **Cognis: Clear Index & Re-index** from the Command Palette.
+- Click **Rebuild index** in the sidebar panel's *Index Status* section, or
+- run **Cognis: Rebuild Index** from the Command Palette.
 
 It stops indexing, deletes the stored index (database, sidecars, capsule cache),
 and rebuilds from scratch. **Your config and MCP wiring are kept.** A
@@ -137,18 +110,40 @@ on large repos.
 
 ---
 
+## Removing Cognis
+
+Cognis writes to three places: the local `.cognis/` index inside each repo, your
+editor's MCP config (global `~/.cursor/mcp.json` by default, shared across
+repos), and the Python backend it installed for you. The panel's **Danger zone**
+(bottom of the sidebar) cleans these up — no terminal needed:
+
+- **Remove from this workspace** — stops indexing, removes *this repo's* MCP
+  entry, and deletes this repo's `.cognis/`. Other indexed repos keep working.
+  Command: **Cognis: Remove from Workspace**.
+- **Remove everything (prepare to uninstall)** — does the above, strips **every**
+  `cognis-*` server from your MCP config, *and* uninstalls the backend Cognis
+  installed. After this you can uninstall the extension with nothing left behind.
+  Command: **Cognis: Remove Everything (Prepare for Uninstall)**.
+
+Both leave your **source code** untouched. If you pointed Cognis at your own
+Python (`cognis.pythonPath`), "Remove everything" only removes the `cognis`
+package from it — your environment is kept.
+
+---
+
 ## Troubleshooting
 
-If anything looks off, run **Cognis: Repair Setup** (or the **Repair Setup**
-button in the panel). It re-checks Python, config, MCP wiring, and indexing,
-then tells you the next step.
+If anything looks off, run **Cognis: Troubleshoot & Repair** (or the
+**Troubleshoot** button in the panel). It re-checks Python, config, MCP wiring,
+and indexing, then tells you the next step.
 
 | Symptom | Fix |
 | --- | --- |
-| "Python / cognis backend not found" | Re-check Step 2, then set `cognis.pythonPath` (Step 3) and run **Repair Setup**. |
-| AI tools don't appear in chat | Reload your editor / MCP host. If still missing, run **Repair Setup**. |
-| Indexing or config errors | Run **Repair Setup**; open **Cognis: Show Output** for details. |
-| Degraded health | Open **Cognis: Show Health**, then **Repair Setup**. |
+| "Install the Cognis backend" | Click **Install backend** in the panel — Cognis sets it up automatically. |
+| "Cognis backend not ready" | Click **Install backend** (or **Reinstall backend**) in the panel. |
+| AI tools don't appear in chat | Reload your editor / MCP host. If still missing, run **Troubleshoot & Repair**. |
+| Indexing or config errors | Run **Troubleshoot & Repair**; open **Cognis: Show Output** for details. |
+| Degraded health | Open **Cognis: Show Health**, then **Troubleshoot & Repair**. |
 
 Full logs are always in **Cognis: Show Output** and the health report.
 
@@ -158,7 +153,8 @@ Full logs are always in **Cognis: Show Output** and the health report.
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `cognis.pythonPath` | `""` | Python executable for the backend. Set this to your Cognis venv if it differs from the workspace interpreter. |
+| `cognis.pythonPath` | `""` | Optional. Use your own Python environment for the backend. Empty lets Cognis install and manage its own. |
+| `cognis.backendPackageSpec` | `cognis-engine[...]` | pip requirement Cognis installs for its backend. Change only for a specific version. |
 | `cognis.autoManageOnActivate` | `true` | Inspect and repair the workspace on activation. |
 | `cognis.autoStartLiveIndexing` | `true` | Start live indexing during auto-manage. |
 | `cognis.autoIndexOnFileChange` | `true` | Re-index automatically when you save files. |
@@ -190,7 +186,7 @@ first semantic query unless you override these explicitly.
 ## Requirements
 
 - VS Code 1.85+ or Cursor (any MCP-capable editor).
-- Python 3.11+ with the Cognis backend (Step 2).
+- Python 3.11+ available on your machine (the backend installs in one click).
 - Languages indexed today: **TypeScript / JavaScript, Python, Go**.
 
 ---

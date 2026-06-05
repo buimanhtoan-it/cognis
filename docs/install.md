@@ -147,7 +147,7 @@ export WORKSPACE_HOST_PATH=/path/to/your/codebase
 docker compose -f deploy/compose.yaml up -d
 ```
 
-Published image tags use `ghcr.io/buimanhtoan-it/cognis:<version>`.
+Published image tags use `ghcr.io/buimanhtoan-it/cognis-engine:<version>`.
 Operational steps are documented in [operations.md](operations.md).
 
 ## Windows notes

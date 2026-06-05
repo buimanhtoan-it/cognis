@@ -313,6 +313,65 @@ export async function disableMcpForWorkspace(
   };
 }
 
+/**
+ * Delete every Cognis-managed server entry (``cognis`` / ``cognis-<slug>``)
+ * from a server map in place, returning the names removed. Pure (no fs/vscode)
+ * so the matching rule stays unit-testable.
+ */
+export function filterOutCognisServers(
+  servers: Record<string, unknown>
+): string[] {
+  const removed: string[] = [];
+  for (const name of Object.keys(servers)) {
+    if (isCognisMcpServerName(name)) {
+      delete servers[name];
+      removed.push(name);
+    }
+  }
+  return removed;
+}
+
+/**
+ * Clear ALL Cognis MCP wiring across the global host config and (optionally)
+ * the current workspace config.
+ *
+ * This backs the "prepare for uninstall" cleanup: because MCP config is written
+ * globally by default (one ``~/.cursor/mcp.json`` shared by every indexed repo),
+ * removing just the current workspace's entry would leave orphaned ``cognis-*``
+ * servers that the MCP host keeps trying to spawn after the extension is gone.
+ * Scanning the global file removes every repo's entry in one pass. Returns the
+ * files touched and the server names removed from each.
+ */
+export async function removeAllCognisMcpEntries(
+  repoRoot?: string
+): Promise<Array<{ configPath: string; serverNames: string[] }>> {
+  const host = resolveMcpHost();
+  const candidates = new Set<string>([getGlobalMcpConfigPath(host)]);
+  if (repoRoot) {
+    const workspacePath = getWorkspaceMcpConfigPath(repoRoot, host);
+    if (workspacePath) {
+      candidates.add(workspacePath);
+    }
+  }
+  const touched: Array<{ configPath: string; serverNames: string[] }> = [];
+  for (const configPath of candidates) {
+    if (!fs.existsSync(configPath)) {
+      continue;
+    }
+    const existing = readJsonFile(configPath);
+    const servers =
+      (existing.mcpServers as Record<string, unknown> | undefined) ?? {};
+    const removed = filterOutCognisServers(servers);
+    if (removed.length === 0) {
+      continue;
+    }
+    existing.mcpServers = servers;
+    writeJsonFile(configPath, existing);
+    touched.push({ configPath, serverNames: removed });
+  }
+  return touched;
+}
+
 export async function showMcpConfigPreview(repoRoot: string): Promise<void> {
   const payload = await fetchMcpConfig(repoRoot);
   const doc = await vscode.workspace.openTextDocument({

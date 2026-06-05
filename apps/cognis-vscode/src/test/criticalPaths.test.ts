@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import * as path from "node:path";
 import test from "node:test";
 import {
   getGlobalMcpConfigPath,
@@ -19,7 +20,7 @@ function makeHealth(
 ): HealthReport {
   const ok = { status: "ok", message: "ok" };
   return {
-    runtime_version: "0.2.0",
+    runtime_version: "0.3.0",
     overall,
     checks: {
       config: ok,
@@ -50,13 +51,15 @@ test("isCognisMcpServerName recognizes legacy and named servers", () => {
 
 test("getWorkspaceMcpConfigPath targets repo-local Cursor and VS Code files", () => {
   const repoRoot = "D:/repo";
+  // Build expected paths with path.join so the assertion holds on any OS
+  // (Windows uses backslashes, POSIX uses forward slashes).
   assert.equal(
     getWorkspaceMcpConfigPath(repoRoot, "cursor"),
-    "D:\\repo\\.cursor\\mcp.json"
+    path.join(repoRoot, ".cursor", "mcp.json")
   );
   assert.equal(
     getWorkspaceMcpConfigPath(repoRoot, "vscode"),
-    "D:\\repo\\.vscode\\mcp.json"
+    path.join(repoRoot, ".vscode", "mcp.json")
   );
   assert.equal(getWorkspaceMcpConfigPath(repoRoot, "claude"), undefined);
 });
@@ -66,7 +69,7 @@ test("resolveMcpConfigPath prefers workspace scope for Cursor", () => {
   const homeDir = "C:/Users/test";
   assert.equal(
     resolveMcpConfigPath("cursor", repoRoot, "workspace", homeDir),
-    "D:\\repo\\.cursor\\mcp.json"
+    path.join(repoRoot, ".cursor", "mcp.json")
   );
   assert.equal(
     resolveMcpConfigPath("cursor", repoRoot, "global", homeDir),

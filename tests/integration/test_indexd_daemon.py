@@ -275,9 +275,71 @@ async def test_live_edit_is_indexed_incrementally(
 def _has_symbol(db_path: Path, name: str) -> bool:
     db = Database(str(db_path))
     try:
-        row = db.connect().execute(
-            "SELECT 1 FROM symbol WHERE name = ? LIMIT 1", (name,)
-        ).fetchone()
+        row = (
+            db.connect().execute("SELECT 1 FROM symbol WHERE name = ? LIMIT 1", (name,)).fetchone()
+        )
         return row is not None
     finally:
         db.close_thread_connection()
+
+
+async def test_cold_index_is_queryable_before_embeddings_finish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: a full rebuild populates the DB fast, before embeddings complete.
+
+    The bug (seen only via the extension's daemon path, not manual CLI runs):
+    ``index_repo`` embeds *every* symbol before writing any of them, so on a real
+    repo the DB stayed empty — and health reported "0 files / fail" — for the
+    entire multi-minute embed. The daemon now cold-indexes lexical/structural
+    data first (skip_embeddings), making the workspace searchable in seconds,
+    then backfills embeddings in the background.
+
+    We install a deliberately SLOW embedder so the embedding phase is still in
+    flight when we assert the DB is already populated and the watcher is live.
+    """
+    import time as _time
+
+    import cognis_indexd.main as daemon_main
+
+    class _SlowEmbedder:
+        """Embedder (structural) whose every batch sleeps, simulating slow CPU embed."""
+
+        # Match the DB's pinned embedding dim so vec writes stay valid.
+        embedding_dim = 384
+
+        def embed_batch(self, texts: list[str]):
+            import numpy as np
+
+            _time.sleep(2.0)  # block long enough to observe the pre-embed state
+            return np.zeros((len(texts), self.embedding_dim), dtype=np.float32)
+
+    monkeypatch.setattr(daemon_main, "_build_embedder", lambda _config: _SlowEmbedder())
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_repo(repo_root)
+    db_path = tmp_path / ".cognis" / "uckg.db"
+    status_path = tmp_path / ".cognis" / "indexd-status.json"
+
+    daemon = _DaemonHandle(repo_root, db_path, status_path)
+    await daemon.start(force_full_rebuild=True, monkeypatch=monkeypatch)
+    try:
+        # The DB must become queryable quickly — Phase A (skip-embeddings) writes
+        # symbols before the slow embedding phase runs. This is the core fix:
+        # without it, the symbol count would stay 0 until all embeddings finish.
+        populated = await _wait_for(
+            lambda: db_path.exists() and _symbol_count(db_path) >= 3,
+            timeout=20.0,
+        )
+        assert populated, (
+            "DB must be populated by the lexical phase before embeddings finish; "
+            f"symbol_count={_symbol_count(db_path)}"
+        )
+
+        # And the watcher comes up so the workspace is fully serving while the
+        # embedding backfill proceeds in the background.
+        await daemon.wait_until_watching(timeout=60.0)
+        assert _symbol_count(db_path) >= 3
+    finally:
+        await daemon.stop()

@@ -33,6 +33,7 @@ jobs:
 
       - name: Run benchmark tests
         run: |
+          mkdir -p benchmark-reports
           python -m pytest tests/benchmark/test_latency.py \
             -m benchmark \
             --benchmark-only \

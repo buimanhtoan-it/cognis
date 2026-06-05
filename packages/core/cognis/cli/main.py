@@ -227,14 +227,38 @@ def _default_mcp_timeout_env(target_platform: str | None = None) -> dict[str, st
 McpHost = Literal["vscode", "cursor", "claude"]
 
 
+def _short_path_hash(resolved_path: str) -> str:
+    """Short, stable hash of the *full* resolved repo path (FNV-1a, 32-bit).
+
+    Disambiguates two repos that share a folder name (e.g. ``work/api`` and
+    ``personal/api``) so their global MCP entries never collide.
+
+    IMPORTANT: must stay byte-for-byte identical to ``shortPathHash`` in
+    ``apps/cognis-vscode/src/mcpServerName.ts`` so the CLI and the extension
+    derive the same server key. We hash UTF-8 bytes of a normalized path
+    (forward slashes, lowercased) so OS/casing differences don't change it.
+    """
+    norm = resolved_path.replace("\\", "/").lower()
+    h = 0x811C9DC5
+    for byte in norm.encode("utf-8"):
+        h ^= byte
+        h = (h * 0x01000193) & 0xFFFFFFFF
+    return f"{h:08x}"[:6]
+
+
 def _derive_mcp_server_name(repo_root: Path, *, prefix: str = "cognis") -> str:
-    """Return a stable MCP server key such as ``cognis-my-app`` from *repo_root*."""
-    slug = repo_root.resolve().name.lower()
-    slug = re.sub(r"[^a-z0-9]+", "-", slug)
-    slug = slug.strip("-")
+    """Return a stable, collision-resistant MCP server key from *repo_root*.
+
+    Format: ``cognis-<slug>-<hash>`` (e.g. ``cognis-my-app-3f9a2c``). The slug
+    stays human-readable; the trailing hash of the full path guarantees
+    uniqueness across repos with the same folder name, so multiple repos can be
+    wired into one global MCP config at once.
+    """
+    resolved = repo_root.resolve()
+    slug = re.sub(r"[^a-z0-9]+", "-", resolved.name.lower()).strip("-")
     if not slug:
         slug = "repo"
-    return f"{prefix}-{slug}"
+    return f"{prefix}-{slug}-{_short_path_hash(str(resolved))}"
 
 
 def _build_mcp_server_block(

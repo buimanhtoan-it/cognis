@@ -61,6 +61,7 @@ jobs:
           python scripts/run_eval.py \
             --golden tests/fixtures/eval/golden.jsonl \
             --out "${{ steps.outdir.outputs.dir }}" \
+            --no-timestamp \
             --k 10
 
       - name: Gate against phase1 baseline

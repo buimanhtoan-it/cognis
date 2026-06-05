@@ -70,6 +70,15 @@ def main() -> int:
         action="store_true",
         help="Force NullStrategy (smoke test only)",
     )
+    parser.add_argument(
+        "--no-timestamp",
+        action="store_true",
+        help=(
+            "Write reports directly into --out instead of a nested "
+            "<out>/<timestamp>/ subdirectory. Use when the caller already "
+            "provides a unique output directory (e.g. CI)."
+        ),
+    )
     args = parser.parse_args()
 
     golden = args.golden or (_PROJECT_ROOT / "tests" / "fixtures" / "eval" / "golden.jsonl")
@@ -93,7 +102,15 @@ def main() -> int:
         print("Install the package: pip install -e .", file=sys.stderr)
         return 1
 
-    out_dir = prepare_out_dir(out_base)
+    # By default each run gets its own ``<out>/<timestamp>/`` subdir. When the
+    # caller already supplies a unique directory (CI computes one per run),
+    # ``--no-timestamp`` writes straight into ``--out`` so the report path is
+    # predictable and the baseline gate can find ``<out>/report.json``.
+    if args.no_timestamp:
+        out_dir = out_base
+        out_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        out_dir = prepare_out_dir(out_base)
     print(f"Running eval against: {golden}")
     print(f"Output directory    : {out_dir}")
     print(f"Recall@k cutoff     : {args.k}")

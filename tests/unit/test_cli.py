@@ -17,6 +17,7 @@ Covers:
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -518,7 +519,27 @@ def test_mcp_config_derives_server_name_from_repo_folder(tmp_path: Path) -> None
     result = _invoke(runner, repo, "mcp-config", "--host", "cursor")
     assert result.exit_code == 0  # type: ignore[attr-defined]
     payload = json.loads(result.output)  # type: ignore[attr-defined]
-    assert payload["server_name"] == "cognis-my-app"
+    # Format: cognis-<slug>-<6 hex hash of full path>. The hash disambiguates
+    # repos that share a folder name so global MCP configs never collide.
+    assert re.fullmatch(r"cognis-my-app-[0-9a-f]{6}", payload["server_name"])
+
+
+@pytest.mark.unit
+def test_mcp_config_server_name_disambiguates_same_basename(tmp_path: Path) -> None:
+    runner = CliRunner()
+    names = []
+    for parent in ("work", "personal"):
+        repo = tmp_path / parent / "api"
+        repo.mkdir(parents=True)
+        _invoke(runner, repo, "init")
+        result = _invoke(runner, repo, "mcp-config", "--host", "cursor")
+        assert result.exit_code == 0  # type: ignore[attr-defined]
+        payload = json.loads(result.output)  # type: ignore[attr-defined]
+        names.append(payload["server_name"])
+    # Same slug "api", different full path → different keys (no collision).
+    assert names[0].startswith("cognis-api-")
+    assert names[1].startswith("cognis-api-")
+    assert names[0] != names[1]
 
 
 @pytest.mark.unit

@@ -216,7 +216,7 @@ export interface HealthDescriptor {
 const okCheck: HealthCheck = { status: "ok", message: "ok" };
 
 export const HEALTHY: HealthDescriptor = {
-  runtime_version: "0.3.0",
+  runtime_version: "0.3.1",
   overall: "ok",
   checks: {
     config: okCheck,
@@ -230,7 +230,7 @@ export const HEALTHY: HealthDescriptor = {
 
 /** A fresh repo whose semantic index is still being built in the background. */
 export const FRESH_INDEXING: HealthDescriptor = {
-  runtime_version: "0.3.0",
+  runtime_version: "0.3.1",
   overall: "warn",
   checks: {
     config: okCheck,

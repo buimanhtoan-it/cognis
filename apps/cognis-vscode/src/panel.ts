@@ -299,10 +299,11 @@ export function derivePanelView(ctx: PanelContext): PanelView {
 
   if (health.overall === "ok" && !mcpEnabled) {
     return {
-      headline: "Index ready",
-      detail: "Connect Cognis to your MCP host to enable semantic search in chat.",
+      headline: "Almost ready — connect AI",
+      detail:
+        "Your index is built. One step left: connect Cognis to your editor's AI (MCP) so it can search your code in chat.",
       statusClass: "status-ok",
-      primary: { id: "setup", label: "Set Up for AI" },
+      primary: { id: "setup", label: "Connect to AI" },
     };
   }
 
@@ -707,6 +708,10 @@ function panelHtml(
       color: var(--muted);
       line-height: 1.45;
     }
+    /* Tint the detail text to match the status so warnings (e.g. a version
+       mismatch that needs a re-index) stand out in amber instead of muted gray. */
+    .detail-status-warn { color: var(--warm); }
+    .detail-status-ok { color: var(--ok); }
     .status-pill {
       display: inline-flex;
       align-items: center;
@@ -925,7 +930,7 @@ function panelHtml(
     .step-done .step-marker { background: var(--accent-soft); color: var(--ok); border-color: transparent; }
     .step-done .step-label { color: var(--text); }
     .step-done .step-bar { background: var(--ok); }
-    .step-active .step-marker { background: var(--accent); color: var(--button-fg); border-color: transparent; }
+    .step-active .step-marker { background: var(--accent); color: var(--button-fg); border-color: transparent; animation: pulse 1.2s ease-in-out infinite; }
     .step-active .step-label { color: var(--text); font-weight: 600; }
     .step-error .step-marker { background: rgba(255, 154, 46, 0.16); color: var(--warm); border-color: var(--warm); }
     .step-error .step-label { color: var(--warm); }
@@ -1144,7 +1149,7 @@ function panelHtml(
       <div class="status-copy">
         ${
           view.detail
-            ? `<div class="detail">${escapeHtml(view.detail)}</div>`
+            ? `<div class="detail detail-${view.statusClass}">${escapeHtml(view.detail)}</div>`
             : ""
         }
       </div>

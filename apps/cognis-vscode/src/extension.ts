@@ -5,7 +5,9 @@ import {
   installManagedBackend,
   isManagedBackendInstalled,
   uninstallManagedBackend,
+  checkManagedBackendDrift,
   BackendInstallError,
+  formatElapsed,
 } from "./backend";
 import {
   presentGuidance,
@@ -450,8 +452,11 @@ async function runInstallBackend(): Promise<void> {
       outcome.mode === "managed"
         ? "in a private environment Cognis manages for you"
         : "in your configured Python environment";
+    // Report how long the whole install took (sum of phases) so the user gets a
+    // sense of the cost and a confirmation it actually finished.
+    const totalMs = outcome.timings.reduce((sum, t) => sum + t.ms, 0);
     const next = await vscode.window.showInformationMessage(
-      `Cognis backend installed ${where}. Set up this workspace for AI now?`,
+      `Cognis backend installed ${where} in ${formatElapsed(totalMs)}. Set up this workspace for AI now?`,
       "Set Up for AI",
       "Later"
     );
@@ -460,12 +465,21 @@ async function runInstallBackend(): Promise<void> {
     }
   } catch (err) {
     if (err instanceof BackendInstallError) {
-      const actions = err.canInstallPython ? ["Get Python", "Show Output"] : ["Show Output"];
+      const actions: string[] = [];
+      if (err.canInstallPython) {
+        actions.push("Get Python");
+      }
+      if (err.actionLabel) {
+        actions.push(err.actionLabel);
+      }
+      actions.push("Show Output");
       const choice = await vscode.window.showErrorMessage(err.userMessage, ...actions);
       if (choice === "Get Python") {
         void vscode.env.openExternal(
           vscode.Uri.parse("https://www.python.org/downloads/")
         );
+      } else if (choice === err.actionLabel && err.actionUrl) {
+        void vscode.env.openExternal(vscode.Uri.parse(err.actionUrl));
       } else if (choice === "Show Output") {
         void vscode.commands.executeCommand("cognis.showOutput");
       }
@@ -475,10 +489,52 @@ async function runInstallBackend(): Promise<void> {
   }
 }
 
+/**
+ * After an extension update, detect a managed backend that's older than the
+ * extension and offer a one-click upgrade. Only prompts for the managed env
+ * (never a bring-your-own Python), and remembers a "skip this version" choice so
+ * it doesn't nag. Silent when nothing is installed or versions already match.
+ */
+async function maybeUpgradeBackend(): Promise<void> {
+  const userPythonPath = vscode.workspace
+    .getConfiguration("cognis")
+    .get<string>("pythonPath", "")
+    .trim();
+  let drift;
+  try {
+    drift = await checkManagedBackendDrift({
+      userPythonPath: userPythonPath || undefined,
+    });
+  } catch {
+    return;
+  }
+  if (!drift.outdated || !drift.installed || !drift.expected) {
+    return;
+  }
+  const skipKey = `cognis.skipBackendUpgrade.${drift.expected}`;
+  if (extensionContext?.globalState.get<boolean>(skipKey)) {
+    return;
+  }
+  const choice = await vscode.window.showInformationMessage(
+    `Cognis was updated to ${drift.expected}, but its backend is still ${drift.installed}. ` +
+      "Upgrade the backend so features and fixes match?",
+    "Upgrade backend",
+    "Later",
+    "Skip this version"
+  );
+  if (choice === "Skip this version") {
+    await extensionContext?.globalState.update(skipKey, true);
+    return;
+  }
+  if (choice === "Upgrade backend") {
+    await runInstallBackend();
+  }
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   extensionContext = context;
   initStateStorage(context);
-  initManagedBackend(context);
+  initManagedBackend(context, context.extension?.packageJSON?.version);
   panelProvider = new CognisPanelProvider(context.extensionUri);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
@@ -655,6 +711,10 @@ export function activate(context: vscode.ExtensionContext): void {
     await refreshPrerequisites();
     await pollHealth();
     startHealthPolling();
+
+    // After an extension update the managed backend can lag behind. Offer a
+    // one-click upgrade so the running backend matches the extension version.
+    void maybeUpgradeBackend();
 
     indexingActive = true;
     blockingIndexMessage = "Inspecting workspace and checking live indexing…";

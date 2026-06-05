@@ -20,7 +20,7 @@ function makeHealth(
 ): HealthReport {
   const ok = { status: "ok", message: "ok" };
   return {
-    runtime_version: "0.3.0",
+    runtime_version: "0.3.1",
     overall,
     checks: {
       config: ok,
@@ -34,18 +34,38 @@ function makeHealth(
   };
 }
 
-test("deriveMcpServerName builds cognis-<slug> from repo folder", () => {
-  assert.equal(deriveMcpServerName("D:/PROGRAMING/cognis"), "cognis-cognis");
-  assert.equal(
+test("deriveMcpServerName builds cognis-<slug>-<hash> from repo folder", () => {
+  // Human-readable slug + a stable short hash of the full path.
+  assert.match(deriveMcpServerName("D:/PROGRAMING/cognis"), /^cognis-cognis-[0-9a-f]{6}$/);
+  assert.match(
     deriveMcpServerName("D:/PROGRAMING/edittruyentranh/edittruyentranh"),
-    "cognis-edittruyentranh"
+    /^cognis-edittruyentranh-[0-9a-f]{6}$/
   );
-  assert.equal(deriveMcpServerName("D:/work/My App"), "cognis-my-app");
+  assert.match(deriveMcpServerName("D:/work/My App"), /^cognis-my-app-[0-9a-f]{6}$/);
+});
+
+test("deriveMcpServerName disambiguates same-named repos at different paths", () => {
+  const a = deriveMcpServerName("D:/work/api");
+  const b = deriveMcpServerName("D:/personal/api");
+  // Same slug, different hash → no collision in a shared global MCP config.
+  assert.notEqual(a, b);
+  assert.ok(a.startsWith("cognis-api-"));
+  assert.ok(b.startsWith("cognis-api-"));
+});
+
+test("deriveMcpServerName is stable and path-normalized", () => {
+  // Backslashes vs forward slashes and casing must not change the key, so the
+  // extension and CLI always agree and re-runs don't create duplicate entries.
+  assert.equal(
+    deriveMcpServerName("D:/work/api"),
+    deriveMcpServerName("D:\\work\\api")
+  );
 });
 
 test("isCognisMcpServerName recognizes legacy and named servers", () => {
   assert.equal(isCognisMcpServerName("cognis"), true);
   assert.equal(isCognisMcpServerName("cognis-cognis"), true);
+  assert.equal(isCognisMcpServerName("cognis-api-3f9a2c"), true);
   assert.equal(isCognisMcpServerName("brave-search"), false);
 });
 

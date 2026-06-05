@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-06-05
+
+### Fixed
+
+- **MCP server entries no longer collide for repos that share a folder name.**
+  The per-repo MCP key was derived from the folder basename only, so two repos
+  named the same (e.g. `work/api` and `personal/api`) both became `cognis-api`
+  and overwrote each other in the shared global MCP config — breaking semantic
+  search for whichever was wired first. Keys now include a short, stable hash of
+  the full repo path (`cognis-api-3f9a2c`), so any number of repos — including
+  same-named ones — can be connected at once. The extension and the
+  `cognis-cli mcp-config` command derive identical keys, and existing entries
+  are migrated automatically on the next connect (matched by `COGNIS_DB_PATH`,
+  not by name, so nothing is left orphaned).
+
 ## [0.3.0] — 2026-06-05
 
 ### Added
@@ -187,7 +202,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cold-start model loads no longer fail with a follow-up soft-timeout after the
   semantic stage already completed.
 
-[Unreleased]: https://github.com/buimanhtoan-it/cognis/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/buimanhtoan-it/cognis/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/buimanhtoan-it/cognis/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/buimanhtoan-it/cognis/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/buimanhtoan-it/cognis/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/buimanhtoan-it/cognis/compare/v0.1.17...v0.2.0

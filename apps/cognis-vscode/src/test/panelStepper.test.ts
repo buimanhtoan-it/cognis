@@ -17,7 +17,7 @@ import type { HealthReport, PrerequisiteReport } from "../types";
 function okHealth(): HealthReport {
   const ok = { status: "ok", message: "ok" };
   return {
-    runtime_version: "0.3.0",
+    runtime_version: "0.3.1",
     overall: "ok",
     checks: { config: ok, db: ok, index: ok, vector: ok, embedder: ok, version: ok },
   };
@@ -113,6 +113,11 @@ test("index ready but MCP not connected keeps the AI step active", () => {
   assert.equal(stepState(ctx, "connected"), "active");
   // Stepper is still visible while a step is outstanding.
   assert.ok(renderStepperSection(ctx).includes("Getting started"));
+  // The primary action must say "Connect to AI" (not "Set Up for AI") here:
+  // the index is built, only MCP wiring remains.
+  const view = derivePanelView(ctx);
+  assert.equal(view.primary?.label, "Connect to AI");
+  assert.match(view.headline, /connect ai/i);
 });
 
 test("status bar collapses to a short, stable vocabulary", () => {

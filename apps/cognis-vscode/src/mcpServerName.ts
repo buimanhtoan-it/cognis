@@ -35,7 +35,13 @@ export function deriveMcpServerName(
   prefix: string = SERVER_PREFIX
 ): string {
   const resolved = path.resolve(repoRoot);
-  const base = path.basename(resolved).toLowerCase();
+  // Extract the final path segment in a separator-agnostic way so the slug is
+  // identical whether the path was written with / or \ , and on any OS. Plain
+  // path.basename is platform-specific (it won't split a Windows-style path on
+  // POSIX), which made the key differ between platforms. This mirrors the
+  // normalization shortPathHash already does.
+  const normalized = resolved.replace(/\\/g, "/").replace(/\/+$/, "");
+  const base = (normalized.split("/").pop() ?? "").toLowerCase();
   const slug = base.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return `${prefix}-${slug || "repo"}-${shortPathHash(resolved)}`;
 }

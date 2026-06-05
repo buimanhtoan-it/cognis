@@ -8,7 +8,7 @@
 
 > **Software Cognition Engine** for MCP clients and coding agents.
 >
-> **Status: v0.3.1 beta** — see [CHANGELOG.md](CHANGELOG.md) and [docs/release-notes-v0.3.0.md](docs/release-notes-v0.3.0.md).
+> **Status: v0.3.2 beta** — see [CHANGELOG.md](CHANGELOG.md) and [docs/release-notes-v0.3.0.md](docs/release-notes-v0.3.0.md).
 
 `cognis` is a local indexing and retrieval system for source code. It builds a
 workspace database from your repository and exposes structured queries such as

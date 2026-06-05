@@ -7,8 +7,8 @@
 #   - bge-small-en-v1.5 embedding model pre-cached
 #
 # Usage:
-#   docker build -t cognis-engine:0.3.1 .
-#   docker run -v /your/repo:/workspace -e COGNIS_DB_PATH=/workspace/.cognis/uckg.db cognis-engine:0.3.1 cognis-mcpd
+#   docker build -t cognis-engine:0.3.2 .
+#   docker run -v /your/repo:/workspace -e COGNIS_DB_PATH=/workspace/.cognis/uckg.db cognis-engine:0.3.2 cognis-mcpd
 #
 # For development (with source bind-mount):
 #   docker run -v $(pwd):/app -v /your/repo:/workspace cognis-engine:dev cognis-cli health

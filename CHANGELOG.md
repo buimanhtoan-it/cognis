@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-06-05
+
+### Fixed
+
+- **MCP server keys are now identical across operating systems.** The
+  human-readable slug part of the key was derived with a platform-specific path
+  helper, so a Windows-style path processed on a non-Windows host (e.g. CI, or a
+  remote/WSL backend) produced a different key than the same repo on Windows —
+  which could create a duplicate MCP entry. The slug now extracts the final path
+  segment in a separator-agnostic way, matching the already-normalized path
+  hash, so the extension and `cognis-cli` always agree regardless of platform.
+- **Backend auto-upgrade after an extension update.** When the managed Python
+  backend is older than the installed extension, Cognis now offers a one-click
+  upgrade on activation (managed environments only; a bring-your-own Python is
+  never touched), with a "skip this version" option so it doesn't nag.
+
 ## [0.3.1] — 2026-06-05
 
 ### Fixed
@@ -202,7 +218,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cold-start model loads no longer fail with a follow-up soft-timeout after the
   semantic stage already completed.
 
-[Unreleased]: https://github.com/buimanhtoan-it/cognis/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/buimanhtoan-it/cognis/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/buimanhtoan-it/cognis/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/buimanhtoan-it/cognis/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/buimanhtoan-it/cognis/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/buimanhtoan-it/cognis/compare/v0.2.0...v0.2.1

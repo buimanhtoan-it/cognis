@@ -17,7 +17,7 @@ import type { HealthReport, PrerequisiteReport } from "../types";
 function okHealth(): HealthReport {
   const ok = { status: "ok", message: "ok" };
   return {
-    runtime_version: "0.3.1",
+    runtime_version: "0.3.2",
     overall: "ok",
     checks: { config: ok, db: ok, index: ok, vector: ok, embedder: ok, version: ok },
   };

@@ -2,7 +2,7 @@
   "name": "cognis-vscode",
   "displayName": "Cognis",
   "description": "Managed Cognis setup for AI semantic search, MCP wiring, and live indexing across MCP-capable editors.",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "publisher": "ToanBui",
   "license": "SEE LICENSE IN LICENSE.txt",
   "icon": "media/icon.png",

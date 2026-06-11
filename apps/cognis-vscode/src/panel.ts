@@ -248,7 +248,15 @@ export function derivePanelView(ctx: PanelContext): PanelView {
   const { status, health, liveIndexing, mcpEnabled } = ctx;
   const statusClass = STATUS_CLASSES[status] ?? STATUS_CLASSES.unknown;
 
-  if (status === "indexing") {
+  // While the daemon reports an active index operation (the cold index or the
+  // embedding backfill), health is transiently inconsistent: the DB is being
+  // written and the vector table is not complete yet, so a poll can momentarily
+  // read a failing "vector"/"index" check or fail to open the WAL-locked DB.
+  // Never surface a setup/repair verdict in this window — that caused a
+  // first-run "Generating…" → "Set Up for AI" regression and a repeated
+  // "Troubleshoot" loop. Show progress and let the next poll settle once
+  // embeddings finish.
+  if (status === "indexing" || ctx.indexStatus?.active) {
     return {
       headline: deriveIndexingHeadline(ctx),
       detail: deriveIndexingDetail(ctx),
@@ -265,6 +273,20 @@ export function derivePanelView(ctx: PanelContext): PanelView {
           "Cognis is installed but couldn't start. This usually fixes itself — reinstall the backend in one click, or run Troubleshoot.",
         statusClass: "status-warn",
         primary: { id: "installBackend", label: "Reinstall backend" },
+      };
+    }
+    // A workspace that has already been set up must not regress to the
+    // first-run "Set Up for AI"/"Install backend" actions just because health
+    // is momentarily unavailable (e.g. the poll landed while indexd was still
+    // releasing the DB right after embedding). Show a non-destructive checking
+    // state; the next poll recovers without the user touching anything.
+    if (ctx.configured) {
+      return {
+        headline: "Finishing setup…",
+        detail:
+          "Cognis is verifying this workspace. This clears on its own once indexing settles — no action needed.",
+        statusClass: "status-active",
+        primary: { id: "output", label: "View Output" },
       };
     }
     // Fresh machine: the Python backend isn't installed yet, so `doctor` can't

@@ -988,6 +988,7 @@ export async function refreshPanelContext(repoRoot: string): Promise<PanelContex
       mcpEnabled: current.mcpEnabled,
       syncPaused: current.syncPaused,
       indexStatus,
+      configured: isWorkspaceConfigured(repoRoot),
     };
   } catch {
     syncMcpStateFromDisk(repoRoot);
@@ -1001,6 +1002,7 @@ export async function refreshPanelContext(repoRoot: string): Promise<PanelContex
       mcpEnabled: current.mcpEnabled,
       syncPaused: current.syncPaused,
       indexStatus,
+      configured,
     };
   }
 }

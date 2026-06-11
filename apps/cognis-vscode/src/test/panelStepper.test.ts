@@ -178,3 +178,99 @@ test("backend unknown (not yet probed) still shows the plain setup prompt", () =
   assert.equal(view.headline, "Setup required");
   assert.equal(view.primary?.id, "setup");
 });
+
+// ---------------------------------------------------------------------------
+// Regression: fresh-install cold-start race. During the embedding backfill the
+// DB is WAL-locked and the vector table is incomplete, so a health poll can
+// momentarily read a failing "vector" check or fail to open the DB. The panel
+// must keep showing progress and must NOT regress a configured workspace to
+// "Set Up for AI" or loop on "Troubleshoot". (Reproduces the user-reported
+// first-run setup⇄repair loop that the e2e suite missed.)
+// ---------------------------------------------------------------------------
+
+function vectorFailHealth(): HealthReport {
+  const ok = { status: "ok", message: "ok" };
+  return {
+    runtime_version: "0.5.1",
+    overall: "fail",
+    checks: {
+      config: ok,
+      db: ok,
+      index: ok,
+      vector: { status: "fail", message: "no vectors yet (embedding in progress)" },
+      embedder: ok,
+      version: ok,
+    },
+  };
+}
+
+function embeddingStatus(): PanelContext["indexStatus"] {
+  return {
+    active: true,
+    phase: "embedding",
+    message: "Generating semantic embeddings… 100/200 symbols (search already works)",
+    progressPercent: 85,
+    pendingCount: 0,
+    pendingFiles: [],
+    inflightCount: 0,
+    inflightFiles: [],
+    recentFiles: [],
+    updatedAt: Date.now(),
+  };
+}
+
+test("embedding in progress never regresses to Set Up for AI (configured + health gap)", () => {
+  // indexd is still embedding (active) and a poll landed while the DB was
+  // locked, so health is momentarily undefined.
+  const view = derivePanelView({
+    status: "indexing",
+    configured: true,
+    indexStatus: embeddingStatus(),
+  });
+  assert.match(view.headline, /generating embeddings/i);
+  assert.notEqual(view.primary?.id, "setup");
+  assert.notEqual(view.primary?.id, "repair");
+});
+
+test("embedding in progress is shown as progress, not a repairable failure", () => {
+  // health momentarily reports vector=fail because vectors aren't written yet —
+  // an active embedding op must show progress, never "Troubleshoot".
+  const view = derivePanelView({
+    status: "indexing",
+    configured: true,
+    health: vectorFailHealth(),
+    indexStatus: embeddingStatus(),
+  });
+  assert.match(view.headline, /generating embeddings/i);
+  assert.notEqual(view.primary?.id, "repair");
+});
+
+test("an active index op wins even if status was momentarily computed as degraded", () => {
+  // Defensive: indexStatus.active is the source of truth for an in-flight op.
+  const view = derivePanelView({
+    status: "degraded",
+    configured: true,
+    health: vectorFailHealth(),
+    indexStatus: embeddingStatus(),
+  });
+  assert.match(view.headline, /generating embeddings/i);
+  assert.notEqual(view.primary?.id, "repair");
+});
+
+test("configured workspace with a transient health gap does not regress to setup", () => {
+  // No active op, health undefined, but already set up — show a non-destructive
+  // checking state, never "Set Up for AI"/"Install backend".
+  const view = derivePanelView({ status: "unknown", configured: true });
+  assert.equal(view.statusClass, "status-active");
+  assert.notEqual(view.primary?.id, "setup");
+  assert.notEqual(view.primary?.id, "installBackend");
+  assert.match(view.headline, /finishing setup/i);
+});
+
+test("fresh (unconfigured) machine still shows Set Up / Install — fix does not over-reach", () => {
+  assert.equal(derivePanelView({ status: "notInstalled" }).primary?.id, "setup");
+  assert.equal(
+    derivePanelView({ status: "notInstalled", backendAvailable: false }).primary?.id,
+    "installBackend"
+  );
+});

@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-06-11
+
+Patch release. Fixes a first-run panel state regression in the VS Code/Cursor
+extension (no engine code change; the engine version is bumped only to keep the
+bundle's pinned install in lockstep).
+
+### Fixed
+
+- **Fresh-install cold start no longer regresses or loops.** While the initial
+  embedding backfill runs, the engine WAL-locks the DB and the vector table is
+  briefly incomplete, so a health poll could momentarily read a failing
+  `vector`/`index` check or fail to open the DB. The panel misread this as a
+  failure and (a) reverted from "Generating embeddings…" back to "Set Up for
+  AI", and (b) looped on "Troubleshoot" / "repair semantic index". The panel now
+  keeps showing progress whenever the daemon reports an active index operation,
+  and an already-configured workspace shows a non-destructive "Finishing setup…"
+  state on a transient health gap instead of a first-run setup/repair verdict.
+- Added panel state-machine regression tests and simulator fixtures for the
+  embedding-backfill and transient-health-gap states — the cross-process e2e
+  never sampled the panel during embedding, so these races slipped through.
+
 ## [0.5.1] — 2026-06-11
 
 Patch release. Fixes the CI unit/PBT suite (no functional engine change).

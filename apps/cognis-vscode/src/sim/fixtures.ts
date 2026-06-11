@@ -107,6 +107,33 @@ export const FIXTURES: NamedFixture[] = [
     },
   },
   {
+    name: "embedding-backfill",
+    title: "Embedding backfill in progress (configured)",
+    context: {
+      status: "indexing",
+      configured: true,
+      version: VERSION,
+      indexStatus: {
+        active: true,
+        phase: "embedding",
+        message:
+          "Generating semantic embeddings… 120/240 symbols (search already works)",
+        progressPercent: 85,
+        pendingCount: 0,
+        pendingFiles: [],
+        inflightCount: 0,
+        inflightFiles: [],
+        recentFiles: ["src/auth.ts"],
+        updatedAt: Date.now(),
+      },
+    },
+  },
+  {
+    name: "transient-health-gap",
+    title: "Configured — transient health gap (must not regress to setup)",
+    context: { status: "unknown", configured: true, version: VERSION },
+  },
+  {
     name: "ready-not-connected",
     title: "Index ready — connect AI",
     context: {

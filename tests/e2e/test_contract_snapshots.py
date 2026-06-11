@@ -56,6 +56,52 @@ def _key_skeleton(value: Any) -> Any:
     return type(value).__name__
 
 
+# Fields that are environment-specific (present as an absolute path on some
+# installs, ``null`` on others; console-script vs ``python -m`` shape) — pin
+# their *presence* but not their concrete type so the golden is portable across
+# Windows / Linux / macOS.
+_NULLABLE_COMMAND_KEYS = ("cognis_cli", "cognis_mcpd", "cognis_indexd")
+_PATH_OR_NULL = "<path-or-null>"
+
+
+def _normalize_paths(payload: Any) -> Any:
+    """Normalize a ``paths`` payload so its skeleton is platform-independent.
+
+    ``commands.cognis_{cli,mcpd,indexd}`` are ``str | null`` by contract (the
+    console script may or may not be on PATH), so a raw skeleton encodes
+    ``str`` on Linux but ``NoneType`` on Windows. Pin them to a stable sentinel.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    out = dict(payload)
+    commands = out.get("commands")
+    if isinstance(commands, dict):
+        out["commands"] = {
+            k: (_PATH_OR_NULL if k in _NULLABLE_COMMAND_KEYS else v)
+            for k, v in commands.items()
+        }
+    return out
+
+
+def _normalize_mcp_server_block(block: Any) -> Any:
+    """Pin the stable MCP server-block contract the extension depends on.
+
+    The block shape varies by environment: with the ``cognis-mcpd`` console
+    script on PATH it is ``{command, env}``; otherwise ``{command, args, env}``.
+    The passthrough ``env`` keys also vary. The extension only requires
+    ``command`` plus ``env.COGNIS_DB_PATH`` (``args`` is optional), so pin that.
+    """
+    if not isinstance(block, dict):
+        return block
+    out: dict[str, Any] = {}
+    if "command" in block:
+        out["command"] = block["command"]
+    env = block.get("env")
+    if isinstance(env, dict):
+        out["env"] = {"COGNIS_DB_PATH": env.get("COGNIS_DB_PATH", "")}
+    return out
+
+
 def _assert_or_update(name: str, skeleton: Any) -> None:
     """Compare *skeleton* against the committed golden, or rewrite it."""
     CONTRACTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -82,7 +128,7 @@ def _assert_or_update(name: str, skeleton: Any) -> None:
 def test_paths_contract_snapshot(sample_repo: Path) -> None:
     """`cognis-cli paths` shape is pinned for the extension's WorkspacePaths type."""
     payload = run_cli_json(sample_repo, ["paths"])
-    _assert_or_update("paths.json", _key_skeleton(payload))
+    _assert_or_update("paths.json", _key_skeleton(_normalize_paths(payload)))
 
 
 def test_mcp_config_contract_snapshot(sample_repo: Path) -> None:
@@ -95,7 +141,7 @@ def test_mcp_config_contract_snapshot(sample_repo: Path) -> None:
     normalized = dict(payload)
     servers = payload.get("config", {}).get("mcpServers", {})
     if servers:
-        first_block = next(iter(servers.values()))
+        first_block = _normalize_mcp_server_block(next(iter(servers.values())))
         normalized["config"] = {"mcpServers": {"<server>": first_block}}
     _assert_or_update("mcp_config.json", _key_skeleton(normalized))
 
@@ -122,7 +168,7 @@ def test_bootstrap_contract_snapshot(sample_repo: Path) -> None:
     # phases is a heterogeneous list; pin just the top-level keys + paths shape.
     skeleton = {
         "keys": sorted(payload.keys()),
-        "paths": _key_skeleton(payload["paths"]),
+        "paths": _key_skeleton(_normalize_paths(payload["paths"])),
     }
     _assert_or_update("bootstrap.json", skeleton)
 
@@ -137,4 +183,14 @@ def test_indexd_status_contract_snapshot(sample_repo: Path) -> None:
     with IndexdProcess(sample_repo, db_path, status_path, full_rebuild=True) as daemon:
         snapshot = daemon.wait_for_phase("watching", timeout=180.0)
 
-    _assert_or_update("indexd_status.json", _key_skeleton(snapshot))
+    # The file lists and last_error carry timing/environment-specific values
+    # (which files were recently indexed at the sampled instant, whether a
+    # transient error occurred). Pin their *shape* — list-of-strings, nullable
+    # error — not the runtime contents, so the golden is portable.
+    normalized = dict(snapshot)
+    for key in ("pending_files", "inflight_files", "recent_files"):
+        if key in normalized:
+            normalized[key] = ["<file>"]
+    if "last_error" in normalized:
+        normalized["last_error"] = "<error-or-null>"
+    _assert_or_update("indexd_status.json", _key_skeleton(normalized))

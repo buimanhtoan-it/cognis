@@ -2,19 +2,19 @@
   "active": "bool",
   "inflight_count": "int",
   "inflight_files": [
-    "<empty>"
+    "str"
   ],
-  "last_error": "NoneType",
+  "last_error": "str",
   "message": "str",
   "pending_count": "int",
   "pending_files": [
-    "<empty>"
+    "str"
   ],
   "phase": "str",
   "pid": "int",
   "progress_percent": "float",
   "recent_files": [
-    "<empty>"
+    "str"
   ],
   "updated_at": "float"
 }

@@ -17,11 +17,11 @@
     "capsule_cache_dir": "str",
     "cognis_dir": "str",
     "commands": {
-      "cognis_cli": "NoneType",
+      "cognis_cli": "str",
       "cognis_cli_module": "str",
-      "cognis_indexd": "NoneType",
+      "cognis_indexd": "str",
       "cognis_indexd_module": "str",
-      "cognis_mcpd": "NoneType",
+      "cognis_mcpd": "str",
       "cognis_mcpd_module": "str",
       "python": "str"
     },

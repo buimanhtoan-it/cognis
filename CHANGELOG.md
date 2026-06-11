@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-06-11
+
+Patch release. CI/test-only fix (no engine or extension code change).
+
+### Fixed
+
+- **Cross-language contract snapshots are now platform-independent.** The e2e
+  contract goldens were generated on Windows (where the `cognis-mcpd` console
+  script is not on PATH, so `commands.cognis_*` are `null` and the MCP server
+  block carries `args`), so they failed when the e2e sandbox first ran on Linux
+  CI (`str` paths, no `args`). The snapshots now normalize these
+  environment-specific fields (nullable command paths, the console-script-vs
+  `python -m` block shape, passthrough env keys, timing-dependent status file
+  lists), so they pin the real contract shape and pass on every platform.
+
 ## [0.6.0] — 2026-06-11
 
 Feature release. Adds an optional standalone **HTTP MCP server** (panel-managed,

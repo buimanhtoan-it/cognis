@@ -12,8 +12,8 @@ drives every *engine* stage directly against a local fixture repo so that:
 - the file doubles as executable documentation of how a query becomes a capsule.
 
 Local data only: uses the committed ``tests/fixtures/repos/mini-py-svc`` repo,
-no network, no model download (embeddings are exercised only when
-``sentence-transformers`` is already installed).
+no network, no model download (the embedding stage runs only when the model is
+already cached locally for an offline load; otherwise it skips).
 
 Run with: ``pytest -m integration -k full_pipeline_inprocess``
 """
@@ -196,13 +196,23 @@ def test_stage_empty_inputs_are_safe(indexed_db: Database) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_stage_semantic_when_available(tmp_path: Path) -> None:
+def test_stage_semantic_when_available(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pytest.importorskip("sentence_transformers")
     from cognis_indexer.registry import build_embedder
     from cognis_retrieval.semantic import SemanticLayer
 
+    # ``sentence-transformers`` being installed does NOT mean the model weights
+    # are cached. Force an offline load so this never reaches out to Hugging Face
+    # (CI runners have the package but no model cache and no network for the
+    # download), and skip cleanly when the weights aren't already present.
+    monkeypatch.setenv("COGNIS_EMBED_OFFLINE", "1")
+    try:
+        embedder = build_embedder(Config.default().embedder)
+    except Exception as exc:
+        # Model not cached for an offline load (e.g. CI) → skip, don't download.
+        pytest.skip(f"embedding model not cached for offline use: {exc}")
+
     db = Database(str(tmp_path / "uckg_emb.db"))
-    embedder = build_embedder(Config.default().embedder)
     pipeline = IndexerPipeline(db=db, config=Config.default(), embedder=embedder)
     try:
         pipeline.index_repo(FIXTURE, full=True, skip_embeddings=False)

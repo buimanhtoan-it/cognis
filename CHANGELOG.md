@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-06-11
+
+Patch release. Fixes the CI unit/PBT suite (no functional engine change).
+
+### Fixed
+
+- `test_stage_semantic_when_available` no longer attempts a Hugging Face model
+  **download** during the unit/integration run. Having `sentence-transformers`
+  installed does not mean the model weights are cached, so on a fresh CI runner
+  (package present, no model cache, no network) the test reached out to the Hub
+  and errored. It now forces an offline load and **skips cleanly** when the
+  weights aren't already cached, honoring the module's "no network" contract;
+  where the model is cached it still runs the full semantic+fusion path.
+
 ## [0.5.0] — 2026-06-11
 
 Positioning + measurement-infrastructure release. Ships the live-indexing

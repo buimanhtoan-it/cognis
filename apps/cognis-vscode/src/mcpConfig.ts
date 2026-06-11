@@ -11,6 +11,7 @@ import {
   type McpConfigScope,
 } from "./mcpConfigPaths";
 import { deriveMcpServerName, isCognisMcpServerName } from "./mcpServerName";
+import { buildHttpMcpServerBlock, isHttpServerBlock } from "./mcpServer";
 import type { McpConfigPayload, McpServerBlock } from "./types";
 
 export type { McpConfigScope } from "./mcpConfigPaths";
@@ -64,7 +65,7 @@ export function resolveMcpHost(): "cursor" | "vscode" | "claude" {
 export function resolveMcpConfigScope(): McpConfigScope {
   return vscode.workspace
     .getConfiguration("cognis")
-    .get<McpConfigScope>("mcpConfigScope", "global");
+    .get<McpConfigScope>("mcpConfigScope", "workspace");
 }
 
 function detectDefaultHost(): "cursor" | "vscode" | "claude" {
@@ -246,6 +247,21 @@ export function isCognisMcpConfiguredForRepo(repoRoot: string): boolean {
   return match.serverName === deriveMcpServerName(repoRoot);
 }
 
+/**
+ * True when this repo's cognis mcp.json entry is the HTTP (url) form — i.e. it
+ * points at the panel-managed standalone server rather than the editor-managed
+ * stdio command. Used on activation to detect a *dangling* http config (server
+ * not running) so we can fall back to stdio and keep AI tools working.
+ */
+export function isHttpMcpConfiguredForRepo(repoRoot: string): boolean {
+  const host = resolveMcpHost();
+  const match = findConfiguredServerBlockForRepo(repoRoot, host);
+  if (!match || match.serverName !== deriveMcpServerName(repoRoot)) {
+    return false;
+  }
+  return isHttpServerBlock(match.block);
+}
+
 export async function hasExpectedMcpConfigForRepo(
   repoRoot: string
 ): Promise<boolean> {
@@ -287,6 +303,30 @@ export async function enableMcpForWorkspace(
   existing.mcpServers = servers;
   writeJsonFile(configPath, existing);
   return { configPath, payload, serverName };
+}
+
+/**
+ * Write the workspace mcp.json so the editor connects to a *running* HTTP MCP
+ * server at *url* (the panel-managed standalone server). Mirrors
+ * ``enableMcpForWorkspace``'s merge — same config path, same stale-entry
+ * cleanup — but swaps the stdio block for the ``{type:"http", url}`` form. No
+ * CLI round-trip needed (the URL is owned by the extension), so it is sync.
+ */
+export function writeHttpMcpConfig(
+  repoRoot: string,
+  url: string
+): { configPath: string; serverName: string } {
+  const host = resolveMcpHost();
+  const serverName = deriveMcpServerName(repoRoot);
+  const configPath = getMcpConfigPath(host, repoRoot);
+  const existing = readJsonFile(configPath);
+  const servers =
+    (existing.mcpServers as Record<string, unknown> | undefined) ?? {};
+  removeStaleCognisEntriesForRepo(servers, repoRoot, serverName);
+  servers[serverName] = buildHttpMcpServerBlock(url);
+  existing.mcpServers = servers;
+  writeJsonFile(configPath, existing);
+  return { configPath, serverName };
 }
 
 export async function disableMcpForWorkspace(

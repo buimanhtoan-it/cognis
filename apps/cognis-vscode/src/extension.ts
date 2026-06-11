@@ -20,6 +20,12 @@ import {
   stopAllIndexing,
 } from "./indexd";
 import {
+  onDidChangeMcpServerState,
+  startMcpServer,
+  stopAllMcpServers,
+  stopMcpServer,
+} from "./mcpServer";
+import {
   CognisPanelProvider,
   outcomeLabelForContext,
   type PanelContext,
@@ -42,8 +48,10 @@ import {
   isIndexStatusBusy,
   setIndexStatus,
   setLiveIndexing,
+  setMcpEnabled,
 } from "./state";
 import type { PrerequisiteReport, SetupResult } from "./types";
+import { enableMcpForWorkspace, writeHttpMcpConfig } from "./mcpConfig";
 import {
   getWorkspaceFolder,
   isWorkspaceConfigured,
@@ -361,6 +369,93 @@ async function runConnectToAi(): Promise<void> {
     await connectToAi();
   } catch (err) {
     await showErrorGuidance(err, "Connect to AI");
+  }
+}
+
+/**
+ * Start the standalone HTTP MCP server and make it usable in one click:
+ * pre-flight the workspace, start the server, write the url-form mcp.json so the
+ * editor connects to it, then tell the user exactly which file changed and that
+ * a window reload is needed (offering the Reload button).
+ */
+async function runStartMcpServer(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    return;
+  }
+  const repoRoot = folder.uri.fsPath;
+
+  // Pre-flight: warn with the exact next action instead of failing opaquely.
+  if (!isWorkspaceConfigured(repoRoot)) {
+    const pick = await vscode.window.showWarningMessage(
+      "Set up Cognis for this workspace before starting the MCP server (it needs an index to serve).",
+      "Set Up for AI"
+    );
+    if (pick === "Set Up for AI") {
+      await runSetupForAi();
+    }
+    return;
+  }
+
+  try {
+    const state = await startMcpServer(repoRoot);
+    if (state.phase === "error" || !state.url) {
+      await showErrorGuidance(
+        new Error(state.lastError ?? "the server did not report a URL"),
+        "Start MCP server"
+      );
+      return;
+    }
+    // Make it usable: point the editor's mcp.json at the running server.
+    const { configPath } = writeHttpMcpConfig(repoRoot, state.url);
+    setMcpEnabled(repoRoot, true);
+    await pollHealth();
+    const choice = await vscode.window.showInformationMessage(
+      `Cognis MCP server running at ${state.url}. Updated ${configPath} to use it. ` +
+        "Reload the window so your editor connects.",
+      "Reload Window"
+    );
+    if (choice === "Reload Window") {
+      void vscode.commands.executeCommand("workbench.action.reloadWindow");
+    }
+  } catch (err) {
+    await showErrorGuidance(err, "Start MCP server");
+  }
+}
+
+/**
+ * Stop the HTTP server and revert mcp.json to the editor-managed (stdio) form,
+ * so the editor's AI keeps working (it auto-spawns stdio) instead of pointing at
+ * a dead URL. Tells the user a reload applies the change.
+ */
+async function runStopMcpServer(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    return;
+  }
+  const repoRoot = folder.uri.fsPath;
+  await stopMcpServer(repoRoot);
+  let reverted = false;
+  try {
+    await enableMcpForWorkspace(repoRoot);
+    reverted = true;
+  } catch (err) {
+    getOutputChannel().appendLine(
+      `[mcp-http] could not revert mcp.json to stdio: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+  }
+  await pollHealth();
+  const detail = reverted
+    ? "Reverted mcp.json to the editor-managed (stdio) config so your AI keeps working. Reload the window to apply."
+    : "Could not rewrite mcp.json automatically — open the Cognis output log for details.";
+  const choice = await vscode.window.showInformationMessage(
+    `Cognis MCP server stopped. ${detail}`,
+    "Reload Window"
+  );
+  if (choice === "Reload Window") {
+    void vscode.commands.executeCommand("workbench.action.reloadWindow");
   }
 }
 
@@ -750,6 +845,23 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("cognis.startMcpServer", () => runStartMcpServer())
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("cognis.stopMcpServer", () => runStopMcpServer())
+  );
+
+  context.subscriptions.push(
+    onDidChangeMcpServerState(({ repoRoot }) => {
+      const folder = getWorkspaceFolder();
+      if (folder && folder.uri.fsPath === repoRoot) {
+        void pollHealth();
+      }
+    })
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("cognis.openPanel", () => {
       panelProvider.reveal();
     })
@@ -856,12 +968,14 @@ export function activate(context: vscode.ExtensionContext): void {
         clearInterval(healthPollTimer);
       }
       stopAllIndexing();
+      void stopAllMcpServers();
     },
   });
 }
 
 export function deactivate(): void {
   stopAllIndexing();
+  void stopAllMcpServers();
   if (healthPollTimer) {
     clearInterval(healthPollTimer);
   }

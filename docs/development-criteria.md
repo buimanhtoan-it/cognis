@@ -78,7 +78,9 @@ Reference values (psf/requests, 736 symbols, CPU) recorded this cycle:
 | Types | `make typecheck` | clean; expand the mypy-strict scope each cycle (now: `packages/core` + `cognis_indexer`; next: `cognis_retrieval`) |
 | Unit + property + integration | `make test` | 100 % pass |
 | Coverage | `make coverage` | `fail_under` ratchets up only (currently 60; measured ≈ 76), never down |
-| Cross-app e2e | `make e2e` | all pass; no hidden flakes (reproduce-in-isolation and classify, never blind retry) |
+| Cross-app e2e | `make e2e` | all pass; **runs on every push** (ci.yml `e2e-sandbox` job) + cross-platform on PRs; no hidden flakes (reproduce-in-isolation and classify, never blind retry) |
+| Sold-artifact packaging | `pytest -m e2e -k wheel` | the built wheel ships all 8 packages + 3 console entry points + the logo asset |
+| Backend install/upgrade | extension unit (`buildPackageSpec`, `classifyPipFailure`) | the engine pin is deterministic (`==<ext version>`); pip failures classified (incl. "engine not on PyPI yet" vs "Python too new") |
 | Panel UI e2e | `npm run test:e2e` | all states pass; every button posts a valid command |
 | Cross-language contracts | contract snapshots | extension ↔ CLI JSON shapes pinned (regenerate only on intentional change) |
 

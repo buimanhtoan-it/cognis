@@ -6,26 +6,56 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.5.3] — 2026-06-11
+## [0.6.0] — 2026-06-11
 
-Patch release. Extension UX: the panel now speaks in MCP terms (no engine code
-change; the engine version is bumped only to keep the bundle's pinned install in
-lockstep).
-
-### Changed
-
-- **The panel now states the MCP server status explicitly.** Cognis is an MCP
-  server, so the panel shows whether it is connected to the editor, the server
-  name, and the workspace `mcp.json` path, with a single **Set up MCP
-  (mcp.json)** action — replacing the vague "Set Up for AI" / "Connect to AI" /
-  "AI connected" wording. The connected state reads "Cognis MCP server
-  connected", and the onboarding step is labelled "MCP connected".
+Feature release. Adds an optional standalone **HTTP MCP server** (panel-managed,
+per workspace) alongside the default stdio transport, MCP-focused panel UX,
+workspace-visible `mcp.json`, and clearer install/upgrade errors. Supersedes the
+never-published 0.5.3.
 
 ### Added
 
+- **Per-window HTTP MCP server, panel-managed, one-click.** The Cognis MCP
+  server can run as a standalone HTTP server (`cognis-mcpd --transport http`)
+  with a stable per-workspace localhost URL. The panel's collapsible
+  "Standalone HTTP MCP server" sub-section has **Start** / **Stop**, the live
+  `http://127.0.0.1:<port>/mcp` URL, and the phase (Stopped / Starting /
+  Running / Error). **Start** pre-flights the workspace, launches the server
+  (TCP readiness probe + automatic port retry), **auto-writes the url-form
+  `mcp.json`** so the editor connects, and offers a one-click **Reload Window**.
+  **Stop** reverts `mcp.json` to the editor-managed stdio form so AI tools keep
+  working; a dangling http config is also reverted to stdio on activation.
+  Stdio remains the default; the server binds loopback only unless
+  `COGNIS_MCP_ALLOW_REMOTE=1`.
 - The sold bundle's `INSTALL.md` now includes an "Updating to a new version"
-  section so buyers can self-serve a fix/upgrade (install the new VSIX over the
-  old, then one click to upgrade the backend).
+  section so buyers can self-serve a fix/upgrade.
+- One-click **Reload Window** in the post-setup and MCP-config guidance.
+
+### Changed
+
+- **The panel now states the MCP server status explicitly** — connected/not,
+  server name, and workspace `mcp.json` path, with a single **Set up MCP
+  (mcp.json)** action — replacing the vague "Set Up for AI" / "Connect to AI" /
+  "AI connected" wording. Connected reads "Cognis MCP server connected"; the
+  onboarding step is "MCP connected".
+- **MCP config is written into the workspace by default** so it is visible and
+  per-project (`.vscode/mcp.json` / `.cursor/mcp.json`) instead of the global
+  home config. Added the `cognis.mcpConfigScope` setting (`workspace` |
+  `global`).
+
+### Fixed
+
+- **A clear message when the engine version isn't on PyPI yet.** A pin to an
+  unpublished `cognis-engine` previously showed a misleading "your Python is too
+  new" error; it is now reported honestly as "this engine version is not on PyPI
+  yet — wait and retry".
+
+### Internal
+
+- The cross-process e2e sandbox now runs on every push (not just PRs); added a
+  wheel-packaging e2e (the sold artifact ships all packages + entry points +
+  asset), an HTTP-MCP round-trip e2e, `buildPackageSpec` pin tests, and a filter
+  for a third-party opentelemetry deprecation that broke the MCP e2e suite.
 
 ## [0.5.2] — 2026-06-11
 

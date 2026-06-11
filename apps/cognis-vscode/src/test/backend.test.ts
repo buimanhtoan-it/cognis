@@ -7,6 +7,7 @@ import * as path from "node:path";
 import test from "node:test";
 
 import {
+  buildPackageSpec,
   classifyPipFailure,
   compareVersions,
   formatElapsed,
@@ -104,6 +105,20 @@ test("classifyPipFailure maps no-matching-wheel to a Python-version fix", () => 
   assert.equal(err.canInstallPython, true);
 });
 
+test("classifyPipFailure flags an unpublished cognis-engine version (not a Python problem)", () => {
+  // Upgrading to a version whose engine isn't on PyPI yet (e.g. the tag's
+  // publish is still running) must NOT tell the user to downgrade Python —
+  // cognis-engine is a pure-Python wheel that works on any supported Python.
+  const err = classifyPipFailure(
+    "ERROR: Could not find a version that satisfies the requirement " +
+      "cognis-engine[indexer,embed-local,vector,tokenizers,mcp]==0.5.3 " +
+      "(from versions: 0.5.1, 0.5.2)\n" +
+      "ERROR: No matching distribution found for cognis-engine[indexer]==0.5.3"
+  );
+  assert.match(err.userMessage, /not on PyPI yet/i);
+  assert.equal(err.canInstallPython, false);
+});
+
 test("classifyPipFailure maps a missing compiler to build-tools guidance", () => {
   const err = classifyPipFailure(
     "error: Microsoft Visual C++ 14.0 or greater is required"
@@ -122,3 +137,39 @@ test("classifyPipFailure falls back to the output-log message", () => {
   assert.match(err.userMessage, /output log/i);
 });
 
+
+
+// --- buildPackageSpec: deterministic version pin (the upgrade-flow contract) ---
+
+test("buildPackageSpec pins the engine to the extension version", () => {
+  assert.equal(
+    buildPackageSpec("cognis-engine[indexer,mcp]", "0.5.3"),
+    "cognis-engine[indexer,mcp]==0.5.3"
+  );
+});
+
+test("buildPackageSpec falls back to the unpinned base when version is unknown", () => {
+  assert.equal(
+    buildPackageSpec("cognis-engine[indexer,mcp]", undefined),
+    "cognis-engine[indexer,mcp]"
+  );
+});
+
+test("buildPackageSpec does not pin a base without an extras group", () => {
+  // No trailing "]" → inserting ==v would be malformed, so leave it unpinned.
+  assert.equal(buildPackageSpec("cognis-engine", "0.5.3"), "cognis-engine");
+});
+
+test("buildPackageSpec honors a configured override verbatim", () => {
+  assert.equal(
+    buildPackageSpec("cognis-engine[indexer,mcp]", "0.5.3", "  cognis-engine==0.4.0  "),
+    "cognis-engine==0.4.0"
+  );
+});
+
+test("buildPackageSpec ignores a blank override", () => {
+  assert.equal(
+    buildPackageSpec("cognis-engine[indexer,mcp]", "0.5.3", "   "),
+    "cognis-engine[indexer,mcp]==0.5.3"
+  );
+});

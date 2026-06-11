@@ -2,7 +2,7 @@
   "name": "cognis-vscode",
   "displayName": "Cognis",
   "description": "Managed Cognis setup for AI semantic search, MCP wiring, and live indexing across MCP-capable editors.",
-  "version": "0.5.3",
+  "version": "0.6.0",
   "publisher": "ToanBui",
   "license": "SEE LICENSE IN LICENSE.txt",
   "icon": "media/icon.png",
@@ -89,6 +89,18 @@
         "icon": "media/command.png"
       },
       {
+        "command": "cognis.startMcpServer",
+        "title": "Cognis: Start MCP Server (HTTP)",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.stopMcpServer",
+        "title": "Cognis: Stop MCP Server (HTTP)",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
         "command": "cognis.pauseSync",
         "title": "Cognis: Pause Index Sync",
         "category": "Cognis",
@@ -162,6 +174,15 @@
           "default": "",
           "description": "Where the \"Buy Cognis\" button sends users (e.g. your Polar checkout link). Leave empty to use the project page."
         },
+        "cognis.mcpConfigScope": {
+          "type": "string",
+          "enum": [
+            "workspace",
+            "global"
+          ],
+          "default": "global",
+          "description": "Where to write MCP client config. global merges cognis-<repo-slug> entries into ~/.cursor/mcp.json so multiple indexed repos can stay connected at once. workspace writes to .cursor/mcp.json inside the target repository."
+        },
         "cognis.backendPackageSpec": {
           "type": "string",
           "default": "",
@@ -233,15 +254,6 @@
           "default": 0,
           "minimum": 0,
           "description": "Override COGNIS_MCP_SEMANTIC_COOLDOWN_S in generated MCP config. 0 keeps the Cognis default."
-        },
-        "cognis.mcpConfigScope": {
-          "type": "string",
-          "enum": [
-            "workspace",
-            "global"
-          ],
-          "default": "global",
-          "description": "Where to write MCP client config. global merges cognis-<repo-slug> entries into ~/.cursor/mcp.json so multiple indexed repos can stay connected at once. workspace writes to .cursor/mcp.json inside the target repository."
         },
         "cognis.mcpWarmSemanticOnStartup": {
           "type": "boolean",

@@ -136,3 +136,77 @@ def test_semantic_warm_is_best_effort_and_never_raises(
     monkeypatch.setattr(pool, "get_shared_semantic_layer", _boom)
     # Must not raise — warm-up failure should never stop the server.
     mcpd_main._warm_semantic_layer_on_startup(logging.getLogger("test"))
+
+
+# ---------------------------------------------------------------------------
+# Transport selection (stdio default; opt-in http for the panel-managed server)
+# ---------------------------------------------------------------------------
+
+
+class _FakeMcp:
+    """Records the transport/kwargs a serve call would use, without binding."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def run(self, **kwargs: object) -> None:
+        self.calls.append(kwargs)
+
+
+def test_parse_args_defaults_to_stdio() -> None:
+    from cognis_mcpd.main import _parse_args
+
+    args = _parse_args([])
+    assert args.transport == "stdio"
+
+
+def test_parse_args_reads_http_host_port() -> None:
+    from cognis_mcpd.main import _parse_args
+
+    args = _parse_args(["--transport", "http", "--host", "127.0.0.1", "--port", "8123"])
+    assert (args.transport, args.host, args.port) == ("http", "127.0.0.1", 8123)
+
+
+def test_serve_stdio_runs_stdio_transport() -> None:
+    from cognis_mcpd.main import _parse_args, _serve
+
+    mcp = _FakeMcp()
+    _serve(mcp, _parse_args([]), logging.getLogger("test"))
+    assert mcp.calls == [{"transport": "stdio"}]
+
+
+def test_serve_http_binds_requested_host_and_port() -> None:
+    from cognis_mcpd.main import _parse_args, _serve
+
+    mcp = _FakeMcp()
+    _serve(
+        mcp,
+        _parse_args(["--transport", "http", "--host", "127.0.0.1", "--port", "8123"]),
+        logging.getLogger("test"),
+    )
+    assert mcp.calls == [{"transport": "http", "host": "127.0.0.1", "port": 8123}]
+
+
+def test_serve_http_requires_a_port() -> None:
+    from cognis_mcpd.main import _parse_args, _serve
+
+    mcp = _FakeMcp()
+    with pytest.raises(SystemExit):
+        _serve(mcp, _parse_args(["--transport", "http"]), logging.getLogger("test"))
+    assert mcp.calls == []
+
+
+def test_serve_http_refuses_non_loopback_without_optin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cognis_mcpd.main import _parse_args, _serve
+
+    monkeypatch.delenv("COGNIS_MCP_ALLOW_REMOTE", raising=False)
+    mcp = _FakeMcp()
+    with pytest.raises(SystemExit):
+        _serve(
+            mcp,
+            _parse_args(["--transport", "http", "--host", "0.0.0.0", "--port", "8123"]),
+            logging.getLogger("test"),
+        )
+    assert mcp.calls == []

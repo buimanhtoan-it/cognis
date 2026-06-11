@@ -27,6 +27,7 @@ import {
   resolveMcpHost,
   showMcpConfigPreview,
 } from "./mcpConfig";
+import { getMcpServerState } from "./mcpServer";
 import { verifyPythonEnvironment } from "./python";
 import { fetchPrerequisites } from "./prerequisites";
 import type { PanelContext } from "./panel";
@@ -984,6 +985,7 @@ export async function refreshPanelContext(repoRoot: string): Promise<PanelContex
     const indexStatus = syncIndexStatusFromDaemon(repoRoot);
     const current = getState(repoRoot);
     const mcpHost = resolveMcpHost();
+    const mcpServer = getMcpServerState(repoRoot);
     return {
       status: deriveStatus(repoRoot, report.overall, false),
       health: report,
@@ -995,6 +997,9 @@ export async function refreshPanelContext(repoRoot: string): Promise<PanelContex
       mcpHost,
       mcpServerName: deriveMcpServerName(repoRoot),
       mcpConfigPath: getWorkspaceMcpConfigPath(repoRoot, mcpHost),
+      mcpServerPhase: mcpServer.phase,
+      mcpServerUrl: mcpServer.url,
+      mcpServerError: mcpServer.lastError,
     };
   } catch {
     syncMcpStateFromDisk(repoRoot);
@@ -1002,6 +1007,7 @@ export async function refreshPanelContext(repoRoot: string): Promise<PanelContex
     const indexStatus = syncIndexStatusFromDaemon(repoRoot);
     const current = getState(repoRoot);
     const mcpHost = resolveMcpHost();
+    const mcpServer = getMcpServerState(repoRoot);
     return {
       status: configured ? deriveStatus(repoRoot, undefined, false) : "notInstalled",
       setupHint: configured ? "python" : undefined,
@@ -1013,6 +1019,9 @@ export async function refreshPanelContext(repoRoot: string): Promise<PanelContex
       mcpHost,
       mcpServerName: deriveMcpServerName(repoRoot),
       mcpConfigPath: getWorkspaceMcpConfigPath(repoRoot, mcpHost),
+      mcpServerPhase: mcpServer.phase,
+      mcpServerUrl: mcpServer.url,
+      mcpServerError: mcpServer.lastError,
     };
   }
 }

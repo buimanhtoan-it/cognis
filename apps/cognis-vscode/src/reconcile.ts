@@ -1,7 +1,12 @@
 import * as vscode from "vscode";
 import { getOutputChannel } from "./cli";
 import { isLiveIndexing } from "./indexd";
-import { hasExpectedMcpConfigForRepo } from "./mcpConfig";
+import {
+  enableMcpForWorkspace,
+  hasExpectedMcpConfigForRepo,
+  isHttpMcpConfiguredForRepo,
+} from "./mcpConfig";
+import { isMcpServerRunning } from "./mcpServer";
 import { verifyPythonEnvironment } from "./python";
 import { isSyncPaused, setAutoManaged, setMcpEnabled } from "./state";
 import {
@@ -158,6 +163,23 @@ export async function reconcileWorkspaceOnActivate(
   }
 
   setAutoManaged(repoRoot, true);
+
+  // A standalone HTTP MCP server is per-session: if a previous session left an
+  // http-form mcp.json but no server is running now, the editor would point at
+  // a dead URL. Fall back to the editor-managed stdio config so AI tools keep
+  // working; the user can click Start again to switch back to http on demand.
+  if (isHttpMcpConfiguredForRepo(repoRoot) && !isMcpServerRunning(repoRoot)) {
+    try {
+      await enableMcpForWorkspace(repoRoot);
+      channel.appendLine(
+        "[reconcile] Reverted a dangling HTTP MCP config to stdio (server not running)."
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      channel.appendLine(`[reconcile] could not revert HTTP MCP config: ${message}`);
+    }
+  }
+
   await maybeEnableMcp(context, repoRoot);
 
   channel.appendLine("[reconcile] Done");

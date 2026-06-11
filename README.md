@@ -8,7 +8,7 @@
 
 > **Software Cognition Engine** for MCP clients and coding agents.
 >
-> **Status: v0.5.3** — see [CHANGELOG.md](CHANGELOG.md).
+> **Status: v0.6.0** — see [CHANGELOG.md](CHANGELOG.md).
 
 `cognis` is a **local, private** code-retrieval engine. It indexes your
 repository on your machine and exposes precise retrieval tools (symbol lookup,

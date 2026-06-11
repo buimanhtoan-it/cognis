@@ -68,6 +68,47 @@ jobs:
           HYPOTHESIS_PROFILE: ci
         run: make test PYTEST_ARGS="--maxfail=1"
 
+  e2e-sandbox:
+    name: e2e sandbox (cross-process CLI + indexd + mcpd)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+
+      - name: Cache tree-sitter grammars and build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/tree_sitter
+            ~/.cache/tree-sitter
+            ./build-tree-sitter
+            ./tree_sitter_languages_build
+          key: tree-sitter-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            tree-sitter-${{ runner.os }}-
+
+      - name: Install production + dev dependencies
+        uses: ./.github/actions/install-prod
+
+      - name: Install wheel-build tooling (for the packaging e2e)
+        run: python -m pip install build hatchling
+
+      - name: E2E sandbox (real process boundaries)
+        env:
+          HYPOTHESIS_PROFILE: ci
+          # Semantic warm-up needs the model; the semantic e2e tests skip
+          # cleanly without it (no model download in push CI).
+          COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP: "0"
+        run: python -m pytest -m e2e --maxfail=3 -v
+
   vscode-extension:
     name: vscode extension (compile)
     runs-on: ubuntu-latest

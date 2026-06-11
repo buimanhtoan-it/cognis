@@ -53,6 +53,11 @@ const HEALTH_ACTION: GuidanceAction = {
   command: "cognis.showHealth",
 };
 
+const RELOAD_ACTION: GuidanceAction = {
+  label: "Reload Window",
+  command: "workbench.action.reloadWindow",
+};
+
 export function pythonMissingGuidance(pythonPath: string): UserGuidance {
   return {
     title: "Cognis backend not ready",
@@ -117,7 +122,7 @@ export function mcpReloadRequiredGuidance(configPath: string): UserGuidance {
     message:
       "MCP config was written. Reload your editor or MCP host so Cognis tools appear.",
     severity: "info",
-    actions: [HEALTH_ACTION, OUTPUT_ACTION],
+    actions: [RELOAD_ACTION, HEALTH_ACTION, OUTPUT_ACTION],
     technicalDetail: `Config path: ${configPath}`,
   };
 }
@@ -271,9 +276,9 @@ export function setupResultGuidance(result: SetupResult): UserGuidance | undefin
     return {
       title: "Ready for AI",
       message:
-        "Cognis is ready. MCP is configured. Reload your editor or MCP host if tools do not appear yet.",
+        "Cognis is ready and MCP is configured. Reload the window so your editor's AI picks up the Cognis tools.",
       severity: "info",
-      actions: [HEALTH_ACTION, OUTPUT_ACTION],
+      actions: [RELOAD_ACTION, HEALTH_ACTION, OUTPUT_ACTION],
       technicalDetail: result.mcpConfigPath
         ? `MCP config: ${result.mcpConfigPath}`
         : undefined,

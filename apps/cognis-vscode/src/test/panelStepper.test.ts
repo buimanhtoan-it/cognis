@@ -341,3 +341,62 @@ test("the MCP-connected onboarding step is labelled 'MCP connected'", () => {
   const step = deriveSetupSteps(ctx).find((s) => s.id === "connected");
   assert.equal(step?.label, "MCP connected");
 });
+
+
+// ---------------------------------------------------------------------------
+// Standalone HTTP MCP server sub-section: panel-managed, opt-in, with URL.
+// ---------------------------------------------------------------------------
+
+test("HTTP MCP subsection: stopped offers a Start button (default)", () => {
+  const html = renderMcpSection({
+    status: "ready",
+    configured: true,
+    mcpEnabled: true,
+    mcpHost: "vscode",
+    mcpServerPhase: "stopped",
+  });
+  assert.match(html, /Standalone HTTP MCP server — Stopped/);
+  assert.match(html, /data-action="startMcp"/);
+  assert.doesNotMatch(html, /data-action="stopMcp"/);
+});
+
+test("HTTP MCP subsection: running shows the URL and a Stop button", () => {
+  const html = renderMcpSection({
+    status: "ready",
+    configured: true,
+    mcpEnabled: true,
+    mcpHost: "vscode",
+    mcpServerPhase: "running",
+    mcpServerUrl: "http://127.0.0.1:50001/mcp",
+  });
+  assert.match(html, /Standalone HTTP MCP server — Running/);
+  assert.match(html, /http:\/\/127\.0\.0\.1:50001\/mcp/);
+  assert.match(html, /data-action="stopMcp"/);
+});
+
+test("HTTP MCP subsection: starting shows progress and a Stop button", () => {
+  const html = renderMcpSection({
+    status: "ready",
+    configured: true,
+    mcpEnabled: true,
+    mcpHost: "vscode",
+    mcpServerPhase: "starting",
+    mcpServerUrl: "http://127.0.0.1:50001/mcp",
+  });
+  assert.match(html, /Standalone HTTP MCP server — Starting/);
+  assert.match(html, /data-action="stopMcp"/);
+});
+
+test("HTTP MCP subsection: error surfaces the message and offers Start to retry", () => {
+  const html = renderMcpSection({
+    status: "ready",
+    configured: true,
+    mcpEnabled: true,
+    mcpHost: "vscode",
+    mcpServerPhase: "error",
+    mcpServerError: "cognis-mcpd exited with code=1",
+  });
+  assert.match(html, /Standalone HTTP MCP server — Error/);
+  assert.match(html, /code=1/);
+  assert.match(html, /data-action="startMcp"/);
+});

@@ -134,6 +134,35 @@ export const FIXTURES: NamedFixture[] = [
     context: { status: "unknown", configured: true, version: VERSION },
   },
   {
+    name: "mcp-http-stopped",
+    title: "MCP connected; HTTP server stopped (panel can start)",
+    context: {
+      status: "mcpEnabled",
+      health: healthOk,
+      configured: true,
+      mcpEnabled: true,
+      liveIndexing: true,
+      mcpHost: "vscode",
+      mcpServerPhase: "stopped",
+      version: VERSION,
+    },
+  },
+  {
+    name: "mcp-http-running",
+    title: "MCP HTTP server running (URL visible, can stop)",
+    context: {
+      status: "mcpEnabled",
+      health: healthOk,
+      configured: true,
+      mcpEnabled: true,
+      liveIndexing: true,
+      mcpHost: "vscode",
+      mcpServerPhase: "running",
+      mcpServerUrl: "http://127.0.0.1:50001/mcp",
+      version: VERSION,
+    },
+  },
+  {
     name: "ready-not-connected",
     title: "Index ready — connect AI",
     context: {

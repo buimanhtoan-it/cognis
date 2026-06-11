@@ -305,21 +305,37 @@ async function findBasePython(): Promise<{ cmd: string; args: string[] } | undef
  * If the user overrides ``cognis.backendPackageSpec`` in settings, we honor it
  * verbatim (power users / offline mirrors / pre-release testing).
  */
+/**
+ * Build the pip requirement for the backend, pinned to a specific engine
+ * version for deterministic installs. Pure (no VS Code) so it is unit-testable.
+ *
+ * - A non-empty ``configured`` override wins verbatim (power users / mirrors /
+ *   pre-release testing).
+ * - Otherwise ``cognis-engine[extras]`` -> ``cognis-engine[extras]==<version>``
+ *   when the version is known and the base ends with the extras group.
+ * - With no version (or a base without extras) we fall back to the unpinned
+ *   base rather than emitting a broken spec.
+ */
+export function buildPackageSpec(
+  base: string,
+  version: string | undefined,
+  configured?: string
+): string {
+  const override = configured?.trim();
+  if (override) {
+    return override;
+  }
+  if (version && base.endsWith("]")) {
+    return `${base}==${version}`;
+  }
+  return base;
+}
+
 function packageSpec(): string {
   const configured = vscode.workspace
     .getConfiguration("cognis")
-    .get<string>("backendPackageSpec", "")
-    .trim();
-  if (configured) {
-    return configured;
-  }
-  const v = expectedBackendVersion;
-  // ``cognis-engine[extras]`` -> ``cognis-engine[extras]==<v>``. Only pin when
-  // we know the version and the base ends with the extras group as expected.
-  if (v && DEFAULT_PACKAGE_BASE.endsWith("]")) {
-    return `${DEFAULT_PACKAGE_BASE}==${v}`;
-  }
-  return DEFAULT_PACKAGE_BASE;
+    .get<string>("backendPackageSpec", "");
+  return buildPackageSpec(DEFAULT_PACKAGE_BASE, expectedBackendVersion, configured);
 }
 
 export class BackendInstallError extends Error {
@@ -365,6 +381,25 @@ export function classifyPipFailure(combinedOutput: string): BackendInstallError 
     return new BackendInstallError(
       "Couldn't reach PyPI to download the backend. Check your internet connection (or proxy/VPN) and try Install backend again. " +
         "Behind a corporate proxy? Set HTTPS_PROXY and reload the window.",
+    );
+  }
+
+  // The cognis-engine package itself wasn't found (as opposed to a
+  // dependency). cognis-engine ships as a pure-Python (py3-none-any) wheel, so
+  // it can never fail for "Python too new" as long as the version exists —
+  // this means the requested version is simply not on PyPI yet (the bundle /
+  // extension is ahead of the published engine, or a release upload is still
+  // running). Telling the user to downgrade Python here would be wrong.
+  if (
+    (text.includes("could not find a version that satisfies") ||
+      text.includes("no matching distribution found")) &&
+    text.includes("cognis-engine")
+  ) {
+    const v = expectedBackendVersion ? ` (cognis-engine==${expectedBackendVersion})` : "";
+    return new BackendInstallError(
+      `The Cognis engine version this build needs${v} is not on PyPI yet. ` +
+        "If you just published this release, the upload may still be in progress — wait a minute and click Install backend again. " +
+        "Otherwise this build is ahead of the published engine; install the extension version that matches the available engine."
     );
   }
 

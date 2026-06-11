@@ -8,6 +8,7 @@ The console script ``cognis-mcpd`` in pyproject.toml points here.
 
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import sys
@@ -79,12 +80,69 @@ def _warm_semantic_layer_on_startup(logger: logging.Logger) -> None:
         logger.debug("semantic warm-up skipped", exc_info=True)
 
 
-def main() -> int:
-    """Start the cognis MCP server with stdio transport.
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse cognis-mcpd CLI args.
+
+    Defaults preserve the original behaviour (stdio), so an editor's existing
+    stdio ``mcp.json`` keeps working with no arguments. The HTTP transport is
+    opt-in for the panel-managed, per-workspace server.
+    """
+    parser = argparse.ArgumentParser(prog="cognis-mcpd", description="Cognis MCP server.")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "http"],
+        default=os.environ.get("COGNIS_MCP_TRANSPORT", "stdio"),
+        help="stdio (editor-launched, default) or http (standalone server with a URL).",
+    )
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("COGNIS_MCP_HOST", "127.0.0.1"),
+        help="Host to bind for http transport. Localhost only by default for safety.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("COGNIS_MCP_PORT", "0") or "0"),
+        help="Port to bind for http transport (required when --transport http).",
+    )
+    return parser.parse_args(argv)
+
+
+def _serve(mcp: object, args: argparse.Namespace, logger: logging.Logger) -> None:
+    """Run the server on the selected transport.
+
+    Security: http binds to ``127.0.0.1`` by default and we refuse to bind a
+    non-loopback host unless ``COGNIS_MCP_ALLOW_REMOTE=1`` is set explicitly —
+    the MCP server exposes code-search over the local index and must not be
+    reachable off the machine by accident.
+    """
+    run = mcp.run  # type: ignore[attr-defined]
+    if args.transport == "http":
+        if args.port <= 0:
+            raise SystemExit("cognis-mcpd: --port is required for --transport http")
+        loopback = args.host in {"127.0.0.1", "::1", "localhost"}
+        if not loopback and os.environ.get("COGNIS_MCP_ALLOW_REMOTE", "").lower() not in {
+            "1",
+            "true",
+            "yes",
+        }:
+            raise SystemExit(
+                f"cognis-mcpd: refusing to bind non-loopback host {args.host!r}. "
+                "Set COGNIS_MCP_ALLOW_REMOTE=1 to override (not recommended)."
+            )
+        logger.info("serving MCP over http at http://%s:%d/mcp", args.host, args.port)
+        run(transport="http", host=args.host, port=args.port)
+    else:
+        run(transport="stdio")
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Start the cognis MCP server.
 
     Returns:
         Exit code (0 on clean exit, 1 on startup error).
     """
+    args = _parse_args(argv)
     logging.basicConfig(
         level=logging.WARNING,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
@@ -113,8 +171,7 @@ def main() -> int:
         _warm_db_on_startup(logger)
         _warm_semantic_layer_on_startup(logger)
 
-        # Run with stdio transport (MVP).
-        mcp.run(transport="stdio")
+        _serve(mcp, args, logger)
         return 0
     except KeyboardInterrupt:
         logger.info("cognis-mcpd received KeyboardInterrupt, shutting down.")

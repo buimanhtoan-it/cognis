@@ -16,6 +16,8 @@ export const ACTION_COMMANDS: Record<string, string> = {
   repair: "cognis.repairSetup",
   clearReindex: "cognis.clearAndReindex",
   connectAi: "cognis.connectToAi",
+  startMcp: "cognis.startMcpServer",
+  stopMcp: "cognis.stopMcpServer",
   pauseSync: "cognis.pauseSync",
   resumeSync: "cognis.resumeSync",
   health: "cognis.showHealth",
@@ -46,6 +48,12 @@ export interface PanelContext {
   mcpHost?: string;
   /** Path to the workspace MCP config (mcp.json) Cognis writes for the host. */
   mcpConfigPath?: string;
+  /** Phase of the panel-managed standalone HTTP MCP server, when running. */
+  mcpServerPhase?: "stopped" | "starting" | "running" | "error";
+  /** URL of the panel-managed HTTP MCP server (``http://host:port/mcp``). */
+  mcpServerUrl?: string;
+  /** Last error message from the panel-managed MCP server, if any. */
+  mcpServerError?: string;
   /**
    * Whether the Python backend (cognis CLI) could actually run. Undefined until
    * probed. False means the backend isn't installed/reachable yet — on a fresh
@@ -598,8 +606,8 @@ export function renderMcpSection(context: PanelContext): string {
   const connected = Boolean(context.mcpEnabled);
   const host = hostLabel(context.mcpHost);
   const statusText = connected
-    ? `Connected to ${escapeHtml(host)}. If the Cognis tools don't appear in your AI chat yet, reload the editor window.`
-    : `Not connected yet. Add Cognis as an MCP server in ${escapeHtml(host)} so its AI can call your code-search tools — this writes a workspace mcp.json.`;
+    ? `Connected to ${escapeHtml(host)}. The editor launches the Cognis MCP server over stdio from this config — reload the editor window if the tools don't appear in AI chat yet.`
+    : `Not connected yet. Add Cognis as an MCP server in ${escapeHtml(host)} — this writes a workspace mcp.json the editor reads to launch the server.`;
   const action = connected
     ? `<button data-action="connectAi" title="Rewrite this workspace's MCP config (mcp.json) for the current editor.">Re-write mcp.json</button>`
     : `<button data-action="connectAi" title="Write this workspace's MCP config (mcp.json) so the editor's AI can use Cognis.">Set up MCP (mcp.json)</button>`;
@@ -609,17 +617,84 @@ export function renderMcpSection(context: PanelContext): string {
   const pathRow = context.mcpConfigPath
     ? `<div class="surface-detail">Config: <code>${escapeHtml(context.mcpConfigPath)}</code></div>`
     : "";
+  const mark = connected ? "✓" : "•";
+  const markCls = connected ? "prereq-ok" : "prereq-required";
+  // Collapsed once connected (status is enough); expanded when action is needed.
+  const openAttr = connected ? "" : " open";
   return `<div class="surface">
-    <div class="surface-header">
-      <div>
-        <div class="surface-title">MCP server — ${connected ? "connected" : "not connected"}</div>
-        <div class="surface-detail">${statusText}</div>
+    <details class="prereq-details"${openAttr}>
+      <summary class="prereq-summary">
+        <span class="prereq-summary-mark ${markCls}">${mark}</span>
+        <span class="prereq-summary-text">
+          <span class="surface-title">MCP server — ${connected ? "connected" : "not connected"}</span>
+          <span class="surface-detail">${statusText}</span>
+        </span>
+        <span class="prereq-chevron" aria-hidden="true">▸</span>
+      </summary>
+      <div class="prereq-body">
+        <div class="surface-actions">${action}</div>
+        ${serverRow}
+        ${pathRow}
+        <div class="surface-detail">The editor starts and stops the MCP server automatically from this config (stdio transport) — there is no separate server URL to manage.</div>
+        ${renderMcpHttpSubsection(context)}
       </div>
-      <div class="surface-actions">${action}</div>
-    </div>
-    ${serverRow}
-    ${pathRow}
+    </details>
   </div>`;
+}
+
+/**
+ * Optional standalone HTTP MCP server (panel-managed, per workspace).
+ *
+ * Hidden until the user explicitly starts it. Once started this surface is the
+ * single source of truth for the URL the editor (or any HTTP client) connects
+ * to: a Start/Stop control and the live ``http://127.0.0.1:<port>/mcp`` URL.
+ * When stopped it offers an explicit Start button so it never auto-spawns.
+ */
+function renderMcpHttpSubsection(context: PanelContext): string {
+  const phase = context.mcpServerPhase ?? "stopped";
+  const url = context.mcpServerUrl;
+  const err = context.mcpServerError;
+  const stoppedDetail =
+    "Optional: run a standalone HTTP server with a stable URL (panel-managed, per workspace). Most users do not need this — the stdio config above is enough for Cursor / VS Code.";
+  let label: string;
+  let detail: string;
+  let button: string;
+  switch (phase) {
+    case "starting":
+      label = "Starting…";
+      detail = url ? `Binding ${escapeHtml(url)}` : "Binding port…";
+      button = `<button data-action="stopMcp" title="Stop the panel-managed HTTP MCP server.">Stop</button>`;
+      break;
+    case "running":
+      label = "Running";
+      detail = url
+        ? `Listening at <code>${escapeHtml(url)}</code>`
+        : "Listening…";
+      button = `<button data-action="stopMcp" title="Stop the panel-managed HTTP MCP server.">Stop</button>`;
+      break;
+    case "error":
+      label = "Error";
+      detail = err ? escapeHtml(err) : "The server exited unexpectedly.";
+      button = `<button data-action="startMcp" title="Start a standalone HTTP MCP server for this workspace.">Start</button>`;
+      break;
+    default:
+      label = "Stopped";
+      detail = stoppedDetail;
+      button = `<button data-action="startMcp" title="Start a standalone HTTP MCP server for this workspace.">Start</button>`;
+  }
+  return `<details class="prereq-details">
+    <summary class="prereq-summary">
+      <span class="prereq-summary-mark prereq-optional">•</span>
+      <span class="prereq-summary-text">
+        <span class="surface-title">Standalone HTTP MCP server — ${escapeHtml(label)}</span>
+        <span class="surface-detail">${detail}</span>
+      </span>
+      <span class="prereq-chevron" aria-hidden="true">▸</span>
+    </summary>
+    <div class="prereq-body">
+      <div class="surface-actions">${button}</div>
+    </div>
+  </details>`;
 }
 
 /**

@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 # ---------------------------------------------------------------------------
 [project]
 name = "cognis-engine"
-version = "0.5.3"
+version = "0.6.0"
 description = "Software Cognition Engine — MCP-native context capsules for LLM coding agents."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -248,6 +248,10 @@ asyncio_mode = "auto"
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning:hypothesis.*",
+    # Third-party noise: opentelemetry (pulled in by fastmcp) calls the
+    # deprecated importlib.metadata SelectableGroups dict interface on import.
+    # Not our code and not actionable here; don't let it fail the MCP e2e suite.
+    "ignore:SelectableGroups dict interface is deprecated:DeprecationWarning",
 ]
 
 # ---------------------------------------------------------------------------

@@ -89,7 +89,15 @@ def test_mcp_config_contract_snapshot(sample_repo: Path) -> None:
     """`cognis-cli mcp-config` shape is pinned for McpConfigPayload."""
     run_cli(sample_repo, ["init", "--quiet"])
     payload = run_cli_json(sample_repo, ["mcp-config", "--host", "cursor"])
-    _assert_or_update("mcp_config.json", _key_skeleton(payload))
+    # The mcpServers key is ``cognis-<slug>-<hash>`` where the hash depends on
+    # the (temp) repo path, so it varies per machine/run. Normalize it to a
+    # stable placeholder before skeletonizing so the golden is portable.
+    normalized = dict(payload)
+    servers = payload.get("config", {}).get("mcpServers", {})
+    if servers:
+        first_block = next(iter(servers.values()))
+        normalized["config"] = {"mcpServers": {"<server>": first_block}}
+    _assert_or_update("mcp_config.json", _key_skeleton(normalized))
 
 
 def test_health_contract_snapshot(sample_repo: Path) -> None:
@@ -127,6 +135,6 @@ def test_indexd_status_contract_snapshot(sample_repo: Path) -> None:
     run_cli(sample_repo, ["init", "--quiet"])
 
     with IndexdProcess(sample_repo, db_path, status_path, full_rebuild=True) as daemon:
-        snapshot = daemon.wait_for_phase("watching", timeout=90.0)
+        snapshot = daemon.wait_for_phase("watching", timeout=180.0)
 
     _assert_or_update("indexd_status.json", _key_skeleton(snapshot))

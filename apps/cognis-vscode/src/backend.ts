@@ -18,7 +18,8 @@ import { setManagedPythonPath } from "./python";
  */
 
 const PYTHON_MIN = [3, 11] as const;
-const DEFAULT_PACKAGE_SPEC = "cognis-engine[indexer,embed-local,vector,tokenizers,mcp]";
+const DEFAULT_PACKAGE_BASE = "cognis-engine[indexer,embed-local,vector,tokenizers,mcp]";
+const DEFAULT_PACKAGE_SPEC = DEFAULT_PACKAGE_BASE;
 
 let managedRootDir: string | undefined;
 /** The extension's own version, used as the target backend version. */
@@ -292,11 +293,33 @@ async function findBasePython(): Promise<{ cmd: string; args: string[] } | undef
   return undefined;
 }
 
+/**
+ * The pip requirement Cognis installs for its backend.
+ *
+ * Default is **version-pinned to this extension's version** (e.g.
+ * ``cognis-engine[...]==0.4.0``) so a given prebuilt build always installs the
+ * matching engine — a buyer's install is deterministic and never silently picks
+ * up a newer (or broken) engine from PyPI. The pin is applied to the
+ * extras-bearing base spec by inserting ``==<version>`` after the extras group.
+ *
+ * If the user overrides ``cognis.backendPackageSpec`` in settings, we honor it
+ * verbatim (power users / offline mirrors / pre-release testing).
+ */
 function packageSpec(): string {
-  return vscode.workspace
+  const configured = vscode.workspace
     .getConfiguration("cognis")
-    .get<string>("backendPackageSpec", DEFAULT_PACKAGE_SPEC)
-    .trim() || DEFAULT_PACKAGE_SPEC;
+    .get<string>("backendPackageSpec", "")
+    .trim();
+  if (configured) {
+    return configured;
+  }
+  const v = expectedBackendVersion;
+  // ``cognis-engine[extras]`` -> ``cognis-engine[extras]==<v>``. Only pin when
+  // we know the version and the base ends with the extras group as expected.
+  if (v && DEFAULT_PACKAGE_BASE.endsWith("]")) {
+    return `${DEFAULT_PACKAGE_BASE}==${v}`;
+  }
+  return DEFAULT_PACKAGE_BASE;
 }
 
 export class BackendInstallError extends Error {

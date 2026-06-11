@@ -6,6 +6,122 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-06-11
+
+Positioning + measurement-infrastructure release. Ships the live-indexing
+UX improvements, RRF fusion, and the full development-criteria / regression-gate
+loop, and corrects public copy to claim only what the benchmark supports.
+
+### Added
+
+- **Live embedding progress on cold index.** The initial index now publishes a
+  moving "Generating semantic embeddings… X/N symbols (search already works)"
+  status (70→100%) instead of sitting at a static 70% for minutes. Lexical and
+  structural search remain available within seconds while embeddings backfill in
+  the background (the two-phase cold index is now progress-reported end to end).
+- **RRF fusion as the cross-layer ranker.** Lexical (BM25) and semantic (cosine)
+  hits are now fused with parameter-free Reciprocal Rank Fusion
+  (`cognis_retrieval.fusion`) instead of a scale-incoherent max-score merge —
+  the strongest fusion on the reproducible objective benchmark.
+- **Observability for first-use latency.** Structured timing logs for embedder
+  model load (cache-hit vs online-fallback), MCP semantic-layer warm, per-call
+  `semantic_search` latency, and a per-phase cold-index breakdown
+  (parse/resolve/embed/write) — the basis for UX/perf decisions.
+- **Full-flow coverage harness** (`make coverage`) that measures in-process and
+  spawned-subprocess (CLI/indexd/mcpd) coverage together.
+- **Cross-app e2e report** (`make e2e-report`) capturing per-stage latency,
+  throughput, retrieval correctness, embedding-progress trajectory, and semantic
+  warm-vs-hot latency split — runnable against the bundled sample repo or any
+  repo via `--repo`.
+- **VS Code panel simulator + Playwright UI tests** (`npm run test:e2e`) that
+  render the real webview markup per state and assert every button posts a valid
+  command intent, with no VS Code instance required.
+- **Offline per-version licensing.** The prebuilt build verifies an Ed25519
+  license key fully offline (no license server), with a **version band** —
+  a `0.5` key unlocks every `0.5.x` patch but not `0.6` (free patches, next
+  minor is a separate purchase). The "Buy" action is configurable via the
+  `cognis.buyUrl` setting. The open-source build ships no embedded key, so its
+  gate is fully open.
+
+### Fixed
+
+- **Engine imports without the `embed-local` extra.** `numpy` is now an optional
+  runtime dependency across the indexer/retrieval import chain, so a
+  lexical+structural-only install imports and runs (degrading gracefully to
+  no-semantic) instead of failing at import. The full install (`embed-local`)
+  is unchanged.
+
+- First-time `semantic_search` no longer needs the embedder loaded on a worker
+  thread (warm-on-startup), and the slow online model-revalidation path is now
+  surfaced instead of hanging silently.
+- e2e contract snapshot for `mcp-config` no longer bakes the machine-specific
+  hashed server name into the golden (was non-portable across workspaces).
+
+### Changed
+
+- Type-checking is now strict over `cognis_indexer` in addition to
+  `packages/core` (`make typecheck`), with the embedder-pipeline Optional
+  narrowing fixed — the planned per-cycle ratchet toward full strict coverage.
+
+
+## [0.4.0] — 2026-06-06
+
+First commercial release of the VS Code / Cursor extension.
+
+### Added
+
+- **Offline license gate scaffold.** `apps/cognis-vscode/src/licenseCore.ts`
+  (pure Ed25519 verification) + `license.ts` (editor plumbing) + the
+  `cognis.enterLicense` command. Paid features call `requireLicense(...)`, which
+  is a no-op in the open-source/source build (no embedded key) and enforces in
+  the prebuilt commercial build. `Set Up for AI` is gated as the first example.
+  Verification is fully offline — no license server, zero ops after a sale.
+- **Real MCP concurrency cap.** `cognis-mcpd` now bounds concurrent tool
+  execution with a process-wide semaphore (`COGNIS_MCP_MAX_CONCURRENCY`,
+  default 16) via a `_bounded_tool` decorator; a saturated server returns a
+  retryable envelope instead of piling up work. This makes the documented
+  "concurrent requests" limit code-backed.
+- **Version is now single-source.** `cognis.__version__` derives from
+  `pyproject.toml` (PEP 621) at runtime instead of a duplicated literal, and the
+  extension test harness reads its version from `package.json`. Engine and
+  extension are both **0.4.0**; the Docker image tag is parameterized
+  (`COGNIS_VERSION`).
+- **Stronger math tests.** Added a unit test verifying the CSAR `α→0 ⇒
+  stationary distribution` endpoint (previously docs-only) and concurrency-cap
+  tests for the MCP server.
+- **Version badge in the panel.** The Cognis sidebar header now shows the
+  installed extension version (e.g. `v0.4.0`).
+- **Standalone sellable installer build.** `scripts/build_installer.py` packages
+  the compiled extension `.vsix` plus an `INSTALL.md` and the commercial license
+  into `dist/cognis-pro-<version>.zip` — the artifact distributed via a
+  Merchant-of-Record. The `dist/` output is git-ignored (never committed).
+- **Architecture + audit section in the README.** A diagram
+  (`assets/architecture.svg`) and a plain-language "how it works" walkthrough,
+  plus an independent capability/security audit summary (ratings backed by code
+  and tests), so users understand the system well enough to self-set-up — while
+  most still choose the one-click installer.
+- **"Connect to AI" MCP setup guide.** New command `cognis.connectToAi` (and the
+  panel's "Connect to AI" primary action) writes/refreshes the workspace MCP
+  config, then opens a copy-paste-ready guide: the collected environment
+  variables, the exact `mcpServers` JSON for this workspace, the on-disk config
+  path, and per-host reload steps for Cursor, VS Code, and Claude Desktop.
+- **Pause / resume index sync.** New commands `cognis.pauseSync` /
+  `cognis.resumeSync` and panel buttons. Sync is auto-on by default; pausing
+  stops the live-indexing daemon and prevents auto-restart on reload or file
+  save, while keeping the built index and MCP wiring intact. The paused state is
+  persisted per workspace and reflected in the panel's Index Status section.
+
+### Changed
+
+- **Security docs corrected.** The "concurrent requests" hard-cap claim was
+  reworded to match the code: isolation comes from per-call wall-time limits and
+  a single-flight lock + cooldown on the semantic stage, not a global request
+  semaphore.
+- **License: the extension is now commercial/proprietary** (`SEE LICENSE IN
+  LICENSE.txt`), separate from the open-source engine. The packaged `.vsix` is
+  the paid product distributed via a Merchant-of-Record.
+
+
 ## [0.3.2] — 2026-06-05
 
 ### Fixed

@@ -70,6 +70,13 @@ jobs:
           python scripts/compare_eval_baseline.py \
             "${{ steps.outdir.outputs.dir }}/report.json"
 
+      - name: E2E flow report + regression gate
+        run: |
+          python tests/e2e/report.py --out eval-reports/e2e
+          python scripts/compare_baseline.py \
+            --current eval-reports/e2e/e2e-report.json \
+            --baseline tests/e2e/baselines/sample.json
+
       - name: Upload eval report artifacts
         if: always()
         uses: actions/upload-artifact@v4

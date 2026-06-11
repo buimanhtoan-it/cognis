@@ -1383,14 +1383,16 @@ def cmd_index(
         db_path.parent.mkdir(parents=True, exist_ok=True)
         db = Database(str(db_path))
 
-    # Build an embedder unless the caller asked us to skip it. We import
+    # Build an embedder unless the caller asked us to skip it. Backend
+    # selection is delegated to the shared registry so the CLI, daemon, and
+    # MCP server all resolve ``config.embedder.backend`` identically. We import
     # lazily because ``sentence-transformers`` is an optional extra.
     embedder: object | None = None
     if not skip_embeddings:
         try:
-            from cognis_indexer.embedder import LocalEmbedder
+            from cognis_indexer.registry import build_embedder
 
-            embedder = LocalEmbedder(model_name=cfg.embedder.model)
+            embedder = build_embedder(cfg.embedder)
         except ImportError as exc:
             click.echo(
                 "error: embedder not installed. "

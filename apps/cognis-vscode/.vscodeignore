@@ -7,3 +7,8 @@ tsconfig.json
 *.vsix
 **/*.ts
 **/*.map
+sim-dist/**
+test-results/**
+playwright-report/**
+tests-e2e/**
+playwright.config.ts

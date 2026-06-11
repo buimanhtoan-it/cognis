@@ -43,11 +43,12 @@ SQLite work is synchronous. The pipeline is a sync API; the daemon wraps it in
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import os
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -189,6 +190,14 @@ class IndexerPipeline:
         self.db = db
         self.config = config
         self.embedder = embedder
+
+        # When a real embedder is plugged in, align the DB's vector dimension to
+        # it. A model swap to a different vector size recreates ``symbol_vec``
+        # at the new dim; vectors are regenerated on this index pass.
+        if embedder is not None:
+            dim = getattr(embedder, "embedding_dim", None)
+            if isinstance(dim, int) and dim > 0:
+                db.reconcile_embedding_dim(dim)
 
         # Parsers are loaded lazily — instantiating tree-sitter parsers up
         # front is wasteful when a repo only contains one language.
@@ -414,6 +423,7 @@ class IndexerPipeline:
         results: list[_FileResult],
         *,
         skip_embeddings: bool,
+        progress: Callable[[int, int], None] | None = None,
     ) -> dict[str, object]:
         """Return ``{content_hash: np.ndarray}`` for every enriched symbol.
 
@@ -421,12 +431,21 @@ class IndexerPipeline:
         is empty. Embedding is batched once across the whole call set so the
         embedder's worker pool is fully utilised.
 
+        ``progress(done, total)``, when supplied, is invoked after each embedded
+        chunk so a caller (e.g. the indexd daemon) can publish live "embeddings
+        X/N" progress — embedding is the dominant cost of a cold index, so this
+        is what turns a multi-minute opaque wait into a moving bar.
+
         We key by ``content_hash`` rather than ``symbol_id`` because identical
         bodies (e.g. duplicate stub functions) share the same vector — this
         also feeds the embedder's LRU cache (CP-6).
         """
         if skip_embeddings or self.embedder is None:
             return {}
+        # Bind to a local so the type narrows to ``Embedder`` (non-None) inside
+        # the nested ``_flush_chunk`` closure — mypy cannot narrow a mutable
+        # instance attribute across a function boundary.
+        embedder = self.embedder
 
         # Collect unique (content_hash → embedding text) pairs. Iterate
         # symbols once to build the mapping; keep insertion order so the
@@ -442,6 +461,7 @@ class IndexerPipeline:
         if not text_by_hash:
             return {}
 
+        total = len(text_by_hash)
         embeddings: dict[str, object] = {}
         chunk_hashes: list[str] = []
         chunk_texts: list[str] = []
@@ -450,7 +470,7 @@ class IndexerPipeline:
             if not chunk_hashes:
                 return True
             try:
-                vectors = self.embedder.embed_batch(chunk_texts)
+                vectors = embedder.embed_batch(chunk_texts)
             except Exception as exc:
                 # An embedder failure should not fail the whole index — degrade
                 # to "no vectors" and let lexical/structural retrieval still work.
@@ -460,6 +480,9 @@ class IndexerPipeline:
                 embeddings[content_hash] = vectors[i]
             chunk_hashes.clear()
             chunk_texts.clear()
+            if progress is not None:
+                with contextlib.suppress(Exception):
+                    progress(len(embeddings), total)
             return True
 
         for content_hash, text in text_by_hash.items():
@@ -537,6 +560,7 @@ class IndexerPipeline:
         *,
         full: bool = False,
         skip_embeddings: bool = False,
+        embed_progress: Callable[[int, int], None] | None = None,
     ) -> IndexerStats:
         """Cold or incremental walk of *repo_root*.
 
@@ -554,12 +578,16 @@ class IndexerPipeline:
         repo_root = repo_root.resolve()
         stats = IndexerStats()
         start = time.monotonic()
+        # Per-phase wall time, so the dominant cost in a cold index (the
+        # fresh-user wait) is measurable instead of a black box.
+        phase_s: dict[str, float] = {}
 
         # Pass 1: parse + enrich every file we plan to write. We collect
         # results in memory because the resolver needs them all at once.
         results: list[_FileResult] = []
         skipped_paths: list[str] = []
 
+        _t = time.monotonic()
         for abs_path in self._walk_repo(repo_root):
             try:
                 rel = abs_path.relative_to(repo_root).as_posix()
@@ -592,10 +620,12 @@ class IndexerPipeline:
                 continue
 
             results.append(fr)
+        phase_s["parse_enrich"] = time.monotonic() - _t
 
         # Pass 2: cross-file edge resolution over the union of newly-parsed
         # symbols and surviving DB symbols (covers the case where a changed
         # file calls into an unchanged file).
+        _t = time.monotonic()
         all_symbols = self._collect_resolver_input(results, skipped_paths, repo_root)
         edges = resolve_edges(all_symbols, repo_root=str(repo_root))
 
@@ -604,12 +634,18 @@ class IndexerPipeline:
         owned_files = {fr.rel_path for fr in results}
         symbol_to_file = {s.id: s.file_path for s in all_symbols}
         edges_by_file = self._group_edges_by_src_file(edges, symbol_to_file)
+        phase_s["resolve_edges"] = time.monotonic() - _t
 
         # Pass 3: embed everything in one batch.
-        embeddings = self._embed_results(results, skip_embeddings=skip_embeddings)
+        _t = time.monotonic()
+        embeddings = self._embed_results(
+            results, skip_embeddings=skip_embeddings, progress=embed_progress
+        )
+        phase_s["embed"] = time.monotonic() - _t
 
         # Pass 4: write each file's payload. The writer's per-file transaction
         # gives us atomic upsert + cascade.
+        _t = time.monotonic()
         for fr in results:
             file_edges = edges_by_file.get(fr.rel_path, []) if fr.rel_path in owned_files else []
             self._write_one(fr, edges=file_edges, embeddings=embeddings)
@@ -621,6 +657,22 @@ class IndexerPipeline:
             )
 
         stats.elapsed_s = time.monotonic() - start
+        phase_s["write"] = stats.elapsed_s - sum(phase_s.values())
+        # Structured per-phase breakdown of a cold/full index: the basis for
+        # deciding where to spend latency-reduction effort (the fresh-user wait).
+        if results:
+            logger.info(
+                "indexed %d files / %d symbols / %d edges in %.1fs "
+                "(parse_enrich=%.1fs resolve_edges=%.1fs embed=%.1fs write=%.1fs)",
+                stats.files_processed,
+                stats.symbols_indexed,
+                stats.edges_resolved,
+                stats.elapsed_s,
+                phase_s.get("parse_enrich", 0.0),
+                phase_s.get("resolve_edges", 0.0),
+                phase_s.get("embed", 0.0),
+                max(0.0, phase_s.get("write", 0.0)),
+            )
         return stats
 
     def index_changed_files(
@@ -873,16 +925,20 @@ class IndexerPipeline:
         # match), but a smaller dict is cheaper in the BLOB executemany call.
         # We forward the global dict directly to avoid an extra dict copy; the
         # writer's _upsert_embeddings handles missing entries gracefully.
-        from numpy import ndarray  # local import: numpy is an optional dep
-        from numpy.typing import NDArray
-
+        #
         # Cast to the writer's expected `dict[str, np.ndarray]` shape. We've
         # only put ndarrays into it via _embed_results, so the cast is sound.
-        emb_dict: dict[str, NDArray[Any]] = {}
-        for symbol in symbols:
-            vec = embeddings.get(symbol.content_hash)
-            if isinstance(vec, ndarray):
-                emb_dict[symbol.content_hash] = vec
+        # numpy is an optional dep (the ``embed-local`` extra); ``embeddings``
+        # can only be non-empty when it is installed, so import it lazily and
+        # skip the cast entirely on a lexical+structural-only install.
+        emb_dict: dict[str, Any] = {}
+        if embeddings:
+            from numpy import ndarray  # local import: numpy is an optional dep
+
+            for symbol in symbols:
+                vec = embeddings.get(symbol.content_hash)
+                if isinstance(vec, ndarray):
+                    emb_dict[symbol.content_hash] = vec
 
         payload = FileWritePayload(
             file_path=fr.rel_path,

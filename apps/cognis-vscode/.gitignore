@@ -1,0 +1,8 @@
+# Build output
+out/
+
+# Panel simulator (generated) + Playwright artifacts
+sim-dist/
+test-results/
+playwright-report/
+.playwright/

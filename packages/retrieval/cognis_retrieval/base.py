@@ -9,11 +9,15 @@ Design reference: *Retrieval Mesh* section of design.md.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from cognis.db import Database
 
-__all__ = ["Hit", "RetrievalLayer"]
+if TYPE_CHECKING:
+    import numpy as np
+    from numpy.typing import NDArray
+
+__all__ = ["Hit", "QueryEmbedder", "RetrievalLayer"]
 
 
 @dataclass
@@ -61,4 +65,23 @@ class RetrievalLayer(Protocol):
         Returns:
             List of :class:`Hit` objects ordered by descending score.
         """
+        ...
+
+
+@runtime_checkable
+class QueryEmbedder(Protocol):
+    """Minimal embedder surface the semantic layer needs to embed a query.
+
+    Declared here (in the dependency-neutral retrieval base) so the retrieval
+    package never has to import ``cognis_indexer`` — which would create a cycle,
+    since the indexer depends on retrieval. The indexer's full ``Embedder``
+    protocol structurally satisfies this narrower one (ISP: the semantic layer
+    only needs ``embed_text`` + ``embedding_dim``, not ``embed_batch``).
+    """
+
+    embedding_dim: int
+    """Dimensionality of the vectors this embedder produces."""
+
+    def embed_text(self, text: str) -> NDArray[np.float32]:
+        """Embed *text* and return a 1-D float32 vector."""
         ...

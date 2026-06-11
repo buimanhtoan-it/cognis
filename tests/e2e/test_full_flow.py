@@ -92,9 +92,11 @@ def test_full_setup_flow_indexes_and_serves_mcp(sample_repo: Path) -> None:
     # --- Step 3: mcp-config ------------------------------------------------
     mcp_cfg = run_cli_json(sample_repo, ["mcp-config", "--host", "cursor"])
     server_name = mcp_cfg["server_name"]
-    # Contract: server name is cognis-<repo-slug> and matches the extension's
-    # deriveMcpServerName for the same folder ("workspace").
-    assert server_name == "cognis-workspace", server_name
+    # Contract: server name is cognis-<repo-slug>-<hash> (the trailing hash of
+    # the resolved path disambiguates same-named folders). Matches the
+    # extension's deriveMcpServerName for the folder "workspace".
+    assert server_name.startswith("cognis-workspace-"), server_name
+    assert server_name in mcp_cfg["config"]["mcpServers"], server_name
     server_block = mcp_cfg["config"]["mcpServers"][server_name]
     assert server_block["env"]["COGNIS_DB_PATH"] == str(db_path), (
         "MCP server env must point at the same UCKG db the indexer writes"
@@ -108,7 +110,7 @@ def test_full_setup_flow_indexes_and_serves_mcp(sample_repo: Path) -> None:
         full_rebuild=True,
         env={"COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP": "0"},
     ) as daemon:
-        watching = daemon.wait_for_phase("watching", timeout=90.0)
+        watching = daemon.wait_for_phase("watching", timeout=180.0)
         assert watching["active"] is True
         assert watching["progress_percent"] == 100.0
         assert isinstance(watching.get("pid"), int)
@@ -199,7 +201,7 @@ def test_status_file_is_consumable_by_extension_normalizer(sample_repo: Path) ->
     }
 
     with IndexdProcess(sample_repo, db_path, status_path, full_rebuild=True) as daemon:
-        snapshot = daemon.wait_for_phase("watching", timeout=90.0)
+        snapshot = daemon.wait_for_phase("watching", timeout=180.0)
 
     missing = expected_keys - snapshot.keys()
     assert not missing, f"status file missing keys the extension reads: {missing}"

@@ -153,13 +153,45 @@ first load. Search tools also use a short-lived in-process result cache (default
 ## Extension points
 
 The architecture intentionally isolates the major backends so they can be
-swapped later without changing the overall workflow:
+swapped without changing the overall workflow:
 
 - vector backend
 - graph traversal backend
 - indexer implementation language
 - MCP transport
 - planner strategy
+
+### Pluggable models (embedder / reranker registry)
+
+Embedding and reranking models sit behind narrow protocols and a registry, so
+swapping one is a local change — the retrieval and capsule flow never sees it.
+
+- **Embedder protocol** — `embed_batch`, `embed_text`, and an `embedding_dim`
+  attribute (`packages/indexer/.../embedder.py`). The semantic layer only needs
+  the narrower `QueryEmbedder` surface (`embed_text` + `embedding_dim`) declared
+  in `packages/retrieval/.../base.py`, which keeps retrieval free of any
+  dependency on the indexer.
+- **Registry / factory** — `cognis_indexer.registry.build_embedder(config)` is
+  the single selection point used by the daemon, MCP server, CLI, and eval. Add
+  a backend with one factory:
+
+  ```python
+  @register_embedder("my_backend")
+  def _build(config: EmbedderConfig) -> Embedder:
+      from cognis_indexer.embedder import MyEmbedder
+      return MyEmbedder(model=config.model)
+  ```
+
+  Built-in backends: `local` (production), `voyage` and `openai` (selectable
+  stubs returning zero vectors until their API call is implemented).
+- **Model-driven dimension** — an embedder reports its own `embedding_dim`;
+  `Database.reconcile_embedding_dim` persists it and recreates the `symbol_vec`
+  table when a different-sized model is plugged in. No pinned constant.
+- **Reranker seam** — `cognis_retrieval.reranker.build_reranker(config)` returns
+  a pass-through `NoOpReranker` when `reranker.enabled` is false (flow
+  unchanged), or a registered backend otherwise. Register one with
+  `@register_reranker(...)`. The bundled `local` cross-encoder backend is a stub
+  today.
 
 ## Related documents
 

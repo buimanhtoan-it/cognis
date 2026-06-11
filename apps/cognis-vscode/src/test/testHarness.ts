@@ -17,6 +17,21 @@ import * as fs from "node:fs";
 import Module from "node:module";
 import * as path from "node:path";
 
+/**
+ * The extension version, read once from package.json so test fixtures never
+ * drift from the real version (single source of truth = package.json).
+ */
+export const HARNESS_VERSION: string = (() => {
+  try {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(__dirname, "..", "..", "package.json"), "utf8")
+    ) as { version?: string };
+    return pkg.version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+})();
+
 // ---------------------------------------------------------------------------
 // VS Code stub
 // ---------------------------------------------------------------------------
@@ -216,7 +231,7 @@ export interface HealthDescriptor {
 const okCheck: HealthCheck = { status: "ok", message: "ok" };
 
 export const HEALTHY: HealthDescriptor = {
-  runtime_version: "0.3.2",
+  runtime_version: HARNESS_VERSION,
   overall: "ok",
   checks: {
     config: okCheck,
@@ -230,7 +245,7 @@ export const HEALTHY: HealthDescriptor = {
 
 /** A fresh repo whose semantic index is still being built in the background. */
 export const FRESH_INDEXING: HealthDescriptor = {
-  runtime_version: "0.3.2",
+  runtime_version: HARNESS_VERSION,
   overall: "warn",
   checks: {
     config: okCheck,

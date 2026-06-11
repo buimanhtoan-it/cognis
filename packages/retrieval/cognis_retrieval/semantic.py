@@ -26,31 +26,25 @@ from collections.abc import Callable
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
 from cognis.db import Database
-from numpy.typing import NDArray
 
-from cognis_retrieval.base import Hit
+from cognis_retrieval.base import Hit, QueryEmbedder
 
+# ``numpy`` ships under the ``embed-local`` extra. Import it lazily so importing
+# ``cognis_retrieval`` (which re-exports this module) stays safe on a
+# lexical+structural-only install. ``np`` is only used at runtime when actually
+# embedding/serialising vectors, a path that requires an embedder (hence numpy)
+# to be reachable in the first place.
 if TYPE_CHECKING:
-    pass
+    import numpy as np
+    from numpy.typing import NDArray
+else:
+    try:
+        import numpy as np
+    except ImportError:  # pragma: no cover - exercised only without embed-local
+        np = None
 
 __all__ = ["SemanticLayer", "populate_vec"]
-
-
-# ---------------------------------------------------------------------------
-# Embedder Protocol (lightweight local re-declaration to avoid hard dep)
-# ---------------------------------------------------------------------------
-
-
-class _EmbedderProto:
-    """Minimal structural type for embedder objects accepted by SemanticLayer."""
-
-    embedding_dim: int
-
-    def embed_text(self, text: str) -> NDArray[np.float32]:
-        """Embed *text* and return a float32 vector."""
-        raise NotImplementedError
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +89,7 @@ def populate_vec(db: Database, symbol_id: str, embedding: NDArray[np.float32]) -
 
 
 def _make_query_embed_fn(
-    embedder: _EmbedderProto,
+    embedder: QueryEmbedder,
 ) -> Callable[[str], NDArray[np.float32]]:
     """Return a per-embedder LRU-cached embed function with capacity 1 000."""
 
@@ -134,7 +128,7 @@ class SemanticLayer:
             embedder: Any object satisfying the :class:`Embedder` protocol
                 (``embed_text`` method + ``embedding_dim`` attribute).
         """
-        self._embedder: _EmbedderProto = embedder
+        self._embedder: QueryEmbedder = embedder
         self._embed_cached: Callable[[str], NDArray[np.float32]] = _make_query_embed_fn(embedder)
 
     def search(self, query: str, k: int, db: Database) -> list[Hit]:

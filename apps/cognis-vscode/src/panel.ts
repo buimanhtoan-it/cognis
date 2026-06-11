@@ -6,10 +6,18 @@ import type {
   WorkspaceStatus,
 } from "./types";
 
-const ACTION_COMMANDS: Record<string, string> = {
+/**
+ * Maps webview `data-action` ids to the VS Code commands they invoke. Exported
+ * so the panel simulator/Playwright harness can assert that every clickable
+ * button posts an action that resolves to a real command (the UI contract).
+ */
+export const ACTION_COMMANDS: Record<string, string> = {
   setup: "cognis.setupForAi",
   repair: "cognis.repairSetup",
   clearReindex: "cognis.clearAndReindex",
+  connectAi: "cognis.connectToAi",
+  pauseSync: "cognis.pauseSync",
+  resumeSync: "cognis.resumeSync",
   health: "cognis.showHealth",
   output: "cognis.showOutput",
   refreshPrerequisites: "cognis.refreshPrerequisites",
@@ -38,6 +46,10 @@ export interface PanelContext {
    * machine this is the first thing to fix, before any setup can succeed.
    */
   backendAvailable?: boolean;
+  /** True when the user has explicitly paused index sync for this workspace. */
+  syncPaused?: boolean;
+  /** Extension version string, rendered in the panel header (e.g. "0.4.0"). */
+  version?: string;
 }
 
 export interface PanelPrimaryAction {
@@ -157,6 +169,21 @@ interface IndexSectionView {
 
 function deriveIndexSectionView(ctx: PanelContext): IndexSectionView {
   const status = ctx.indexStatus;
+  // An explicit pause wins over any stale daemon status: show a clear paused
+  // state so the user knows updates are intentionally stopped.
+  if (ctx.syncPaused && !status?.active) {
+    return {
+      title: "Index sync paused",
+      summary:
+        "Automatic indexing is paused. Cognis still answers from the last-synced index; resume to track new changes.",
+      progressPercent: 0,
+      progressLabel: "Paused",
+      busy: false,
+      pendingFiles: [],
+      inflightFiles: [],
+      recentFiles: status?.recentFiles ?? [],
+    };
+  }
   if (status) {
     return {
       title: deriveIndexingHeadline(ctx),
@@ -303,7 +330,7 @@ export function derivePanelView(ctx: PanelContext): PanelView {
       detail:
         "Your index is built. One step left: connect Cognis to your editor's AI (MCP) so it can search your code in chat.",
       statusClass: "status-ok",
-      primary: { id: "setup", label: "Connect to AI" },
+      primary: { id: "connectAi", label: "Connect to AI" },
     };
   }
 
@@ -674,6 +701,17 @@ function panelHtml(
       font-size: 16px;
       font-weight: 700;
       letter-spacing: 0.02em;
+    }
+    .version-badge {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 1px 7px;
+      margin-left: 6px;
+      vertical-align: middle;
     }
     .subtitle {
       font-size: 12px;
@@ -1135,7 +1173,11 @@ function panelHtml(
   <div class="hero">
     <img src="${logoSrc}" alt="Cognis logo" />
     <div class="hero-copy">
-      <div class="title">Cognis</div>
+      <div class="title">Cognis${
+        context.version
+          ? ` <span class="version-badge">v${escapeHtml(context.version)}</span>`
+          : ""
+      }</div>
       <div class="subtitle">Semantic index and MCP setup for AI tooling.</div>
     </div>
   </div>
@@ -1174,6 +1216,11 @@ function panelHtml(
         </div>
       </div>
       <div class="surface-actions">
+        ${
+          context.syncPaused
+            ? `<button data-action="resumeSync" title="Resume automatic indexing of file changes in this workspace.">Resume sync</button>`
+            : `<button data-action="pauseSync" title="Pause automatic indexing. Cognis keeps answering from the current index but stops tracking new changes.">Pause sync</button>`
+        }
         <button data-action="clearReindex" title="Delete the stored index and rebuild from scratch. Keeps your config and MCP wiring.">Rebuild index</button>
       </div>
     </div>
@@ -1244,6 +1291,24 @@ function panelHtml(
 </html>`;
 }
 
+/**
+ * Render the exact production webview HTML for a given context, off the VS Code
+ * host. Used by the panel simulator (tests/Playwright) so the real markup +
+ * button wiring can be exercised in a plain browser. `logoSrc`/`cspSource`/
+ * `nonce` are only string-interpolated by {@link panelHtml}, so stub values are
+ * sufficient and faithful for everything except the live VS Code resource URIs.
+ */
+export function renderPanelHtml(context: PanelContext): string {
+  const view = derivePanelView(context);
+  return panelHtml(
+    "media/logo.png" as unknown as vscode.Uri,
+    "vscode-resource:",
+    view,
+    context,
+    "simnonce",
+  );
+}
+
 function getNonce(): string {
   const chars =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -1260,7 +1325,12 @@ export class CognisPanelProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private context: PanelContext = { status: "unknown" };
 
-  constructor(private readonly extensionUri: vscode.Uri) {}
+  constructor(
+    private readonly extensionUri: vscode.Uri,
+    private readonly version?: string
+  ) {
+    this.context = { status: "unknown", version };
+  }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
@@ -1294,7 +1364,7 @@ export class CognisPanelProvider implements vscode.WebviewViewProvider {
   }
 
   updateContext(context: PanelContext): void {
-    this.context = context;
+    this.context = { ...context, version: context.version ?? this.version };
     this.render();
   }
 

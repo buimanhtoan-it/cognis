@@ -30,6 +30,39 @@ from cognis.config import Config
 
 __all__ = ["Config", "__version__"]
 
-# Single source of truth for runtime version. PEP 621 metadata in pyproject is
-# the canonical tag; this constant tracks it for display in ``cognis-cli health``.
-__version__: str = "0.3.2"
+
+def _resolve_version() -> str:
+    """Return the engine version from a single source of truth.
+
+    ``pyproject.toml`` (PEP 621) is canonical. In a source or editable checkout
+    we read it directly so the repo's declared version always wins (installed
+    editable metadata can go stale). For a shipped wheel — where no
+    ``pyproject.toml`` sits beside the installed package — we fall back to
+    ``importlib.metadata`` (which was populated from that same pyproject at build
+    time). Finally ``"0+unknown"`` so import never fails.
+    """
+    try:
+        import tomllib
+        from pathlib import Path
+
+        for parent in Path(__file__).resolve().parents:
+            candidate = parent / "pyproject.toml"
+            if candidate.is_file():
+                data = tomllib.loads(candidate.read_text(encoding="utf-8"))
+                name = str(data.get("project", {}).get("name", ""))
+                if name == "cognis-engine":
+                    return str(data["project"]["version"])
+    except Exception:
+        pass
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+
+        return version("cognis-engine")
+    except PackageNotFoundError:
+        return "0+unknown"
+    except Exception:
+        return "0+unknown"
+
+
+# Single source of truth for runtime version: PEP 621 metadata in pyproject.
+__version__: str = _resolve_version()

@@ -50,9 +50,8 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import numpy as np
 from cognis.db import (
     Database,
     delete_symbol,
@@ -62,6 +61,18 @@ from cognis.models import Edge, FileRecord, SymbolAttribute, SymbolNode
 
 from cognis_indexer.parsers.base import ParsedSymbol
 from cognis_indexer.resolver.base import ResolvedEdge
+
+# ``numpy`` ships under the ``embed-local`` extra. Import it lazily so the
+# writer (and the indexer pipeline importing it) stays importable without the
+# extra. ``np`` is only touched when upserting embedding vectors, which only
+# happens when embeddings were produced — i.e. numpy is present.
+if TYPE_CHECKING:
+    import numpy as np
+else:
+    try:
+        import numpy as np
+    except ImportError:  # pragma: no cover - exercised only without embed-local
+        np = None
 
 __all__ = ["FileWritePayload", "IndexWriter"]
 

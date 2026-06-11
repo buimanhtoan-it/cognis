@@ -33,12 +33,15 @@ Hard limits (design §Error Handling → Hard limits):
 
 from __future__ import annotations
 
+import contextlib
+import functools
 import logging
 import os
 import queue
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, TypeVar, cast
@@ -88,7 +91,67 @@ _DB_CACHE: dict[str, Database] = {}
 _SEMANTIC_STAGE_LOCK = threading.Lock()
 _SEMANTIC_STATE_LOCK = threading.Lock()
 _SEMANTIC_DISABLED_UNTIL: float = 0.0
+
+# Global cap on concurrently-executing tool calls. Protects the process from
+# unbounded fan-out (an MCP client issuing many parallel requests) independent
+# of the per-stage semantic lock. A saturated server fails fast with a
+# retryable TIMEOUT envelope rather than piling up work. ``0``/negative disables
+# the cap. See docs/security.md (MCP tool limits).
+_MAX_CONCURRENCY: int = int(os.environ.get("COGNIS_MCP_MAX_CONCURRENCY", "16"))
+_CONCURRENCY_ACQUIRE_TIMEOUT_S: float = float(
+    os.environ.get("COGNIS_MCP_CONCURRENCY_ACQUIRE_TIMEOUT_S", "2.0")
+)
+_CONCURRENCY_SEMAPHORE: threading.BoundedSemaphore | None = (
+    threading.BoundedSemaphore(_MAX_CONCURRENCY) if _MAX_CONCURRENCY > 0 else None
+)
 _T = TypeVar("_T")
+
+
+@contextlib.contextmanager
+def _concurrency_slot(tool: str) -> Iterator[None]:
+    """Acquire a global tool-execution slot for the duration of *tool*.
+
+    Bounds the number of tool calls running at once across all threads. When the
+    server is saturated, blocks up to ``_CONCURRENCY_ACQUIRE_TIMEOUT_S`` then
+    raises a retryable :class:`McpError` so the client can back off instead of
+    overloading the process. A no-op when the cap is disabled.
+    """
+    sem = _CONCURRENCY_SEMAPHORE
+    if sem is None:
+        yield
+        return
+    if not sem.acquire(timeout=_CONCURRENCY_ACQUIRE_TIMEOUT_S):
+        raise McpError(
+            TIMEOUT,
+            f"Cognis MCP server is at capacity ({_MAX_CONCURRENCY} concurrent calls); "
+            f"tool '{tool}' was not admitted. Retry shortly.",
+            retryable=True,
+        )
+    try:
+        yield
+    finally:
+        sem.release()
+
+
+def _bounded_tool(fn: Callable[..., _T]) -> Callable[..., _T]:
+    """Wrap a public MCP tool so every invocation holds a global concurrency slot.
+
+    The slot is acquired before the tool body runs and released when it returns.
+    If the server is at capacity the wrapper returns the tool's standard error
+    envelope (tools never raise), keeping the contract identical to an internal
+    timeout.
+    """
+
+    @functools.wraps(fn)
+    def _wrapper(*args: Any, **kwargs: Any) -> _T:
+        try:
+            with _concurrency_slot(fn.__name__):
+                return fn(*args, **kwargs)
+        except McpError as exc:
+            return cast(_T, exc.to_envelope())
+
+    return _wrapper
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -643,11 +706,211 @@ def _semantic_index_available(db: Database) -> bool:
         return False
 
 
+@lru_cache(maxsize=4)
+def _shared_reranker(repo_root: str | None) -> Any:
+    """Build (once per repo root) the configured reranker.
+
+    Defaults to a pass-through ``NoOpReranker`` unless ``reranker.enabled`` is
+    set in the repo config, so this is effectively free when the feature is off.
+    """
+    from cognis.config import Config
+    from cognis_retrieval.reranker import build_reranker
+
+    cfg = Config.load(repo_root) if repo_root is not None else Config.default()
+    return build_reranker(cfg.reranker)
+
+
+def _rerank_capsule_hits(query: str, hits: list[Any]) -> list[Any]:
+    """Reorder fused capsule hits via the configured reranker.
+
+    A failure here must never sink the capsule, so any reranker error degrades
+    to the original (already score-sorted) hit order.
+    """
+    if not hits:
+        return hits
+    try:
+        reranker = _shared_reranker(_repo_root_for_filters())
+        # Pass the full candidate set; the composer enforces the token budget.
+        return cast("list[Any]", reranker.rerank(query, hits, len(hits)))
+    except Exception:
+        logger.debug("Reranking stage failed; using fused order", exc_info=True)
+        return hits
+
+
+# ---------------------------------------------------------------------------
+# Context-capsule pipeline stages
+#
+# These intent-named helpers let ``retrieve_context_capsule`` read as prose:
+# classify the task, plan the layer budget, gather evidence, rerank, compose.
+# Each stage owns its own failure containment so the orchestrator never has to.
+# ---------------------------------------------------------------------------
+
+
+def _connect_capsule_db() -> Database:
+    """Return the active UCKG, raising a retryable McpError if unreachable."""
+    db = _get_db()
+    try:
+        db.connect()
+    except Exception as exc:
+        raise McpError(
+            INDEX_NOT_READY,
+            f"Database not accessible: {exc}",
+            retryable=True,
+        ) from exc
+    return db
+
+
+@dataclass
+class _CapsulePlan:
+    """The planner's verdict for one capsule request."""
+
+    mode: Any
+    confidence: float
+    quotas: Any
+    semantic_available: bool
+
+
+def _plan_capsule_retrieval(
+    planner: Planner, task: str, max_tokens: int, db: Database
+) -> _CapsulePlan:
+    """Classify *task* and decide how much budget each retrieval layer gets.
+
+    Semantic is only offered to the budget when a populated vec0 index exists,
+    so absent-layer tokens flow to lexical/structural (see planner reallocation).
+    """
+    mode, confidence = planner.classify(task)
+    plan = planner.layer_plan(mode)
+
+    semantic_available = _semantic_index_available(db)
+    available_layers = {"lexical", "structural"}
+    if semantic_available:
+        available_layers.add("semantic")
+    quotas = planner.allocate_budget(max_tokens, plan, available_layers)
+
+    return _CapsulePlan(
+        mode=mode,
+        confidence=confidence,
+        quotas=quotas,
+        semantic_available=semantic_available,
+    )
+
+
+def _gather_lexical_evidence(task: str, quotas: Any, db: Database) -> list[Any]:
+    """Run the FTS lexical layer; return [] on any failure (never raises)."""
+    from cognis_retrieval.lexical import LexicalLayer
+
+    try:
+        k_lex = max(1, quotas.lexical // 50)  # ~50 tokens per hit estimate
+        return _filter_retrieval_hits(db, LexicalLayer().search(task, k_lex, db))
+    except Exception:
+        logger.debug("Lexical retrieval failed", exc_info=True)
+        return []
+
+
+def _gather_semantic_evidence(task: str, quotas: Any, db: Database, start_time: float) -> list[Any]:
+    """Run the semantic KNN layer under the single-flight deadline guard.
+
+    Returns [] when the embedder is unavailable, busy, or cooling down.
+    """
+    from cognis_mcpd.embedder_pool import get_shared_semantic_layer
+
+    try:
+        k_sem = max(1, quotas.semantic // 100)
+        hits = _run_semantic_with_deadline(
+            "retrieve_context_capsule",
+            "semantic_leg",
+            start_time,
+            lambda: get_shared_semantic_layer().search(task, k_sem, db),
+            timeout_s=_DISCOVER_SEMANTIC_TIMEOUT_S,
+            cooldown_on_timeout=False,
+        )
+        return _filter_retrieval_hits(db, hits)
+    except Exception:
+        logger.debug("Semantic retrieval failed (embedder may be unavailable)", exc_info=True)
+        return []
+
+
+def _diffuse_structural_evidence(
+    seed_layers: list[list[Any]], quotas: Any, db: Database
+) -> list[Any]:
+    """Spread lexical+semantic seeds across the code graph via CSAR (PPR).
+
+    Returns only the *newly reached* on-path symbols (direct seed matches are
+    already in the candidate set), tagged ``layer="structural"`` so the bugfix
+    composer can promote them to root-cause candidates. [] on any failure.
+
+    See docs/csar.md: multi-hop, weighted, bidirectional diffusion with cost
+    bounded by 1/(alpha*eps) regardless of repo size.
+    """
+    if not seed_layers:
+        return []
+
+    from cognis_retrieval.base import Hit
+    from cognis_retrieval.csar import build_code_graph, diffuse_seed_hits
+
+    try:
+        k_struct = max(5, quotas.structural // 80)
+        graph = build_code_graph(db)
+        diffused = diffuse_seed_hits(
+            graph,
+            seed_layers,
+            k=k_struct,
+            alpha=_CSAR_DEFAULT_ALPHA,
+            eps=_CSAR_DEFAULT_EPS,
+        )
+        seed_ids = {h.symbol_id for hit_list in seed_layers for h in hit_list}
+        on_path = [
+            Hit(
+                symbol_id=hit.symbol_id,
+                score=hit.score,
+                layer="structural",
+                reason=hit.reason,
+                evidence=hit.evidence,
+            )
+            for hit in diffused
+            if hit.symbol_id not in seed_ids
+        ]
+        return _filter_retrieval_hits(db, on_path)
+    except Exception:
+        logger.debug("CSAR diffusion stage failed", exc_info=True)
+        return []
+
+
+def _compose_capsule(
+    *,
+    task: str,
+    plan: _CapsulePlan,
+    hits: list[Any],
+    max_tokens: int,
+    db: Database,
+    include_runtime: bool,
+) -> dict[str, Any]:
+    """Compose the final capsule, translating ComposeError into an McpError."""
+    from cognis.capsule.composer import CapsuleComposer, ComposeError
+
+    try:
+        capsule = CapsuleComposer().compose(
+            task=task,
+            mode=plan.mode,
+            confidence=plan.confidence,
+            hits=hits,
+            max_tokens=max_tokens,
+            db=db,
+            include_runtime=include_runtime,
+        )
+    except ComposeError as exc:
+        raise McpError(
+            INTERNAL_ERROR, f"Capsule composition failed: {exc}", retryable=False
+        ) from exc
+    return capsule.model_dump(by_alias=True)
+
+
 # ---------------------------------------------------------------------------
 # Tool 1: symbol_lookup
 # ---------------------------------------------------------------------------
 
 
+@_bounded_tool
 def symbol_lookup(name_or_id: str, kind: str | None = None) -> dict[str, Any]:
     """Resolve a single symbol by exact id, qualified_name, or fuzzy name.
 
@@ -736,6 +999,7 @@ def symbol_lookup(name_or_id: str, kind: str | None = None) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+@_bounded_tool
 def symbol_search(
     query: str,
     k: int = 8,
@@ -986,6 +1250,7 @@ def _semantic_search_core(
     return results
 
 
+@_bounded_tool
 def semantic_search(
     query: str,
     k: int = 10,
@@ -1024,6 +1289,11 @@ def semantic_search(
         cached = cache_get("semantic_search", args)
         if cached is not None:
             ok = True
+            logger.info(
+                "semantic_search served from cache in %.0fms (%d hits)",
+                (time.perf_counter() - start) * 1000.0,
+                len(cached) if isinstance(cached, list) else 0,
+            )
             return cached
 
         if not query or not query.strip():
@@ -1070,6 +1340,15 @@ def semantic_search(
         _check_elapsed(start, "semantic_search", enforce_soft=False)
 
         ok = True
+        # First call includes the one-time embedder/semantic-layer warm (logged
+        # separately by embedder_pool); subsequent calls are the steady-state
+        # query latency. This split is the basis for the "first semantic query
+        # is slow" UX decision (pre-warm vs accept).
+        logger.info(
+            "semantic_search computed %d hits in %.0fms",
+            len(results),
+            (time.perf_counter() - start) * 1000.0,
+        )
         if _cacheable_result(results):
             cache_set("semantic_search", args, results)
         return results
@@ -1089,6 +1368,7 @@ def semantic_search(
 # ---------------------------------------------------------------------------
 
 
+@_bounded_tool
 def discover_symbols(
     query: str,
     k: int = 10,
@@ -1316,6 +1596,7 @@ def _csar_seed_hits(
     return seed_layers
 
 
+@_bounded_tool
 def diffuse_context(
     query: str,
     k: int = 10,
@@ -1456,6 +1737,7 @@ def diffuse_context(
 # ---------------------------------------------------------------------------
 
 
+@_bounded_tool
 def resolve_symbols(
     symbol_ids: list[str],
     include_body: bool = True,
@@ -1534,6 +1816,7 @@ def resolve_symbols(
 # ---------------------------------------------------------------------------
 
 
+@_bounded_tool
 def dependency_trace(symbol_id: str, direction: str = "out", depth: int = 3) -> dict[str, Any]:
     """Trace symbol dependencies via the call graph.
 
@@ -1639,6 +1922,7 @@ def dependency_trace(symbol_id: str, direction: str = "out", depth: int = 3) -> 
 # ---------------------------------------------------------------------------
 
 
+@_bounded_tool
 def retrieve_context_capsule(
     task: str,
     max_tokens: int = 8000,
@@ -1662,158 +1946,52 @@ def retrieve_context_capsule(
         if not task or not task.strip():
             raise McpError(INVALID_ARGUMENT, "task must be a non-empty string")
 
-        # Clamp max_tokens.
         max_tokens = max(500, min(max_tokens, _MAX_TOKENS))
-
-        db = _get_db()
-
-        # Check DB is accessible.
-        try:
-            db.connect()
-        except Exception as exc:
-            raise McpError(
-                INDEX_NOT_READY,
-                f"Database not accessible: {exc}",
-                retryable=True,
-            ) from exc
-
+        db = _connect_capsule_db()
         planner = Planner()
 
-        # Step 1: classify.
-        mode, confidence = planner.classify(task)
-
-        _check_elapsed(start_time, "retrieve_context_capsule")
-
-        # Step 2: layer plan.
-        plan = planner.layer_plan(mode)
-
-        # Step 3: allocate budget (available layers at MVP).
-        semantic_available = _semantic_index_available(db)
-        available_layers = {"lexical", "structural"}
-        if semantic_available:
-            available_layers.add("semantic")
-        quotas = planner.allocate_budget(max_tokens, plan, available_layers)
-
-        _check_elapsed(start_time, "retrieve_context_capsule")
-
-        # Step 4: run retrieval layers.
         from cognis_retrieval.base import Hit
-        from cognis_retrieval.lexical import LexicalLayer
 
-        all_hits: list[Hit] = []
-        lex_hits: list[Hit] = []
-        sem_hits: list[Hit] = []
-
-        # Lexical retrieval.
-        try:
-            lex_layer = LexicalLayer()
-            k_lex = max(1, quotas.lexical // 50)  # ~50 tokens per hit estimate
-            lex_hits = _filter_retrieval_hits(db, lex_layer.search(task, k_lex, db))
-            all_hits.extend(lex_hits)
-        except Exception:
-            logger.debug("Lexical retrieval failed", exc_info=True)
-
+        # Plan: classify the task and budget the retrieval layers.
+        plan = _plan_capsule_retrieval(planner, task, max_tokens, db)
         _check_elapsed(start_time, "retrieve_context_capsule")
 
-        # Semantic retrieval (skip if embedder is unavailable, busy, or cooling down).
-        semantic_attempted = False
-        if semantic_available:
-            semantic_attempted = True
-            try:
-                from cognis_mcpd.embedder_pool import get_shared_semantic_layer
+        # Gather evidence layer by layer, accumulating into one candidate set.
+        lex_hits = _gather_lexical_evidence(task, plan.quotas, db)
+        _check_elapsed(start_time, "retrieve_context_capsule")
 
-                k_sem = max(1, quotas.semantic // 100)
-                sem_hits = _run_semantic_with_deadline(
-                    "retrieve_context_capsule",
-                    "semantic_leg",
-                    start_time,
-                    lambda: get_shared_semantic_layer().search(task, k_sem, db),
-                    timeout_s=_DISCOVER_SEMANTIC_TIMEOUT_S,
-                    cooldown_on_timeout=False,
-                )
-                sem_hits = _filter_retrieval_hits(db, sem_hits)
-                all_hits.extend(sem_hits)
-            except Exception:
-                logger.debug(
-                    "Semantic retrieval failed (embedder may be unavailable)", exc_info=True
-                )
-
+        sem_hits: list[Hit] = []
+        if plan.semantic_available:
+            sem_hits = _gather_semantic_evidence(task, plan.quotas, db, start_time)
         _check_elapsed(
             start_time,
             "retrieve_context_capsule",
-            enforce_soft=not semantic_attempted,
+            enforce_soft=not plan.semantic_available,
         )
 
-        # Structural stage — CSAR spreading-activation (flagship engine).
-        #
-        # Instead of a single-hop BFS from the top RRF seeds, diffuse the
-        # lexical + semantic hits over the whole code graph via Personalized
-        # PageRank (docs/csar.md). This is the primary way cognis recovers the
-        # full flow around a relevant region: multi-hop, weighted, and
-        # bidirectional, with cost bounded by 1/(alpha*eps) regardless of repo
-        # size. Diffused on-path symbols are tagged structural so the bugfix
-        # composer surfaces them as root-cause candidates.
+        # Diffuse the seeds across the code graph to recover the surrounding flow.
         seed_layers = [hit_list for hit_list in (lex_hits, sem_hits) if hit_list]
-        if seed_layers:
-            try:
-                from cognis_retrieval.csar import build_code_graph, diffuse_seed_hits
-
-                k_struct = max(5, quotas.structural // 80)
-                graph = build_code_graph(db)
-                diffused = diffuse_seed_hits(
-                    graph,
-                    seed_layers,
-                    k=k_struct,
-                    alpha=_CSAR_DEFAULT_ALPHA,
-                    eps=_CSAR_DEFAULT_EPS,
-                )
-                seed_ids = {h.symbol_id for hit_list in seed_layers for h in hit_list}
-                struct_hits: list[Hit] = []
-                for hit in diffused:
-                    # Only the *newly reached* (on-path) symbols add structural
-                    # signal; direct seed matches are already in all_hits.
-                    if hit.symbol_id in seed_ids:
-                        continue
-                    struct_hits.append(
-                        Hit(
-                            symbol_id=hit.symbol_id,
-                            score=hit.score,
-                            layer="structural",
-                            reason=hit.reason,
-                            evidence=hit.evidence,
-                        )
-                    )
-                all_hits.extend(_filter_retrieval_hits(db, struct_hits))
-            except Exception:
-                logger.debug("CSAR diffusion stage failed", exc_info=True)
-
+        struct_hits = _diffuse_structural_evidence(seed_layers, plan.quotas, db)
         _check_elapsed(
             start_time,
             "retrieve_context_capsule",
-            enforce_soft=not semantic_attempted,
+            enforce_soft=not plan.semantic_available,
         )
 
-        # Step 5: compose capsule.
-        from cognis.capsule.composer import CapsuleComposer, ComposeError
-
-        composer = CapsuleComposer()
-        try:
-            capsule = composer.compose(
-                task=task,
-                mode=mode,
-                confidence=confidence,
-                hits=all_hits,
-                max_tokens=max_tokens,
-                db=db,
-                include_runtime=include_runtime,
-            )
-        except ComposeError as exc:
-            raise McpError(
-                INTERNAL_ERROR, f"Capsule composition failed: {exc}", retryable=False
-            ) from exc
+        # Rerank the fused candidates (a no-op unless reranking is enabled),
+        # then compose the capsule under the token budget.
+        candidate_hits = _rerank_capsule_hits(task, [*lex_hits, *sem_hits, *struct_hits])
+        result = _compose_capsule(
+            task=task,
+            plan=plan,
+            hits=candidate_hits,
+            max_tokens=max_tokens,
+            db=db,
+            include_runtime=include_runtime,
+        )
 
         ok = True
-        return capsule.model_dump(by_alias=True)
+        return result
 
     except McpError as exc:
         return exc.to_envelope()

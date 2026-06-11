@@ -66,26 +66,25 @@ def _build_embedder(config: Config) -> Embedder | None:
     The daemon never refuses to start because the embedder is missing — that
     would block lexical and structural retrieval too. Instead we log a warning
     and continue with ``embedder=None``.
+
+    Backend selection is delegated to :func:`cognis_indexer.registry.build_embedder`
+    so this daemon, ``cognis-mcpd``, ``cognis-cli``, and the eval harness all
+    resolve ``config.embedder.backend`` through the same registry.
     """
-    backend = config.embedder.backend
+    from cognis_indexer.registry import UnknownEmbedderBackendError, build_embedder
+
     try:
-        if backend == "local":
-            from cognis_indexer.embedder import LocalEmbedder
-
-            return LocalEmbedder(model_name=config.embedder.model)
-        if backend == "voyage":
-            from cognis_indexer.embedder import VoyageEmbedder
-
-            return VoyageEmbedder(model=config.embedder.model)
+        return build_embedder(config.embedder)
+    except UnknownEmbedderBackendError as exc:
+        logger.warning("%s; continuing without semantic vectors", exc)
+        return None
     except ImportError as exc:
         logger.warning(
             "embedder %s unavailable (%s); continuing without semantic vectors",
-            backend,
+            config.embedder.backend,
             exc,
         )
         return None
-    logger.warning("unknown embedder backend %r; continuing without semantic vectors", backend)
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -345,9 +344,35 @@ async def run_daemon(
                 status_path,
                 _compose_status_payload(watcher=None, runtime_status=runtime_status),
             )
+
+            # Live embedding progress: embedding is the dominant cost of a cold
+            # index, so move the bar from 70→100% as vectors are generated
+            # instead of sitting at a static 70% for minutes. The callback runs
+            # on the executor thread and only mutates primitive status fields;
+            # the status-writer loop publishes them on its 0.2s tick.
+            def _on_embed_progress(done: int, total: int) -> None:
+                pct = 70.0 + 30.0 * (done / total) if total > 0 else 70.0
+                runtime_status.update(
+                    phase="embedding",
+                    message=f"Generating semantic embeddings… {done}/{total} symbols (search already works)",
+                    progress_percent=round(pct, 1),
+                )
+                # The continuous status-writer loop is not running yet during
+                # cold index, so publish directly from this executor thread
+                # (atomic write) — otherwise the bar would sit static at 70%.
+                _write_status_file(
+                    status_path,
+                    _compose_status_payload(watcher=None, runtime_status=runtime_status),
+                )
+
             embed_stats = await loop.run_in_executor(
                 index_executor,
-                lambda: pipeline.index_repo(repo_root, full=True, skip_embeddings=False),
+                lambda: pipeline.index_repo(
+                    repo_root,
+                    full=True,
+                    skip_embeddings=False,
+                    embed_progress=_on_embed_progress,
+                ),
             )
             logger.info(
                 "embedding backfill complete: files=%d symbols=%d in %.2fs",

@@ -60,7 +60,18 @@ queries.
 | Maximum traversal depth | 8 |
 | Maximum result count | 50 |
 | Maximum capsule size | 32,000 tokens |
+| Soft timeout | 5 seconds |
 | Hard timeout | 10 seconds |
+| Max concurrent tool calls | 16 (env `COGNIS_MCP_MAX_CONCURRENCY`) |
+
+The global concurrency cap is a process-wide bounded semaphore: every tool call
+must acquire one of `COGNIS_MCP_MAX_CONCURRENCY` slots (default 16) before
+running. When the server is saturated, a call that cannot be admitted within a
+short acquire timeout returns a retryable error envelope instead of piling up
+work. In addition, the semantic-retrieval stage is **single-flighted** (one
+in-flight semantic query at a time) and enters a short **cooldown** after a
+timeout, so a slow embedder cannot stack overlapping work. Set the cap to `0` to
+disable it.
 
 ## Audit logging
 

@@ -3,7 +3,7 @@ import { getOutputChannel } from "./cli";
 import { isLiveIndexing } from "./indexd";
 import { hasExpectedMcpConfigForRepo } from "./mcpConfig";
 import { verifyPythonEnvironment } from "./python";
-import { setAutoManaged, setMcpEnabled } from "./state";
+import { isSyncPaused, setAutoManaged, setMcpEnabled } from "./state";
 import {
   diagnoseRepairPlan,
   enableMcp,
@@ -133,7 +133,13 @@ export async function reconcileWorkspaceOnActivate(
   const autoLive = vscode.workspace
     .getConfiguration("cognis")
     .get<boolean>("autoStartLiveIndexing", true);
-  if (
+  // Honor an explicit user pause: never auto-start the daemon while sync is
+  // paused for this workspace, even if a rebuild would otherwise be due.
+  if (isSyncPaused(repoRoot)) {
+    channel.appendLine(
+      "[reconcile] Index sync is paused for this workspace; skipping live indexing."
+    );
+  } else if (
     autoLive &&
     isWorkspaceConfigured(repoRoot) &&
     (needsManagedRebuild || !isLiveIndexing(repoRoot))

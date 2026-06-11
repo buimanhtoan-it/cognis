@@ -25,6 +25,7 @@ import {
   type PanelContext,
 } from "./panel";
 import { reconcileWorkspaceOnActivate } from "./reconcile";
+import { enterLicenseKey, requireLicense } from "./license";
 import {
   addCognisToGitignore,
   shouldRemindGitignore,
@@ -46,11 +47,15 @@ import type { PrerequisiteReport, SetupResult } from "./types";
 import {
   getWorkspaceFolder,
   isWorkspaceConfigured,
+  isWorkspaceSyncPaused,
   refreshPanelContext,
   rehydrateWorkspaceState,
   clearIndexAndReindex,
+  connectToAi,
+  pauseSync,
   removeFromWorkspace,
   repairSetup,
+  resumeSync,
   setupForAi,
   showHealthReport,
   startLive,
@@ -72,6 +77,7 @@ function buildIndexingContext(repoRoot: string): PanelContext {
     status: "indexing",
     liveIndexing: state.liveIndexing,
     mcpEnabled: state.mcpEnabled,
+    syncPaused: state.syncPaused,
     indexStatus: state.indexStatus,
     indexingMessage: blockingIndexMessage,
     prerequisites: lastPrerequisites,
@@ -154,6 +160,10 @@ async function ensureLiveIndexingForWorkspaceChange(
   if (!isWorkspaceConfigured(repoRoot) || isLiveIndexing(repoRoot)) {
     return;
   }
+  // Respect an explicit user pause: don't resurrect the daemon on file save.
+  if (isWorkspaceSyncPaused(repoRoot)) {
+    return;
+  }
   if (autoIndexStartPromise) {
     await autoIndexStartPromise;
     return;
@@ -234,6 +244,12 @@ async function reportSetupResult(result: SetupResult): Promise<void> {
 }
 
 async function runSetupForAi(): Promise<void> {
+  // Paid-feature gate. No-op (returns true) in the open-source/source build,
+  // which ships without an embedded license public key; only the prebuilt
+  // commercial build enforces this.
+  if (extensionContext && !(await requireLicense(extensionContext, "Set Up for AI"))) {
+    return;
+  }
   try {
     const result = await withProgress("Cognis: Set Up for AI", (p, t) =>
       setupForAi(p, t)
@@ -331,6 +347,62 @@ async function runClearAndReindex(): Promise<void> {
     }
   } catch (err) {
     await showErrorGuidance(err, "Clear & Re-index");
+  }
+}
+
+/**
+ * Open the "Connect to AI" MCP setup guide. Writes/refreshes the MCP config for
+ * the current workspace, then presents copy-paste-ready instructions (collected
+ * env + generated mcp.json + per-host reload steps) so the user can wire any
+ * MCP client without hunting through docs.
+ */
+async function runConnectToAi(): Promise<void> {
+  try {
+    await connectToAi();
+  } catch (err) {
+    await showErrorGuidance(err, "Connect to AI");
+  }
+}
+
+async function runPauseSync(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    await showErrorGuidance(
+      new Error("Open a workspace folder before pausing index sync."),
+      "Pause sync"
+    );
+    return;
+  }
+  try {
+    await withProgress("Cognis: Pause index sync", async () => pauseSync());
+    await pollHealth();
+    await vscode.window.showInformationMessage(
+      "Index sync paused. Cognis keeps answering against the last-synced index but " +
+        "stops re-indexing file changes until you resume."
+    );
+  } catch (err) {
+    await showErrorGuidance(err, "Pause sync");
+  }
+}
+
+async function runResumeSync(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    await showErrorGuidance(
+      new Error("Open a workspace folder before resuming index sync."),
+      "Resume sync"
+    );
+    return;
+  }
+  try {
+    await withProgress("Cognis: Resume index sync", async () => resumeSync());
+    startHealthPolling();
+    await pollHealth();
+    await vscode.window.showInformationMessage(
+      "Index sync resumed. Cognis is watching this workspace for changes again."
+    );
+  } catch (err) {
+    await showErrorGuidance(err, "Resume sync");
   }
 }
 
@@ -535,7 +607,10 @@ export function activate(context: vscode.ExtensionContext): void {
   extensionContext = context;
   initStateStorage(context);
   initManagedBackend(context, context.extension?.packageJSON?.version);
-  panelProvider = new CognisPanelProvider(context.extensionUri);
+  panelProvider = new CognisPanelProvider(
+    context.extensionUri,
+    context.extension?.packageJSON?.version
+  );
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       CognisPanelProvider.viewType,
@@ -579,6 +654,7 @@ export function activate(context: vscode.ExtensionContext): void {
           status: deriveStatus(repoRoot, state.lastHealth, false),
           liveIndexing: state.liveIndexing,
           mcpEnabled: state.mcpEnabled,
+          syncPaused: state.syncPaused,
           indexStatus: state.indexStatus,
         });
         return;
@@ -622,6 +698,26 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("cognis.clearAndReindex", () =>
       runClearAndReindex()
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("cognis.connectToAi", () =>
+      runConnectToAi()
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("cognis.pauseSync", () => runPauseSync())
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("cognis.resumeSync", () => runResumeSync())
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("cognis.enterLicense", () =>
+      enterLicenseKey(context)
     )
   );
 
@@ -702,6 +798,7 @@ export function activate(context: vscode.ExtensionContext): void {
           status: deriveStatus(folder.uri.fsPath, state.lastHealth, false),
           liveIndexing: state.liveIndexing,
           mcpEnabled: state.mcpEnabled,
+          syncPaused: state.syncPaused,
           indexStatus: state.indexStatus,
         });
       }

@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#5b6b7b"/>
+    </marker>
+    <style>
+      .panel { fill:#ffffff; stroke:#c3ccd6; stroke-width:1.5; }
+      .ptitle { font-size:14px; font-weight:700; fill:#1b2733; }
+      .q { font-size:12px; fill:#5b6b7b; }
+      .node { stroke-width:1.6; rx:9; }
+      .hit { fill:#e9f9f0; stroke:#3ecf8e; }
+      .miss { fill:#fff0f0; stroke:#e06c6c; stroke-dasharray:5 3; }
+      .found { fill:#e9f9f0; stroke:#3ecf8e; }
+      .nlabel { font-size:12px; font-weight:600; fill:#1b2733; }
+      .nsub { font-size:10px; fill:#5b6b7b; }
+      .edge { stroke:#5b6b7b; stroke-width:1.6; fill:none; marker-end:url(#a); }
+      .tag { font-size:10px; font-weight:700; }
+      .tag-hit { fill:#2a9d68; }
+      .tag-miss { fill:#cc4b4b; }
+      .legend { font-size:11px; fill:#5b6b7b; }
+    </style>
+  </defs>
+
+  <text x="20" y="28" font-size="15" font-weight="700" fill="#1b2733">Query: "where is the jwt token validated on login?"</text>
+
+  <!-- LEFT: plain embedding / BM25 -->
+  <rect class="panel" x="20" y="48" width="410" height="392" rx="14"/>
+  <text x="40" y="76" class="ptitle">Plain embedding + keyword (Cursor, Cody, RAG)</text>
+  <text x="40" y="96" class="q">scores each symbol on its own — no code structure</text>
+
+  <!-- nodes left -->
+  <rect class="node hit"  x="120" y="120" width="210" height="48"/>
+  <text x="225" y="140" text-anchor="middle" class="nlabel">postLogin()</text>
+  <text x="225" y="156" text-anchor="middle" class="nsub">login.ts · matches "login", "jwt"</text>
+  <text x="345" y="148" class="tag tag-hit">FOUND</text>
+
+  <rect class="node miss" x="120" y="216" width="210" height="48"/>
+  <text x="225" y="236" text-anchor="middle" class="nlabel">requireAuth()</text>
+  <text x="225" y="252" text-anchor="middle" class="nsub">auth.ts · no matching words</text>
+  <text x="338" y="244" class="tag tag-miss">MISSED</text>
+
+  <rect class="node hit"  x="120" y="312" width="210" height="48"/>
+  <text x="225" y="332" text-anchor="middle" class="nlabel">validate()</text>
+  <text x="225" y="348" text-anchor="middle" class="nsub">jwt.ts · matches "validate", "jwt"</text>
+  <text x="345" y="340" class="tag tag-hit">FOUND</text>
+
+  <!-- call edges left (greyed, since method ignores them) -->
+  <path class="edge" d="M225,168 L225,214" stroke-dasharray="3 3" opacity="0.5"/>
+  <path class="edge" d="M225,264 L225,310" stroke-dasharray="3 3" opacity="0.5"/>
+
+  <text x="40" y="404" class="legend">Result: the middleware that actually runs the check is invisible.</text>
+  <text x="40" y="422" class="legend">The agent gets two endpoints with a hole in the middle.</text>
+
+  <!-- RIGHT: CSAR -->
+  <rect class="panel" x="466" y="48" width="414" height="392" rx="14"/>
+  <text x="486" y="76" class="ptitle">CSAR (this repo)</text>
+  <text x="486" y="96" class="q">seeds from the same matches, then diffuses along call edges</text>
+
+  <rect class="node found" x="566" y="120" width="210" height="48"/>
+  <text x="671" y="140" text-anchor="middle" class="nlabel">postLogin()</text>
+  <text x="671" y="156" text-anchor="middle" class="nsub">seed match</text>
+  <text x="788" y="148" class="tag tag-hit">SEED</text>
+
+  <rect class="node found" x="566" y="216" width="210" height="48"/>
+  <text x="671" y="236" text-anchor="middle" class="nlabel">requireAuth()</text>
+  <text x="671" y="252" text-anchor="middle" class="nsub">reached via call flow</text>
+  <text x="781" y="244" class="tag tag-hit">RECOVERED</text>
+
+  <rect class="node found" x="566" y="312" width="210" height="48"/>
+  <text x="671" y="332" text-anchor="middle" class="nlabel">validate()</text>
+  <text x="671" y="348" text-anchor="middle" class="nsub">seed match</text>
+  <text x="788" y="340" class="tag tag-hit">SEED</text>
+
+  <!-- call edges right (active green) -->
+  <path class="edge" d="M671,168 L671,214" stroke="#3ecf8e"/>
+  <path class="edge" d="M671,264 L671,310" stroke="#3ecf8e"/>
+
+  <text x="486" y="404" class="legend">Result: the full call path surfaces — including the on-path</text>
+  <text x="486" y="422" class="legend">middleware no keyword or vector matched. One round trip.</text>
+
+  <!-- bottom note -->
+  <text x="20" y="476" font-size="12" fill="#1b2733"><tspan font-weight="700">Why:</tspan> embeddings answer "which symbols look like the query?"  CSAR also answers "what else is on the same flow?"</text>
+  <text x="20" y="498" font-size="12" fill="#5b6b7b">And it does so with a cost bound of 1/(alpha·eps) — independent of how big your repo grows.</text>
+</svg>

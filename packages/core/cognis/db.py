@@ -28,6 +28,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -47,7 +48,20 @@ MIGRATIONS_DIR: Final[Path] = Path(__file__).parent / "migrations"
 """Directory holding ``NNN_*.sql`` migration files (task 3.2)."""
 
 EMBEDDING_DIM: Final[int] = 384
-"""Vector dimensionality pinned at MVP (design Q-2, bge-small-en-v1.5)."""
+"""Default vector dimensionality for a fresh DB (bge-small-en-v1.5, 384-d).
+
+This is the *default* used when no embedder has declared a dimension yet (e.g.
+lexical/structural-only boots). The **active** dimension is persisted in
+``meta.embedding_dim`` and can differ when a higher-dim model is plugged in —
+see :func:`reconcile_embedding_dim`. Code that needs the real, active dimension
+should read it from the embedder instance or from ``meta``, never assume 384.
+"""
+
+DEFAULT_EMBEDDING_DIM: Final[int] = EMBEDDING_DIM
+"""Explicit alias for the fresh-DB default, for call sites that want intent."""
+
+EMBEDDING_DIM_META_KEY: Final[str] = "embedding_dim"
+"""``meta`` key under which the active vector dimension is persisted."""
 
 BUSY_TIMEOUT_MS: Final[int] = 5000
 """sqlite ``busy_timeout`` per connection (design 3.1)."""
@@ -113,25 +127,53 @@ def _try_load_sqlite_vec(conn: sqlite3.Connection) -> bool:
     return True
 
 
-def _ensure_vec_table(conn: sqlite3.Connection, *, vec_enabled: bool) -> None:
-    """Ensure ``symbol_vec`` matches the active backend (vec0 vs fallback).
+def _read_vec_table_dim(conn: sqlite3.Connection) -> int | None:
+    """Return the ``FLOAT[N]`` dimension of the current ``symbol_vec`` vec0 table.
+
+    Returns ``None`` when the table is absent or is the plain-BLOB fallback
+    (which carries no dimension constraint).
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type IN ('table','view','shadow') "
+        "AND name = 'symbol_vec'"
+    ).fetchone()
+    if row is None:
+        return None
+    match = re.search(r"FLOAT\[(\d+)\]", str(row[0] or ""), re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
+def _ensure_vec_table(
+    conn: sqlite3.Connection,
+    *,
+    vec_enabled: bool,
+    dim: int = EMBEDDING_DIM,
+) -> None:
+    """Ensure ``symbol_vec`` matches the active backend (vec0 vs fallback) and *dim*.
 
     The DDL in migration 001 creates a plain table as a portable baseline.
-    When sqlite-vec is loaded, we drop and recreate as ``vec0(...)`` so KNN
-    queries work. Migrations themselves are not parameterized — the choice
-    happens here at connection time, idempotently.
+    When sqlite-vec is loaded, we (re)create it as ``vec0(... FLOAT[dim] ...)``
+    so KNN queries work. Migrations themselves are not parameterized — the
+    choice happens here at connection time, idempotently.
+
+    When an existing vec0 table has a *different* dimension than *dim* (a model
+    with a new vector size was plugged in), the table is dropped and recreated.
+    Embeddings are re-generated on the next index pass (idempotent, CP-5/CP-6).
     """
     if not vec_enabled:
         return  # Migration 001 already created the fallback table; nothing to do.
 
-    # Ask the live schema what `symbol_vec` currently is. If it's already a
-    # vec0 virtual table, leave it alone; otherwise replace it.
+    # Ask the live schema what `symbol_vec` currently is. Leave a matching vec0
+    # table untouched; replace a fallback table or a dim-mismatched vec0 table.
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type IN ('table','view') AND name = 'symbol_vec'"
     ).fetchone()
     sql_text: str = "" if row is None else str(row[0] or "")
     if "USING vec0" in sql_text:
-        return
+        existing_dim = _read_vec_table_dim(conn)
+        if existing_dim == dim:
+            return
+        # Dimension changed (model swap): fall through to recreate at *dim*.
 
     # The fallback table has no rows yet at first boot (Writer hasn't run);
     # if a user upgrades after some indexing, dropping the fallback and
@@ -141,7 +183,7 @@ def _ensure_vec_table(conn: sqlite3.Connection, *, vec_enabled: bool) -> None:
     conn.execute(
         f"CREATE VIRTUAL TABLE symbol_vec USING vec0("
         f"  symbol_id TEXT PRIMARY KEY,"
-        f"  embedding FLOAT[{EMBEDDING_DIM}]"
+        f"  embedding FLOAT[{dim}]"
         f")"
     )
 
@@ -233,9 +275,43 @@ class Database:
 
         # Bring the schema into sync with whatever migrations have shipped.
         run_migrations(conn)
-        _ensure_vec_table(conn, vec_enabled=self.vec_enabled)
+        # Build the vec table at the dimension persisted in ``meta`` (set when
+        # an embedder was plugged in), falling back to the fresh-DB default.
+        active_dim = int(_read_meta(conn, EMBEDDING_DIM_META_KEY, str(EMBEDDING_DIM)))
+        _ensure_vec_table(conn, vec_enabled=self.vec_enabled, dim=active_dim)
 
         return conn
+
+    # ------------------------------------------------------------------
+    # Embedding dimension reconciliation (model plug-in/out)
+    # ------------------------------------------------------------------
+
+    def reconcile_embedding_dim(self, dim: int) -> bool:
+        """Align the persisted vector dimension and ``symbol_vec`` table to *dim*.
+
+        Call this once after building the active embedder (the dimension is read
+        from ``embedder.embedding_dim``). When *dim* differs from the value
+        stored in ``meta`` — i.e. a model with a new vector size was plugged in
+        — the ``symbol_vec`` table is recreated at the new dimension and the old
+        vectors are dropped; they are regenerated on the next index pass
+        (idempotent, CP-5/CP-6).
+
+        Args:
+            dim: The active embedder's ``embedding_dim``.
+
+        Returns:
+            True when the dimension changed (a re-embed is required), else False.
+        """
+        conn = self.connect()
+        current = int(_read_meta(conn, EMBEDDING_DIM_META_KEY, str(EMBEDDING_DIM)))
+        table_dim = _read_vec_table_dim(conn)
+        if current == dim and (table_dim is None or table_dim == dim):
+            return False
+
+        with _WRITER_LOCK:
+            _write_meta(conn, EMBEDDING_DIM_META_KEY, str(dim))
+            _ensure_vec_table(conn, vec_enabled=self.vec_enabled, dim=dim)
+        return True
 
     # ------------------------------------------------------------------
     # Transaction helper (single-writer mutex)
@@ -725,7 +801,9 @@ def now_epoch() -> int:
 
 __all__ = [
     "BUSY_TIMEOUT_MS",
+    "DEFAULT_EMBEDDING_DIM",
     "EMBEDDING_DIM",
+    "EMBEDDING_DIM_META_KEY",
     "MIGRATIONS_DIR",
     "Database",
     "delete_symbol",

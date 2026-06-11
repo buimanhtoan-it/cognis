@@ -1,7 +1,7 @@
 {
   "config": {
     "mcpServers": {
-      "cognis-workspace": {
+      "<server>": {
         "args": [
           "str"
         ],

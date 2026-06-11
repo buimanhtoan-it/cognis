@@ -32,37 +32,50 @@ Design references:
 from __future__ import annotations
 
 import concurrent.futures
+import logging
 import os
 import re
 import sqlite3
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-# ``numpy`` ships under the ``embed-local`` optional extra.  We import it at
-# module level with a graceful message so *all* other cognis code can import
-# this module even when the extra isn't installed.  Actual embedding calls will
-# raise at that point; the import itself doesn't.
-try:
+# ``numpy`` ships under the ``embed-local`` optional extra. Import it lazily so
+# this module — and the whole indexer pipeline that imports it — stays
+# importable without the extra (e.g. a lexical+structural-only install). ``np``
+# is only used inside embedding code paths, which are unreachable until an
+# embedder is constructed; constructing ``LocalEmbedder`` requires
+# ``sentence-transformers`` (which pulls in numpy), so a ``None`` here can never
+# reach a real embedding call.
+if TYPE_CHECKING:
     import numpy as np
     from numpy.typing import NDArray
-except ImportError as _np_err:  # pragma: no cover
-    raise ImportError(
-        "numpy is required for the embedder. Install it via: pip install cognis-engine[embed-local]"
-    ) from _np_err
 
-if TYPE_CHECKING:
     from cognis_indexer.enricher.enricher import EnrichedSymbol
     from cognis_indexer.parsers.base import ParsedSymbol
+else:
+    try:
+        import numpy as np
+    except ImportError:  # pragma: no cover - exercised only without embed-local
+        np = None
 
 from cognis.db import EMBEDDING_DIM, Database
+
+logger = logging.getLogger(__name__)
+
+# A first-run embedder load that exceeds this (seconds) is the painful
+# fresh-user path the panel/agent should surface, so we escalate it to WARNING
+# (visible at the default mcpd log level) instead of INFO.
+_SLOW_LOAD_WARN_S = 10.0
 
 __all__ = [
     "EMBEDDING_DIM",
     "Embedder",
     "LocalEmbedder",
+    "OpenAIEmbedder",
     "VoyageEmbedder",
     "assert_vec_dim",
     "build_embedding_text",
@@ -202,18 +215,64 @@ def _load_sentence_transformer(
     )
     allow_offline_attempt = offline_pref not in {"0", "false", "no"}
 
+    started = time.perf_counter()
     if allow_offline_attempt:
         try:
-            return sentence_transformer_cls(model_name, device=device, local_files_only=True)
+            model = sentence_transformer_cls(model_name, device=device, local_files_only=True)
+            logger.info(
+                "embedder model %r loaded from local cache in %.1fs",
+                model_name,
+                time.perf_counter() - started,
+            )
+            return model
         except Exception:
             if force_offline:
                 # Operator explicitly demanded offline; surface the real error
                 # instead of silently reaching out to the network.
                 raise
             # Model not cached yet — fall through to an online load so the
-            # first run can download the weights.
+            # first run can download the weights. This is the slow, first-run
+            # path (download + per-file Hub revalidation): tell the operator
+            # plainly so an opaque multi-second wait has a visible reason.
+            logger.warning(
+                "embedder model %r not in local cache; downloading/revalidating "
+                "from Hugging Face (one-time first-run step, can take tens of "
+                "seconds)…",
+                model_name,
+            )
 
-    return sentence_transformer_cls(model_name, device=device)
+    online_started = time.perf_counter()
+    model = sentence_transformer_cls(model_name, device=device)
+    total = time.perf_counter() - started
+    emit = logger.warning if total >= _SLOW_LOAD_WARN_S else logger.info
+    emit(
+        "embedder model %r loaded via online path in %.1fs (download/encode %.1fs)",
+        model_name,
+        total,
+        time.perf_counter() - online_started,
+    )
+    return model
+
+
+def _detect_model_dim(model: object, default: int) -> int:
+    """Return the embedding dimension reported by *model*, or *default*.
+
+    Newer ``sentence-transformers`` exposes ``get_embedding_dimension()``; older
+    versions use ``get_sentence_embedding_dimension()``. We probe the new name
+    first (avoiding the deprecation warning), then fall back, then to *default*
+    so a backend that implements neither degrades gracefully.
+    """
+    for attr in ("get_embedding_dimension", "get_sentence_embedding_dimension"):
+        getter = getattr(model, attr, None)
+        if not callable(getter):
+            continue
+        try:
+            value = getter()
+        except Exception:
+            continue
+        if isinstance(value, int) and value > 0:
+            return value
+    return default
 
 
 class LocalEmbedder:
@@ -247,7 +306,12 @@ class LocalEmbedder:
     """
 
     embedding_dim: int = EMBEDDING_DIM
-    """384 — pinned for MVP (design Q-2)."""
+    """Vector size, derived from the loaded model at construction.
+
+    Defaults to the class-level :data:`EMBEDDING_DIM` (384, bge-small) but is
+    overridden per-instance from the SentenceTransformer's reported dimension,
+    so plugging in a different-sized model just works without editing constants.
+    """
 
     _DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
     _QUEUE_MAX = 256
@@ -270,6 +334,11 @@ class LocalEmbedder:
         self._model: object = _load_sentence_transformer(SentenceTransformer, model_name, device)
         self._batch_size = batch_size
         self._model_name = model_name
+
+        # Let the vector size flow from the model rather than a pinned constant.
+        # ``get_sentence_embedding_dimension`` is the canonical accessor; fall
+        # back to the class default if the backend doesn't expose it.
+        self.embedding_dim = _detect_model_dim(self._model, EMBEDDING_DIM)
 
         # Worker pool: min(cpu_count, 4) threads (task 10.5).
         # The pool is used for concurrent batch preparation; the actual
@@ -445,6 +514,68 @@ class VoyageEmbedder:
         TODO: Replace with real Voyage API call when activating.
         """
         # TODO: call voyageai.Client(api_key=self._api_key).embed(texts, model=self._model)
+        return np.zeros((len(texts), self.embedding_dim), dtype=np.float32)
+
+    def embed_text(self, text: str) -> NDArray[np.float32]:
+        """Return a zero vector at MVP (stub)."""
+        return np.zeros(self.embedding_dim, dtype=np.float32)
+
+
+# ---------------------------------------------------------------------------
+# OpenAIEmbedder stub (config backend "openai")
+# ---------------------------------------------------------------------------
+
+
+class OpenAIEmbedder:
+    """Stub OpenAI embedding backend (opt-in, feature-flagged off by default).
+
+    Exists so the ``embedder.backend = "openai"`` config value (declared in
+    :data:`cognis.config.EmbedderBackend`) has a concrete implementation and is
+    selectable through the embedder registry.  At MVP this returns **zero
+    vectors** for every input — wiring the registry is intentionally decoupled
+    from the network implementation so the engine flow is identical regardless
+    of which backend is active.
+
+    Activated only when:
+    1. The ``openai`` package is installed, AND
+    2. The ``embedder.backend = "openai"`` config flag is set.
+
+    TODO: implement the real ``text-embedding-3-*`` API call when activating.
+          ``text-embedding-3-small`` is 1536-d; this stub uses
+          ``EMBEDDING_DIM = 384`` for schema compatibility at MVP.  Update the
+          DDL migration + ``embedding_dim`` when switching.
+
+    Args:
+        api_key: OpenAI API key.  If ``None``, falls back to ``OPENAI_API_KEY``
+            env var.
+        model: OpenAI embedding model name.
+            Defaults to ``"text-embedding-3-small"``.
+    """
+
+    embedding_dim: int = EMBEDDING_DIM
+    """384 at MVP for schema compatibility; change when activating."""
+
+    _DEFAULT_MODEL = "text-embedding-3-small"
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = _DEFAULT_MODEL,
+    ) -> None:
+        self._api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+        self._model = model
+
+        # Soft-check: openai package is optional. Use find_spec so this works
+        # whether or not the dependency is installed (no env-dependent import).
+        import importlib.util
+
+        self._openai_available = importlib.util.find_spec("openai") is not None
+
+    def embed_batch(self, texts: list[str]) -> NDArray[np.float32]:
+        """Return zero vectors at MVP (stub).
+
+        TODO: Replace with real OpenAI API call when activating.
+        """
         return np.zeros((len(texts), self.embedding_dim), dtype=np.float32)
 
     def embed_text(self, text: str) -> NDArray[np.float32]:

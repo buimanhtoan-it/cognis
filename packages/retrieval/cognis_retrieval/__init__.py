@@ -16,9 +16,23 @@ Design reference: *Retrieval Mesh* section of design.md (tasks 12.1-12.3).
 CSAR reference: ``docs/csar.md``.
 """
 
-from cognis_retrieval.base import Hit, RetrievalLayer
+from cognis_retrieval.base import Hit, QueryEmbedder, RetrievalLayer
+from cognis_retrieval.fusion import (
+    DEFAULT_RRF_K,
+    fuse_rankings,
+    reciprocal_rank_fusion,
+)
 from cognis_retrieval.lexical import LexicalLayer, populate_fts
 from cognis_retrieval.query_rewriter import rewrite_query
+from cognis_retrieval.reranker import (
+    CrossEncoderReranker,
+    NoOpReranker,
+    Reranker,
+    UnknownRerankerBackendError,
+    available_reranker_backends,
+    build_reranker,
+    register_reranker,
+)
 from cognis_retrieval.semantic import SemanticLayer, populate_vec
 from cognis_retrieval.structural import StructuralLayer
 
@@ -42,13 +56,24 @@ except ImportError:  # pragma: no cover - only when numpy is absent
     _CSAR_AVAILABLE = False
 
 __all__ = [
+    "DEFAULT_RRF_K",
+    "CrossEncoderReranker",
     "Hit",
     "LexicalLayer",
+    "NoOpReranker",
+    "QueryEmbedder",
+    "Reranker",
     "RetrievalLayer",
     "SemanticLayer",
     "StructuralLayer",
+    "UnknownRerankerBackendError",
+    "available_reranker_backends",
+    "build_reranker",
+    "fuse_rankings",
     "populate_fts",
     "populate_vec",
+    "reciprocal_rank_fusion",
+    "register_reranker",
     "rewrite_query",
 ]
 

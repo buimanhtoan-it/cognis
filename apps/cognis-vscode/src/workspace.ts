@@ -19,8 +19,10 @@ import {
   hasExpectedMcpConfigForRepo,
   disableMcpForWorkspace,
   enableMcpForWorkspace,
+  fetchMcpConfig,
   isCognisMcpConfiguredForRepo,
   removeAllCognisMcpEntries,
+  resolveMcpHost,
   showMcpConfigPreview,
 } from "./mcpConfig";
 import { verifyPythonEnvironment } from "./python";
@@ -29,12 +31,14 @@ import type { PanelContext } from "./panel";
 import {
   deriveStatus,
   getState,
+  isSyncPaused,
   loadPersistedState,
   setAutoManaged,
   setIndexStatus,
   setLastHealth,
   setLiveIndexing,
   setMcpEnabled,
+  setSyncPaused,
 } from "./state";
 import { buildRepairPlan } from "./repairPlan";
 import type {
@@ -126,7 +130,13 @@ export async function rehydrateWorkspaceState(): Promise<void> {
   syncMcpStateFromDisk(repoRoot);
 
   const state = getState(repoRoot);
-  if (state.liveIndexing && configured) {
+  if (state.syncPaused) {
+    // User explicitly paused sync for this workspace; never auto-start the
+    // daemon on reload. Reflect the paused state instead.
+    if (state.liveIndexing) {
+      setLiveIndexing(repoRoot, false);
+    }
+  } else if (state.liveIndexing && configured) {
     try {
       const paths = await fetchPaths(repoRoot);
       await startLiveIndexing(repoRoot, paths.db_path, paths.indexd_status_path);
@@ -644,6 +654,40 @@ export async function stopLive(): Promise<void> {
   syncIndexStatusFromDaemon(repoRoot);
 }
 
+/**
+ * Pause automatic index sync for this workspace.
+ *
+ * Stops the live-indexing daemon and sets a persisted ``syncPaused`` flag so
+ * neither auto-manage-on-activate nor file-change auto-indexing restarts it.
+ * The built index and MCP wiring are left intact — semantic search keeps
+ * answering against the last-synced index; only *updates* stop until the user
+ * resumes. Idempotent.
+ */
+export async function pauseSync(): Promise<void> {
+  const folder = requireWorkspaceFolder();
+  const repoRoot = folder.uri.fsPath;
+  setSyncPaused(repoRoot, true);
+  await stopLiveIndexing(repoRoot);
+  setLiveIndexing(repoRoot, false);
+  syncIndexStatusFromDaemon(repoRoot);
+}
+
+/**
+ * Resume automatic index sync after a pause: clear the persisted flag and start
+ * the watcher daemon again on the existing DB (no forced rebuild). Restores the
+ * default "always auto-sync" behaviour for this workspace.
+ */
+export async function resumeSync(): Promise<void> {
+  const folder = requireWorkspaceFolder();
+  const repoRoot = folder.uri.fsPath;
+  setSyncPaused(repoRoot, false);
+  await startLive();
+}
+
+export function isWorkspaceSyncPaused(repoRoot: string): boolean {
+  return isSyncPaused(repoRoot);
+}
+
 export async function enableMcp(options?: { silent?: boolean }): Promise<string> {
   const folder = requireWorkspaceFolder();
   const repoRoot = folder.uri.fsPath;
@@ -669,6 +713,163 @@ export async function enableMcp(options?: { silent?: boolean }): Promise<string>
     }
   }
   return configPath;
+}
+
+/**
+ * "Connect to AI" — write/refresh the MCP config for this workspace and open a
+ * copy-paste-ready setup guide.
+ *
+ * This is the one-stop wiring action surfaced by the panel's "Connect to AI"
+ * button. It:
+ *   1. writes the merged ``mcp.json`` for the resolved host (so the common path
+ *      "just works" after a reload), then
+ *   2. opens a generated Markdown guide containing the collected environment,
+ *      the exact ``mcpServers`` JSON, the on-disk config path, and per-host
+ *      reload steps — so any MCP client (Cursor, VS Code, Claude Desktop, or a
+ *      custom one) can be connected by hand if needed.
+ */
+export async function connectToAi(): Promise<void> {
+  const folder = requireWorkspaceFolder();
+  const repoRoot = folder.uri.fsPath;
+
+  await ensurePythonReady(repoRoot, { report: () => {} });
+
+  const host = resolveMcpHost();
+  const payload = await fetchMcpConfig(repoRoot, host);
+
+  // Write the config for the common case so a reload is usually all that's left.
+  let configPath: string | undefined;
+  let writeError: string | undefined;
+  try {
+    const result = await enableMcpForWorkspace(repoRoot);
+    configPath = result.configPath;
+    setMcpEnabled(repoRoot, true);
+  } catch (err) {
+    writeError = err instanceof Error ? err.message : String(err);
+  }
+
+  const guide = renderMcpConnectGuide({
+    host,
+    serverName: payload.server_name,
+    env: payload.env,
+    serversJson: JSON.stringify(payload.config, null, 2),
+    configPath,
+    writeError,
+  });
+  const doc = await vscode.workspace.openTextDocument({
+    content: guide,
+    language: "markdown",
+  });
+  await vscode.window.showTextDocument(doc, { preview: true });
+}
+
+function hostDisplayName(host: string): string {
+  switch (host) {
+    case "cursor":
+      return "Cursor";
+    case "vscode":
+      return "VS Code";
+    case "claude":
+      return "Claude Desktop";
+    default:
+      return host;
+  }
+}
+
+function hostReloadSteps(host: string, configPath?: string): string {
+  const where = configPath ? `\`${configPath}\`` : "your MCP client config";
+  switch (host) {
+    case "cursor":
+      return [
+        `1. Cognis wrote the server entry to ${where}.`,
+        "2. In Cursor, open **Settings → MCP** and confirm `" +
+          "cognis" +
+          "` (or `cognis-<repo>`) is listed.",
+        "3. Toggle the server off and on, or reload the window " +
+          "(**Cmd/Ctrl+Shift+P → Developer: Reload Window**), so the tools load.",
+      ].join("\n");
+    case "vscode":
+      return [
+        `1. Cognis wrote the server entry to ${where}.`,
+        "2. Make sure your MCP-capable extension (e.g. Copilot Chat agent mode) " +
+          "points at this `mcp.json`.",
+        "3. Reload the window (**Ctrl+Shift+P → Developer: Reload Window**) so the " +
+          "tools load.",
+      ].join("\n");
+    case "claude":
+      return [
+        `1. Cognis wrote the server entry to ${where}.`,
+        "2. Fully quit Claude Desktop (not just close the window).",
+        "3. Reopen Claude Desktop; the Cognis tools appear under the MCP tools menu.",
+      ].join("\n");
+    default:
+      return `1. Add the server block below to ${where}.\n2. Restart your MCP client.`;
+  }
+}
+
+/**
+ * Build the human-facing "Connect to AI" guide. Pure string builder (no fs /
+ * vscode) so the format stays easy to reason about and test. The env table and
+ * the verbatim ``mcpServers`` block let a user wire a client that Cognis didn't
+ * write automatically.
+ */
+export function renderMcpConnectGuide(args: {
+  host: string;
+  serverName: string;
+  env: Record<string, string>;
+  serversJson: string;
+  configPath?: string;
+  writeError?: string;
+}): string {
+  const { host, serverName, env, serversJson, configPath, writeError } = args;
+  const envRows = Object.keys(env).length
+    ? Object.entries(env)
+        .map(([key, value]) => `| \`${key}\` | \`${value}\` |`)
+        .join("\n")
+    : "| _(none)_ | |";
+
+  const statusLine = writeError
+    ? `> ⚠️ Cognis could not write the config automatically: ${writeError}\n` +
+      "> Use the JSON below to wire it manually."
+    : configPath
+      ? `> ✅ Cognis wrote the MCP config to \`${configPath}\`. The steps below are for reference or for connecting another client.`
+      : "> Use the JSON below to wire your MCP client.";
+
+  return `# Connect Cognis to AI (MCP)
+
+${statusLine}
+
+**Editor detected:** ${hostDisplayName(host)}
+**MCP server name:** \`${serverName}\`
+
+## 1. Reload your editor
+
+${hostReloadSteps(host, configPath)}
+
+## 2. Environment Cognis configured
+
+These are written into the server entry for you. They point the MCP server at
+this workspace's local index and tune timeouts.
+
+| Variable | Value |
+| --- | --- |
+${envRows}
+
+## 3. The server entry (for manual setup)
+
+If you connect a client Cognis didn't write to, paste this into its
+\`mcpServers\` map:
+
+\`\`\`json
+${serversJson}
+\`\`\`
+
+## 4. Verify
+
+Open your AI chat and ask it to search the codebase (for example,
+"use cognis to find where X is handled"). If the tools don't appear, reload the
+editor once more, or run **Cognis: Troubleshoot & Repair**.
+`;
 }
 
 export async function disableMcp(): Promise<void> {
@@ -785,6 +986,7 @@ export async function refreshPanelContext(repoRoot: string): Promise<PanelContex
       health: report,
       liveIndexing: current.liveIndexing,
       mcpEnabled: current.mcpEnabled,
+      syncPaused: current.syncPaused,
       indexStatus,
     };
   } catch {
@@ -797,6 +999,7 @@ export async function refreshPanelContext(repoRoot: string): Promise<PanelContex
       setupHint: configured ? "python" : undefined,
       liveIndexing: current.liveIndexing,
       mcpEnabled: current.mcpEnabled,
+      syncPaused: current.syncPaused,
       indexStatus,
     };
   }

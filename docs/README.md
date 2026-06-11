@@ -34,6 +34,7 @@ This directory contains user, operator, and maintainer documentation for
 | Document | Use it for |
 | --- | --- |
 | [architecture.md](architecture.md) | Internal structure, data flow, and MCP tool design |
+| [development-criteria.md](development-criteria.md) | The four-pillar measurement loop (quality / UX / reliability / scaling) used to develop every release |
 | [deps.md](deps.md) | Dependency decisions and rationale |
 | [release.md](release.md) | Release steps for maintainers |
 | [eval/phase1-baseline.md](eval/phase1-baseline.md) | Eval baseline and acceptance criteria |

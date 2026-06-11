@@ -2,11 +2,14 @@
   "name": "cognis-vscode",
   "displayName": "Cognis",
   "description": "Managed Cognis setup for AI semantic search, MCP wiring, and live indexing across MCP-capable editors.",
-  "version": "0.3.2",
+  "version": "0.5.0",
   "publisher": "ToanBui",
-  "license": "Apache-2.0",
+  "license": "SEE LICENSE IN LICENSE.txt",
   "icon": "media/icon.png",
-  "author": { "name": "ToanBui", "email": "buimanhtoan.it@gmail.com" },
+  "author": {
+    "name": "ToanBui",
+    "email": "buimanhtoan.it@gmail.com"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/buimanhtoan-it/cognis.git",
@@ -80,6 +83,30 @@
         "icon": "media/command.png"
       },
       {
+        "command": "cognis.connectToAi",
+        "title": "Cognis: Connect to AI (MCP Setup Guide)",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.pauseSync",
+        "title": "Cognis: Pause Index Sync",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.resumeSync",
+        "title": "Cognis: Resume Index Sync",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.enterLicense",
+        "title": "Cognis: Enter License Key",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
         "command": "cognis.removeFromWorkspace",
         "title": "Cognis: Remove from Workspace",
         "category": "Cognis",
@@ -130,10 +157,15 @@
           "default": "",
           "description": "Optional: use your own Python environment for the Cognis backend. Leave empty to let Cognis install and manage its own backend automatically."
         },
+        "cognis.buyUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Where the \"Buy Cognis\" button sends users (e.g. your Polar checkout link). Leave empty to use the project page."
+        },
         "cognis.backendPackageSpec": {
           "type": "string",
-          "default": "cognis-engine[indexer,embed-local,vector,tokenizers,mcp]",
-          "description": "pip requirement Cognis installs for its backend. Change only if you need a specific version or feature set."
+          "default": "",
+          "description": "Advanced: override the pip requirement Cognis installs for its backend. Leave empty to install the engine version that matches this extension (recommended; deterministic). Set a value only to pin a specific version, use a mirror, or test a pre-release."
         },
         "cognis.autoManageOnActivate": {
           "type": "boolean",
@@ -226,9 +258,12 @@
     "watch": "tsc -watch -p ./",
     "package": "vsce package",
     "test": "npm run compile && node --test out/test/*.test.js",
+    "sim:build": "npm run compile && node out/sim/build.js",
+    "test:e2e": "npm run sim:build && playwright test",
     "lint": "tsc -p ./ --noEmit"
   },
   "devDependencies": {
+    "@playwright/test": "^1.48.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.17.0",
     "@types/vscode": "^1.85.0",

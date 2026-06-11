@@ -95,6 +95,37 @@ indexing now, and overall health.
 
 ---
 
+## Connect to AI (MCP setup guide)
+
+Already indexed but want to (re)wire your AI client, or connect a second MCP
+client to the same workspace? Use **Connect to AI**:
+
+- Click **Connect to AI** in the panel when the index is built but MCP isn't
+  wired yet, or
+- run **Cognis: Connect to AI (MCP Setup Guide)** from the Command Palette.
+
+Cognis writes the MCP config for your detected editor and opens a guide with the
+collected environment, the exact `mcpServers` JSON for this workspace, the
+on-disk config path, and per-host reload steps — so you can connect Cursor,
+VS Code, Claude Desktop, or any custom MCP client by hand if needed.
+
+---
+
+## Pause &amp; resume index sync
+
+By default Cognis **auto-syncs**: it indexes file changes as you save. To stop
+that temporarily (e.g. during a huge rebase, or to free CPU):
+
+- Click **Pause sync** in the panel's *Index Status* section, or
+- run **Cognis: Pause Index Sync** from the Command Palette.
+
+While paused, Cognis keeps answering AI queries from the last-synced index but
+stops tracking new changes — and it won't auto-restart on reload or file save.
+Click **Resume sync** (or run **Cognis: Resume Index Sync**) to turn auto-sync
+back on. The default is always-on auto-sync.
+
+---
+
 ## Rebuild Index
 
 Index looking stale or wrong (after a big branch switch, an upgrade, or a
@@ -196,7 +227,7 @@ first semantic query unless you override these explicitly.
 - **Source, docs & issues:** [github.com/buimanhtoan-it/cognis](https://github.com/buimanhtoan-it/cognis)
 - **How CSAR works (the math):** [docs/csar.md](https://github.com/buimanhtoan-it/cognis/blob/main/docs/csar.md)
 - **MCP client setup:** [docs/mcp-client-config.md](https://github.com/buimanhtoan-it/cognis/blob/main/docs/mcp-client-config.md)
-- **License:** Apache-2.0
+- **License:** Commercial — see [LICENSE.txt](LICENSE.txt)
 
 ---
 

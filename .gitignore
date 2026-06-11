@@ -119,6 +119,9 @@ scratch_*
 .kiro/
 .cursor/
 
+# Internal business / strategy docs — local-only, never published
+/business/
+
 # OS / misc
 *.bak
 *.tmp

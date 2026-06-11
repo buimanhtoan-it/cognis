@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 # ---------------------------------------------------------------------------
 [project]
 name = "cognis-engine"
-version = "0.3.2"
+version = "0.5.0"
 description = "Software Cognition Engine — MCP-native context capsules for LLM coding agents."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -83,6 +83,7 @@ dev = [
     "hypothesis>=6.108",
     "pre-commit>=3.7",
     "invoke>=2.2",
+    "coverage[toml]>=7.6",
 ]
 
 # ---------------------------------------------------------------------------
@@ -254,6 +255,17 @@ filterwarnings = [
 # ---------------------------------------------------------------------------
 [tool.coverage.run]
 branch = true
+# parallel + a COVERAGE_PROCESS_START bootstrap (tests/coverage/sitecustomize.py)
+# let us measure code that runs inside the *subprocesses* the e2e harness spawns
+# (cognis-cli / cognis-indexd / cognis-mcpd), not just the in-process test code.
+# Each process writes its own .coverage.<host>.<pid>.<rand>; `coverage combine`
+# merges them. ``sigterm`` flushes data when a daemon is stopped via SIGTERM
+# (POSIX CI); on Windows ``terminate()`` is a hard kill that cannot flush, so
+# daemon-subprocess lines there are covered by the in-process daemon tests
+# instead (see tests/coverage/README.md).
+parallel = true
+sigterm = true
+concurrency = ["thread"]
 source = [
     "packages/core",
     "packages/retrieval",
@@ -267,7 +279,24 @@ omit = [
     "**/__init__.py",
 ]
 
+[tool.coverage.paths]
+# Collapse the same file seen from different cwds / install layouts into one
+# logical path so `coverage combine` merges subprocess + in-process data.
+core       = ["packages/core/cognis", "*/packages/core/cognis", "*/cognis"]
+retrieval  = ["packages/retrieval/cognis_retrieval", "*/cognis_retrieval"]
+indexer    = ["packages/indexer/cognis_indexer", "*/cognis_indexer"]
+adapters   = ["packages/adapters/cognis_adapters", "*/cognis_adapters"]
+eval       = ["packages/eval/cognis_eval", "*/cognis_eval"]
+apps       = ["apps", "*/apps"]
+
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
 fail_under = 60  # production CI gate; raise as coverage grows.
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+    "if __name__ == .__main__.:",
+    "pragma: no cover",
+]

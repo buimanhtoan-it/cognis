@@ -17,14 +17,17 @@ if TYPE_CHECKING:
 
 
 def _merge_hits(hits: list[Hit], k: int) -> list[str]:
-    """Deduplicate by symbol_id, keeping the highest score per id."""
-    best: dict[str, float] = {}
-    for hit in hits:
-        prev = best.get(hit.symbol_id)
-        if prev is None or hit.score > prev:
-            best[hit.symbol_id] = hit.score
-    ranked = sorted(best.items(), key=lambda item: item[1], reverse=True)
-    return [sid for sid, _ in ranked[:k]]
+    """Fuse layer hits into a single ranked id list via Reciprocal Rank Fusion.
+
+    Lexical (BM25) and semantic (cosine) scores live on incompatible scales, so
+    the previous max-score merge let whichever layer emitted larger magnitudes
+    dominate. RRF fuses on *ranks* instead — scale-invariant and the strongest
+    fusion on the reproducible objective benchmark (see
+    ``.benchmarks/public/RESULTS.md`` and ``cognis_retrieval.fusion``).
+    """
+    from cognis_retrieval.fusion import reciprocal_rank_fusion
+
+    return reciprocal_rank_fusion(hits, k)
 
 
 class HybridStrategy:
@@ -64,10 +67,11 @@ class HybridStrategy:
 
         k_sem = max(1, min(k, quotas.semantic // 100 or k))
         try:
-            from cognis_indexer.embedder import Embedder
+            from cognis.config import Config
+            from cognis_indexer.registry import build_embedder
             from cognis_retrieval.semantic import SemanticLayer
 
-            embedder = Embedder()
+            embedder = build_embedder(Config.default().embedder)
             sem_layer = SemanticLayer(embedder)
             all_hits.extend(sem_layer.search(query, k_sem, self._db))
         except Exception:

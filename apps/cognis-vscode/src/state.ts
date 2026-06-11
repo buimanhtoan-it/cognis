@@ -5,6 +5,12 @@ export interface WorkspaceState {
   liveIndexing: boolean;
   mcpEnabled: boolean;
   autoManaged: boolean;
+  /**
+   * When true the user has explicitly paused index sync for this workspace.
+   * Auto-manage and file-change auto-indexing must not start the daemon while
+   * paused. Defaults to false (sync stays automatic out of the box).
+   */
+  syncPaused: boolean;
   lastHealth?: string;
   symbolCount?: number;
   indexStatus?: IndexStatusReport;
@@ -14,6 +20,7 @@ interface PersistedWorkspaceState {
   liveIndexing?: boolean;
   mcpEnabled?: boolean;
   autoManaged?: boolean;
+  syncPaused?: boolean;
   lastHealth?: string;
 }
 
@@ -23,7 +30,12 @@ const states = new Map<string, WorkspaceState>();
 let workspaceStorage: vscode.Memento | undefined;
 
 function defaultState(): WorkspaceState {
-  return { liveIndexing: false, mcpEnabled: false, autoManaged: false };
+  return {
+    liveIndexing: false,
+    mcpEnabled: false,
+    autoManaged: false,
+    syncPaused: false,
+  };
 }
 
 export function initStateStorage(context: vscode.ExtensionContext): void {
@@ -48,6 +60,7 @@ export function persistState(folder: string): void {
     liveIndexing: state.liveIndexing,
     mcpEnabled: state.mcpEnabled,
     autoManaged: state.autoManaged,
+    syncPaused: state.syncPaused,
     lastHealth: state.lastHealth,
   };
   void workspaceStorage.update(STORAGE_KEY, entries);
@@ -67,6 +80,9 @@ export function loadPersistedState(folder: string): void {
   }
   if (entry.autoManaged !== undefined) {
     state.autoManaged = entry.autoManaged;
+  }
+  if (entry.syncPaused !== undefined) {
+    state.syncPaused = entry.syncPaused;
   }
   if (entry.lastHealth !== undefined) {
     state.lastHealth = entry.lastHealth;
@@ -94,6 +110,15 @@ export function setMcpEnabled(folder: string, enabled: boolean): void {
 export function setAutoManaged(folder: string, managed: boolean): void {
   getState(folder).autoManaged = managed;
   persistState(folder);
+}
+
+export function setSyncPaused(folder: string, paused: boolean): void {
+  getState(folder).syncPaused = paused;
+  persistState(folder);
+}
+
+export function isSyncPaused(folder: string): boolean {
+  return getState(folder).syncPaused;
 }
 
 export function setLastHealth(folder: string, overall: string | undefined): void {

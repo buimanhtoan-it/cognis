@@ -233,6 +233,39 @@ class TestEndpointLimits:
         # With low alpha, less mass remains on the seed node A.
         assert r_lo[a] < r_hi[a]
 
+    def test_alpha_to_zero_approaches_stationary(self) -> None:
+        """T4 (second endpoint): as alpha->0+, r* -> the stationary distribution pi.
+
+        For an undirected, connected, non-bipartite graph the random walk is
+        ergodic and its unique stationary distribution is pi_i = d_i / sum_j d_j
+        (degree-proportional). The docs claim ``lim_{alpha->0+} r* = pi``; here
+        we verify it numerically: r*(alpha) converges to the degree distribution
+        and the error shrinks monotonically as alpha decreases.
+        """
+        # Triangle + pendant: connected, non-bipartite (odd cycle present),
+        # so the symmetrized walk is ergodic and π is degree-proportional.
+        db = _graph_db([("A", "B"), ("B", "C"), ("C", "A"), ("C", "D")])
+        g = build_code_graph(db)
+        P = transition_matrix(g)
+        s = np.zeros(g.n)
+        s[g.index["A"]] = 1.0
+
+        pi = g.degree / g.degree.sum()
+        # P must fix the stationary distribution: P @ pi = pi.
+        np.testing.assert_allclose(P @ pi, pi, atol=1e-12)
+
+        prev_err = None
+        for alpha in (0.5, 0.1, 0.01, 1e-3, 1e-4):
+            r = personalized_pagerank_exact(P, s, alpha)
+            err = float(np.abs(r - pi).sum())
+            if prev_err is not None:
+                # Strictly decreasing error as alpha shrinks toward 0.
+                assert err < prev_err
+            prev_err = err
+        # At very small alpha the PPR vector is essentially the stationary pi.
+        r_tiny = personalized_pagerank_exact(P, s, 1e-5)
+        np.testing.assert_allclose(r_tiny, pi, atol=1e-3)
+
 
 # ---------------------------------------------------------------------------
 # T5: forward-push correctness and cost bound

@@ -10,8 +10,8 @@ RUFF        ?= $(PYTHON) -m ruff
 MYPY        ?= $(PYTHON) -m mypy
 COGNIS_CLI  ?= $(PYTHON) -m cognis.cli.main
 
-# Strict-typing scope per Task 1 — start with packages/core, expand later.
-MYPY_STRICT_PATHS ?= packages/core
+# Strict-typing scope per Task 1 — packages/core first, expanding each cycle.
+MYPY_STRICT_PATHS ?= packages/core packages/indexer
 PYTEST_ARGS ?=
 
 .DEFAULT_GOAL := help
@@ -24,6 +24,8 @@ help:
 	@echo "  make typecheck   # mypy (strict on $(MYPY_STRICT_PATHS))"
 	@echo "  make test        # pytest unit + property tests"
 	@echo "  make e2e         # full cross-app end-to-end flow (CLI+indexd+mcpd)"
+	@echo "  make coverage    # full-flow coverage (unit+integration+pbt+e2e) + gap report"
+	@echo "  make coverage-html # same, plus htmlcov/ report"
 	@echo "  make bench       # pytest --benchmark-only"
 	@echo "  make eval        # cognis-cli eval (golden-set runner)"
 	@echo "  make clean       # remove build / cache artifacts"
@@ -63,6 +65,28 @@ test:
 .PHONY: e2e
 e2e:
 	$(PYTEST) -m e2e $(PYTEST_ARGS)
+
+.PHONY: coverage
+coverage:
+	$(PYTHON) scripts/coverage_full.py $(COVERAGE_ARGS)
+
+.PHONY: coverage-html
+coverage-html:
+	$(PYTHON) scripts/coverage_full.py --html $(COVERAGE_ARGS)
+
+.PHONY: e2e-report
+e2e-report:
+	$(PYTHON) tests/e2e/report.py $(E2E_REPORT_ARGS)
+
+.PHONY: e2e-baseline-update
+e2e-baseline-update:
+	$(PYTHON) tests/e2e/report.py --out eval-reports/e2e
+	$(PYTHON) scripts/compare_baseline.py --current eval-reports/e2e/e2e-report.json --update
+
+.PHONY: compare-baseline
+compare-baseline:
+	$(PYTHON) tests/e2e/report.py --out eval-reports/e2e
+	$(PYTHON) scripts/compare_baseline.py --current eval-reports/e2e/e2e-report.json $(COMPARE_ARGS)
 
 .PHONY: bench
 bench:

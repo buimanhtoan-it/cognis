@@ -1,0 +1,158 @@
+/**
+ * Named PanelContext fixtures covering every panel state the simulator drives.
+ *
+ * Each fixture is a real {@link PanelContext} the production `renderPanelHtml`
+ * accepts, so the simulator renders the *actual* webview markup for that state
+ * — no hand-written HTML. Add a state here and it is automatically built into a
+ * standalone page and exercised by the Playwright spec.
+ */
+import type { PanelContext } from "../panel";
+import type { HealthReport, PrerequisiteReport } from "../types";
+
+const VERSION = "0.4.0";
+
+const healthOk: HealthReport = {
+  runtime_version: VERSION,
+  overall: "ok",
+  checks: {
+    config: { status: "ok", message: "ok" },
+    db: { status: "ok", message: "ok" },
+    index: { status: "ok", message: "ok" },
+    vector: { status: "ok", message: "ok" },
+    embedder: { status: "ok", message: "ok" },
+    version: { status: "ok", message: "ok" },
+  },
+};
+
+const healthDegraded: HealthReport = {
+  runtime_version: VERSION,
+  overall: "fail",
+  checks: {
+    ...healthOk.checks,
+    index: { status: "fail", message: "Index is corrupt; rebuild required." },
+  },
+};
+
+const prereqsMissing: PrerequisiteReport = {
+  python: "python",
+  ready: false,
+  combined_install_target: ".[indexer,mcp]",
+  items: [
+    {
+      id: "indexer",
+      label: "Code parsers (tree-sitter)",
+      description: "Parses your code so the workspace can be indexed.",
+      status: "missing",
+      required: true,
+      install_target: ".[indexer]",
+      detail: "Not installed.",
+    },
+    {
+      id: "embed-local",
+      label: "Local embeddings",
+      description: "Optional on-device embedding model.",
+      status: "missing",
+      required: false,
+      install_target: ".[embed-local]",
+      detail: "Not installed.",
+    },
+  ],
+};
+
+export interface NamedFixture {
+  name: string;
+  title: string;
+  context: PanelContext;
+}
+
+export const FIXTURES: NamedFixture[] = [
+  {
+    name: "fresh-machine",
+    title: "Fresh machine — backend not installed",
+    context: { status: "notInstalled", backendAvailable: false, version: VERSION },
+  },
+  {
+    name: "prerequisites-missing",
+    title: "Prerequisites missing",
+    context: {
+      status: "notInstalled",
+      backendAvailable: true,
+      prerequisites: prereqsMissing,
+      version: VERSION,
+    },
+  },
+  {
+    name: "setup-required",
+    title: "Backend ready — setup required",
+    context: { status: "notInstalled", backendAvailable: true, version: VERSION },
+  },
+  {
+    name: "indexing",
+    title: "Building the index",
+    context: {
+      status: "indexing",
+      version: VERSION,
+      indexStatus: {
+        active: true,
+        phase: "cold_index",
+        message: "Indexing your codebase…",
+        progressPercent: 42,
+        pendingCount: 3,
+        pendingFiles: ["src/a.ts", "src/b.ts", "src/c.ts"],
+        inflightCount: 1,
+        inflightFiles: ["src/main.ts"],
+        recentFiles: ["src/done.ts"],
+        updatedAt: Date.now(),
+      },
+    },
+  },
+  {
+    name: "ready-not-connected",
+    title: "Index ready — connect AI",
+    context: {
+      status: "ready",
+      health: healthOk,
+      liveIndexing: true,
+      mcpEnabled: false,
+      configured: true,
+      version: VERSION,
+    },
+  },
+  {
+    name: "ready-connected",
+    title: "AI search ready (fully connected)",
+    context: {
+      status: "mcpEnabled",
+      health: healthOk,
+      liveIndexing: true,
+      mcpEnabled: true,
+      configured: true,
+      version: VERSION,
+    },
+  },
+  {
+    name: "degraded",
+    title: "Degraded — needs repair",
+    context: {
+      status: "degraded",
+      health: healthDegraded,
+      mcpEnabled: true,
+      liveIndexing: false,
+      configured: true,
+      version: VERSION,
+    },
+  },
+  {
+    name: "sync-paused",
+    title: "Index sync paused",
+    context: {
+      status: "ready",
+      health: healthOk,
+      liveIndexing: false,
+      mcpEnabled: true,
+      configured: true,
+      syncPaused: true,
+      version: VERSION,
+    },
+  },
+];

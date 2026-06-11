@@ -40,6 +40,12 @@ export interface PanelContext {
   prerequisites?: PrerequisiteReport;
   /** True once the workspace has a `.cognis/config.yaml` (setup has run). */
   configured?: boolean;
+  /** Resolved Cognis MCP server name for this workspace (e.g. `cognis-<slug>-<hash>`). */
+  mcpServerName?: string;
+  /** Target MCP host: "cursor" | "vscode" | "claude". */
+  mcpHost?: string;
+  /** Path to the workspace MCP config (mcp.json) Cognis writes for the host. */
+  mcpConfigPath?: string;
   /**
    * Whether the Python backend (cognis CLI) could actually run. Undefined until
    * probed. False means the backend isn't installed/reachable yet — on a fresh
@@ -317,7 +323,7 @@ export function derivePanelView(ctx: PanelContext): PanelView {
     return {
       headline: "Setup required",
       detail:
-        "Initialize Cognis for this workspace so your editor can search code semantically.",
+        "Set up Cognis for this workspace: it indexes your code and connects an MCP server to your editor so the AI can search it.",
       statusClass: "status-muted",
       primary: { id: "setup", label: "Set Up for AI" },
     };
@@ -339,20 +345,20 @@ export function derivePanelView(ctx: PanelContext): PanelView {
 
   if (mcpEnabled && liveIndexing && health.overall === "ok") {
     return {
-      headline: "AI search ready",
+      headline: "Cognis MCP server connected",
       detail:
-        "Semantic search and live indexing are active. Reload your MCP host if tools do not appear yet.",
+        "Semantic search and live indexing are active. If the Cognis tools don't appear in your editor's AI chat yet, reload the editor window.",
       statusClass: "status-ok",
     };
   }
 
   if (health.overall === "ok" && !mcpEnabled) {
     return {
-      headline: "Almost ready — connect AI",
+      headline: "Connect Cognis to your editor (MCP)",
       detail:
-        "Your index is built. One step left: connect Cognis to your editor's AI (MCP) so it can search your code in chat.",
+        "Your index is built. One step left: add Cognis as an MCP server so your editor's AI can search your code in chat. This writes a workspace mcp.json.",
       statusClass: "status-ok",
-      primary: { id: "connectAi", label: "Connect to AI" },
+      primary: { id: "connectAi", label: "Set up MCP (mcp.json)" },
     };
   }
 
@@ -487,7 +493,7 @@ export function deriveSetupSteps(ctx: PanelContext): SetupStep[] {
     { id: "backend", label: "Backend", state: backend },
     { id: "components", label: "Components", state: components },
     { id: "indexed", label: "Index synced", state: indexed },
-    { id: "connected", label: "AI connected", state: connected },
+    { id: "connected", label: "MCP connected", state: connected },
   ];
 }
 
@@ -558,6 +564,61 @@ export function renderStepperSection(context: PanelContext): string {
   return `<div class="surface">
     <div class="surface-title">Getting started</div>
     <ol class="step-list">${items}</ol>
+  </div>`;
+}
+
+/** Human label for an MCP host id. */
+function hostLabel(host: string | undefined): string {
+  switch (host) {
+    case "cursor":
+      return "Cursor";
+    case "vscode":
+      return "VS Code";
+    case "claude":
+      return "Claude";
+    default:
+      return "your editor";
+  }
+}
+
+/**
+ * Render the MCP server status surface.
+ *
+ * Cognis *is* an MCP server, so the panel states this explicitly: whether the
+ * server is wired into the editor (its `mcp.json` is written), what the server
+ * is called, where the config lives, and the one action that connects it. This
+ * replaces vague "AI" wording with the concrete thing the user needs to know —
+ * the MCP server and how to connect it. Hidden until the workspace is set up
+ * (before that the onboarding stepper/primary action guides the user).
+ */
+export function renderMcpSection(context: PanelContext): string {
+  if (!context.configured && !context.mcpEnabled) {
+    return "";
+  }
+  const connected = Boolean(context.mcpEnabled);
+  const host = hostLabel(context.mcpHost);
+  const statusText = connected
+    ? `Connected to ${escapeHtml(host)}. If the Cognis tools don't appear in your AI chat yet, reload the editor window.`
+    : `Not connected yet. Add Cognis as an MCP server in ${escapeHtml(host)} so its AI can call your code-search tools — this writes a workspace mcp.json.`;
+  const action = connected
+    ? `<button data-action="connectAi" title="Rewrite this workspace's MCP config (mcp.json) for the current editor.">Re-write mcp.json</button>`
+    : `<button data-action="connectAi" title="Write this workspace's MCP config (mcp.json) so the editor's AI can use Cognis.">Set up MCP (mcp.json)</button>`;
+  const serverRow = context.mcpServerName
+    ? `<div class="surface-detail">Server: <code>${escapeHtml(context.mcpServerName)}</code></div>`
+    : "";
+  const pathRow = context.mcpConfigPath
+    ? `<div class="surface-detail">Config: <code>${escapeHtml(context.mcpConfigPath)}</code></div>`
+    : "";
+  return `<div class="surface">
+    <div class="surface-header">
+      <div>
+        <div class="surface-title">MCP server — ${connected ? "connected" : "not connected"}</div>
+        <div class="surface-detail">${statusText}</div>
+      </div>
+      <div class="surface-actions">${action}</div>
+    </div>
+    ${serverRow}
+    ${pathRow}
   </div>`;
 }
 
@@ -1226,6 +1287,8 @@ function panelHtml(
   </div>
 
   ${renderStepperSection(context)}
+
+  ${renderMcpSection(context)}
 
   ${renderPrerequisitesSection(context)}
 

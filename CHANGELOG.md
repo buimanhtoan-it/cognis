@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.3] — 2026-06-11
+
+Patch release. Extension UX: the panel now speaks in MCP terms (no engine code
+change; the engine version is bumped only to keep the bundle's pinned install in
+lockstep).
+
+### Changed
+
+- **The panel now states the MCP server status explicitly.** Cognis is an MCP
+  server, so the panel shows whether it is connected to the editor, the server
+  name, and the workspace `mcp.json` path, with a single **Set up MCP
+  (mcp.json)** action — replacing the vague "Set Up for AI" / "Connect to AI" /
+  "AI connected" wording. The connected state reads "Cognis MCP server
+  connected", and the onboarding step is labelled "MCP connected".
+
+### Added
+
+- The sold bundle's `INSTALL.md` now includes an "Updating to a new version"
+  section so buyers can self-serve a fix/upgrade (install the new VSIX over the
+  old, then one click to upgrade the backend).
+
 ## [0.5.2] — 2026-06-11
 
 Patch release. Fixes a first-run panel state regression in the VS Code/Cursor

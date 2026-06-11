@@ -96,6 +96,28 @@ for VS Code and Cursor.
 7. Reload the editor when prompted. Done — your AI agent can now search your
    code with Cognis.
 
+## Updating to a new version
+
+When you receive a new bundle (a fix or a newer release), updating takes about a
+minute:
+
+1. Download the new bundle and unzip it.
+2. In VS Code/Cursor: open Extensions (Ctrl/Cmd+Shift+X) -> the `...` menu ->
+   **Install from VSIX...** -> pick the new `cognis-vscode-{version}.vsix`.
+   Installing over the previous version is fine — you do not need to uninstall
+   first.
+3. **Reload** the editor when prompted (a "Reload Window" button appears, or run
+   *Developer: Reload Window* from the command palette).
+4. Open the **Cognis** panel and click **Install backend** once (or run
+   *Cognis: Install backend* from the command palette). Cognis upgrades the
+   engine to match this version (`cognis-engine=={version}`). This is much
+   faster than the first install — the large machine-learning dependencies are
+   already cached, so only the small engine package is fetched.
+
+Your already-indexed workspaces keep working — you do **not** need to re-index
+after an update. If the panel ever looks stuck, run *Cognis: Show Output* from
+the command palette to see what it is doing.
+
 ## Need the source-build (expert) path instead?
 
 Cognis is also available as an open-source engine you can install and wire by

@@ -17,9 +17,11 @@ import {
 } from "./indexd";
 import {
   hasExpectedMcpConfigForRepo,
+  deriveMcpServerName,
   disableMcpForWorkspace,
   enableMcpForWorkspace,
   fetchMcpConfig,
+  getWorkspaceMcpConfigPath,
   isCognisMcpConfiguredForRepo,
   removeAllCognisMcpEntries,
   resolveMcpHost,
@@ -981,6 +983,7 @@ export async function refreshPanelContext(repoRoot: string): Promise<PanelContex
     syncLiveIndexingFromProcess(repoRoot);
     const indexStatus = syncIndexStatusFromDaemon(repoRoot);
     const current = getState(repoRoot);
+    const mcpHost = resolveMcpHost();
     return {
       status: deriveStatus(repoRoot, report.overall, false),
       health: report,
@@ -989,12 +992,16 @@ export async function refreshPanelContext(repoRoot: string): Promise<PanelContex
       syncPaused: current.syncPaused,
       indexStatus,
       configured: isWorkspaceConfigured(repoRoot),
+      mcpHost,
+      mcpServerName: deriveMcpServerName(repoRoot),
+      mcpConfigPath: getWorkspaceMcpConfigPath(repoRoot, mcpHost),
     };
   } catch {
     syncMcpStateFromDisk(repoRoot);
     const configured = isWorkspaceConfigured(repoRoot);
     const indexStatus = syncIndexStatusFromDaemon(repoRoot);
     const current = getState(repoRoot);
+    const mcpHost = resolveMcpHost();
     return {
       status: configured ? deriveStatus(repoRoot, undefined, false) : "notInstalled",
       setupHint: configured ? "python" : undefined,
@@ -1003,6 +1010,9 @@ export async function refreshPanelContext(repoRoot: string): Promise<PanelContex
       syncPaused: current.syncPaused,
       indexStatus,
       configured,
+      mcpHost,
+      mcpServerName: deriveMcpServerName(repoRoot),
+      mcpConfigPath: getWorkspaceMcpConfigPath(repoRoot, mcpHost),
     };
   }
 }

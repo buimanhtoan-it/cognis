@@ -9,6 +9,7 @@ import {
   derivePanelView,
   deriveSetupSteps,
   outcomeLabelForContext,
+  renderMcpSection,
   renderStepperSection,
   type PanelContext,
 } from "../panel";
@@ -113,11 +114,12 @@ test("index ready but MCP not connected keeps the AI step active", () => {
   assert.equal(stepState(ctx, "connected"), "active");
   // Stepper is still visible while a step is outstanding.
   assert.ok(renderStepperSection(ctx).includes("Getting started"));
-  // The primary action must say "Connect to AI" (not "Set Up for AI") here:
-  // the index is built, only MCP wiring remains.
+  // The primary action connects the MCP server (writes mcp.json), not first-run
+  // setup: the index is built, only MCP wiring remains.
   const view = derivePanelView(ctx);
-  assert.equal(view.primary?.label, "Connect to AI");
-  assert.match(view.headline, /connect ai/i);
+  assert.equal(view.primary?.id, "connectAi");
+  assert.match(view.primary?.label ?? "", /mcp/i);
+  assert.match(view.headline, /mcp/i);
 });
 
 test("status bar collapses to a short, stable vocabulary", () => {
@@ -273,4 +275,69 @@ test("fresh (unconfigured) machine still shows Set Up / Install — fix does not
     derivePanelView({ status: "notInstalled", backendAvailable: false }).primary?.id,
     "installBackend"
   );
+});
+
+// ---------------------------------------------------------------------------
+// MCP server status surface: Cognis is an MCP server, so the panel states the
+// server status explicitly and offers the one action that connects it (writes
+// the workspace mcp.json) — instead of vague "AI" wording.
+// ---------------------------------------------------------------------------
+
+test("MCP section is hidden before the workspace is set up", () => {
+  assert.equal(renderMcpSection({ status: "notInstalled" }), "");
+});
+
+test("MCP section: not connected shows the mcp.json setup action + server/config", () => {
+  const html = renderMcpSection({
+    status: "ready",
+    configured: true,
+    mcpEnabled: false,
+    mcpHost: "cursor",
+    mcpServerName: "cognis-workspace-ab12cd",
+    mcpConfigPath: "/repo/.cursor/mcp.json",
+  });
+  assert.match(html, /not connected/i);
+  assert.match(html, /Set up MCP \(mcp\.json\)/);
+  assert.match(html, /data-action="connectAi"/);
+  assert.match(html, /Cursor/);
+  assert.match(html, /cognis-workspace-ab12cd/);
+  assert.match(html, /\.cursor[\\/]mcp\.json/);
+});
+
+test("MCP section: connected shows connected status + a re-write action", () => {
+  const html = renderMcpSection({
+    status: "mcpEnabled",
+    configured: true,
+    mcpEnabled: true,
+    mcpHost: "vscode",
+    mcpServerName: "cognis-workspace-ab12cd",
+  });
+  assert.match(html, /MCP server — connected/);
+  assert.match(html, /VS Code/);
+  assert.match(html, /data-action="connectAi"/);
+  assert.match(html, /Re-write mcp\.json/);
+});
+
+test("connected panel headline names the MCP server (not vague 'AI search ready')", () => {
+  const view = derivePanelView({
+    status: "mcpEnabled",
+    health: okHealth(),
+    mcpEnabled: true,
+    liveIndexing: true,
+    configured: true,
+  });
+  assert.match(view.headline, /mcp server connected/i);
+  assert.equal(view.primary, undefined);
+});
+
+test("the MCP-connected onboarding step is labelled 'MCP connected'", () => {
+  const ctx: PanelContext = {
+    status: "ready",
+    health: okHealth(),
+    configured: true,
+    mcpEnabled: false,
+    liveIndexing: false,
+  };
+  const step = deriveSetupSteps(ctx).find((s) => s.id === "connected");
+  assert.equal(step?.label, "MCP connected");
 });

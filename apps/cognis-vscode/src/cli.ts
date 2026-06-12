@@ -1,6 +1,7 @@
 import { spawn } from "child_process";
 import * as vscode from "vscode";
 import { resolvePythonExecutable } from "./python";
+import { trace } from "./diagnostics";
 
 const CLI_MODULE = "cognis.cli.main";
 let outputChannel: vscode.OutputChannel | undefined;
@@ -35,6 +36,8 @@ export async function runCli(
   ];
   const label = options?.label ?? args.join(" ");
   channel.appendLine(`$ ${python} ${fullArgs.join(" ")}`);
+  const startedAt = Date.now();
+  trace.debug("cli", "spawn", { label, command: CLI_MODULE });
 
   return new Promise((resolve) => {
     const proc = spawn(python, fullArgs, {
@@ -54,11 +57,26 @@ export async function runCli(
       channel.append(text);
     });
     proc.on("close", (code) => {
-      channel.appendLine(`[${label}] exit ${code ?? 1}`);
-      resolve({ exitCode: code ?? 1, stdout, stderr });
+      const exitCode = code ?? 1;
+      channel.appendLine(`[${label}] exit ${exitCode}`);
+      const durationMs = Date.now() - startedAt;
+      if (exitCode === 0) {
+        trace.info("cli", `${label} ok`, { exitCode, durationMs });
+      } else {
+        trace.error("cli", `${label} failed`, {
+          exitCode,
+          durationMs,
+          stderrTail: stderr.trim().slice(-400),
+        });
+      }
+      resolve({ exitCode, stdout, stderr });
     });
     proc.on("error", (err) => {
       channel.appendLine(`[${label}] error: ${err.message}`);
+      trace.error("cli", `${label} spawn error`, {
+        durationMs: Date.now() - startedAt,
+        error: err.message,
+      });
       resolve({ exitCode: 1, stdout, stderr: `${stderr}\n${err.message}` });
     });
   });
@@ -69,6 +87,7 @@ export async function runCliJson<T>(
   args: string[],
   env?: NodeJS.ProcessEnv
 ): Promise<T> {
+  const label = args.join(" ");
   const result = await runCli(repoRoot, args, { env });
   if (result.exitCode !== 0) {
     throw new Error(
@@ -78,5 +97,22 @@ export async function runCliJson<T>(
   const text = result.stdout.trim();
   const jsonStart = text.indexOf("{");
   const jsonText = jsonStart >= 0 ? text.slice(jsonStart) : text;
-  return JSON.parse(jsonText) as T;
+  try {
+    return JSON.parse(jsonText) as T;
+  } catch (err) {
+    // A parse failure here is a cross-language contract break (the CLI emitted
+    // something the extension can't read). Record it so it is traceable in
+    // production instead of surfacing as a vague downstream "undefined".
+    trace.error("contract", `${label} returned unparseable JSON`, {
+      command: label,
+      bytes: jsonText.length,
+      head: jsonText.slice(0, 200),
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw new Error(
+      `cognis CLI (${label}) returned output the extension could not parse as JSON. ` +
+        "This usually means the backend version does not match the extension. " +
+        "See Cognis: Show Diagnostics Log for details."
+    );
+  }
 }

@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
 import { getOutputChannel, runCli, runCliJson } from "./cli";
+import { trace } from "./diagnostics";
 import {
   CognisGuidanceError,
   healthDegradedGuidance,
@@ -20,7 +21,6 @@ import {
   deriveMcpServerName,
   disableMcpForWorkspace,
   enableMcpForWorkspace,
-  fetchMcpConfig,
   getWorkspaceMcpConfigPath,
   isCognisMcpConfiguredForRepo,
   removeAllCognisMcpEntries,
@@ -237,7 +237,7 @@ async function ensurePrerequisitesReady(
     title: "Install prerequisites first",
     message:
       `Cognis can't set up this workspace until required components are installed: ${names}. ` +
-      "Use the checklist in the Cognis panel to install them, then run Set Up for AI again.",
+      "Use the checklist in the Cognis panel to install them, then run Set Up Workspace again.",
     severity: "warning",
     actions: [
       { label: "Open Cognis Panel", command: "cognis.openPanel" },
@@ -320,7 +320,7 @@ async function buildManagedSetupPayload(
   };
 }
 
-export async function setupForAi(
+export async function setupWorkspace(
   progress: vscode.Progress<{ message?: string }>,
   token: vscode.CancellationToken
 ): Promise<SetupResult> {
@@ -719,51 +719,46 @@ export async function enableMcp(options?: { silent?: boolean }): Promise<string>
 }
 
 /**
- * "Connect to AI" — write/refresh the MCP config for this workspace and open a
- * copy-paste-ready setup guide.
+ * Connect MCP — write the real ``mcp.json`` for this workspace and open it.
  *
- * This is the one-stop wiring action surfaced by the panel's "Connect to AI"
- * button. It:
- *   1. writes the merged ``mcp.json`` for the resolved host (so the common path
- *      "just works" after a reload), then
- *   2. opens a generated Markdown guide containing the collected environment,
- *      the exact ``mcpServers`` JSON, the on-disk config path, and per-host
- *      reload steps — so any MCP client (Cursor, VS Code, Claude Desktop, or a
- *      custom one) can be connected by hand if needed.
+ * This is the concrete wiring action behind the panel's "Connect MCP" button.
+ * It does the actual work rather than printing instructions:
+ *   1. resolves the host and writes/merges the workspace ``mcp.json`` on disk
+ *      (the editor reads this to launch the Cognis MCP server over stdio),
+ *   2. opens the written file so the user sees exactly what changed, and
+ *   3. surfaces a one-click Reload so the editor picks the server up.
+ *
+ * On a write failure it throws — the command wrapper turns that into actionable
+ * error guidance. The per-host reload guide remains available for connecting a
+ * client Cognis did not write to (see {@link renderMcpConnectGuide}).
  */
-export async function connectToAi(): Promise<void> {
+export async function connectMcp(): Promise<void> {
   const folder = requireWorkspaceFolder();
   const repoRoot = folder.uri.fsPath;
 
   await ensurePythonReady(repoRoot, { report: () => {} });
 
-  const host = resolveMcpHost();
-  const payload = await fetchMcpConfig(repoRoot, host);
+  trace.info("connectMcp", "Writing workspace mcp.json", { repoRoot });
+  const { configPath, serverName } = await enableMcpForWorkspace(repoRoot);
+  setMcpEnabled(repoRoot, true);
+  trace.info("connectMcp", "Wrote mcp.json", { configPath, serverName });
 
-  // Write the config for the common case so a reload is usually all that's left.
-  let configPath: string | undefined;
-  let writeError: string | undefined;
+  // Reveal the actual file so the change is concrete and inspectable.
   try {
-    const result = await enableMcpForWorkspace(repoRoot);
-    configPath = result.configPath;
-    setMcpEnabled(repoRoot, true);
-  } catch (err) {
-    writeError = err instanceof Error ? err.message : String(err);
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(configPath));
+    await vscode.window.showTextDocument(doc, { preview: true });
+  } catch {
+    // Non-fatal: the file is written regardless of whether the editor can open it.
   }
 
-  const guide = renderMcpConnectGuide({
-    host,
-    serverName: payload.server_name,
-    env: payload.env,
-    serversJson: JSON.stringify(payload.config, null, 2),
-    configPath,
-    writeError,
-  });
-  const doc = await vscode.workspace.openTextDocument({
-    content: guide,
-    language: "markdown",
-  });
-  await vscode.window.showTextDocument(doc, { preview: true });
+  const choice = await vscode.window.showInformationMessage(
+    `Wrote the Cognis MCP server "${serverName}" to ${configPath}. ` +
+      "Reload the window so your editor launches it.",
+    "Reload Window"
+  );
+  if (choice === "Reload Window") {
+    void vscode.commands.executeCommand("workbench.action.reloadWindow");
+  }
 }
 
 function hostDisplayName(host: string): string {
@@ -811,10 +806,9 @@ function hostReloadSteps(host: string, configPath?: string): string {
 }
 
 /**
- * Build the human-facing "Connect to AI" guide. Pure string builder (no fs /
- * vscode) so the format stays easy to reason about and test. The env table and
- * the verbatim ``mcpServers`` block let a user wire a client that Cognis didn't
- * write automatically.
+ * Build the human-facing "Connect MCP" reference guide for wiring a client
+ * Cognis did not write to automatically. Pure string builder (no fs / vscode)
+ * so the format stays easy to reason about and test.
  */
 export function renderMcpConnectGuide(args: {
   host: string;
@@ -838,7 +832,7 @@ export function renderMcpConnectGuide(args: {
       ? `> ✅ Cognis wrote the MCP config to \`${configPath}\`. The steps below are for reference or for connecting another client.`
       : "> Use the JSON below to wire your MCP client.";
 
-  return `# Connect Cognis to AI (MCP)
+  return `# Connect Cognis to your editor (MCP)
 
 ${statusLine}
 
@@ -869,7 +863,7 @@ ${serversJson}
 
 ## 4. Verify
 
-Open your AI chat and ask it to search the codebase (for example,
+Open your editor's chat and ask it to search the codebase (for example,
 "use cognis to find where X is handled"). If the tools don't appear, reload the
 editor once more, or run **Cognis: Troubleshoot & Repair**.
 `;
@@ -892,7 +886,7 @@ export async function disableMcp(): Promise<void> {
 /**
  * Tear Cognis out of the current workspace: stop the watcher, disconnect MCP,
  * and delete the local ``.cognis/`` index directory. This is the lifecycle
- * counterpart to Set Up for AI — the "remove the container" action — so a user
+ * counterpart to Set Up Workspace — the "remove the container" action — so a user
  * can cleanly back out without hunting through config files. ``config.yaml`` is
  * intentionally removed too (the whole ``.cognis/`` goes), since setup recreates
  * it. Returns whether the directory was actually deleted.

@@ -20,7 +20,7 @@ import test from "node:test";
 
 import { CognisGuidanceError, setupResultGuidance } from "../guidance";
 import { getState } from "../state";
-import { isWorkspaceConfigured, setupForAi } from "../workspace";
+import { isWorkspaceConfigured, setupWorkspace } from "../workspace";
 
 function makeFreshRepo(): string {
   // A brand-new user: an empty workspace folder with no `.cognis` directory,
@@ -52,7 +52,7 @@ test("Set Up for AI provisions a brand-new workspace end to end", async () => {
     assert.equal(isWorkspaceConfigured(repoRoot), false, "precondition: not configured");
 
     const progress = silentProgress();
-    const result = await setupForAi(progress, noCancelToken());
+    const result = await setupWorkspace(progress, noCancelToken());
 
     // Config was materialized by `cognis init`.
     assert.equal(isWorkspaceConfigured(repoRoot), true, "config.yaml should exist after setup");
@@ -90,7 +90,7 @@ test("fresh setup starts cognis-indexd with a full rebuild", async () => {
   resetHarness(repoRoot, { health: FRESH_INDEXING });
 
   try {
-    await setupForAi(silentProgress(), noCancelToken());
+    await setupWorkspace(silentProgress(), noCancelToken());
 
     const daemonSpawns = getDaemonSpawns();
     assert.equal(daemonSpawns.length, 1, "exactly one indexer daemon should start");
@@ -127,7 +127,7 @@ test("fresh setup orders init before indexing so the daemon sees a config", asyn
   resetHarness(repoRoot, { health: FRESH_INDEXING });
 
   try {
-    await setupForAi(silentProgress(), noCancelToken());
+    await setupWorkspace(silentProgress(), noCancelToken());
 
     const records = getSpawnRecords();
     const initIndex = records.findIndex((r) => r.args.includes("init"));
@@ -149,7 +149,7 @@ test("fresh setup surfaces background-indexing guidance to the new user", async 
   resetHarness(repoRoot, { health: FRESH_INDEXING });
 
   try {
-    const result = await setupForAi(silentProgress(), noCancelToken());
+    const result = await setupWorkspace(silentProgress(), noCancelToken());
     const guidance = setupResultGuidance(result);
 
     assert.ok(guidance, "guidance should be produced");
@@ -171,7 +171,7 @@ test("setup on an already-healthy configured workspace does not force a rebuild"
   fs.writeFileSync(path.join(repoRoot, ".cognis", "config.yaml"), "version: 1\n", "utf8");
 
   try {
-    const result = await setupForAi(silentProgress(), noCancelToken());
+    const result = await setupWorkspace(silentProgress(), noCancelToken());
 
     assert.equal(result.indexingInBackground, false);
     assert.equal(result.liveIndexingStarted, true);
@@ -196,7 +196,7 @@ test("setup aborts with guidance when Python is unavailable for a fresh user", a
 
   try {
     await assert.rejects(
-      () => setupForAi(silentProgress(), noCancelToken()),
+      () => setupWorkspace(silentProgress(), noCancelToken()),
       (err: unknown) => {
         assert.ok(err instanceof CognisGuidanceError, "should throw guidance error");
         return true;

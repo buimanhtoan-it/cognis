@@ -8,7 +8,7 @@
 
 > **Software Cognition Engine** for MCP clients and coding agents.
 >
-> **Status: v0.6.2** — see [CHANGELOG.md](CHANGELOG.md).
+> **Status: v0.7.0** — see [CHANGELOG.md](CHANGELOG.md).
 
 `cognis` is a **local, private** code-retrieval engine. It indexes your
 repository on your machine and exposes precise retrieval tools (symbol lookup,
@@ -68,12 +68,16 @@ seed, then adds the structural signal they're blind to.
 
 > **Scope.** CSAR's diffusion is a real, math-proven mechanism (solver
 > work bounded by `1/(α·ε)`; degree-free lift — see [docs/csar.md](docs/csar.md))
-> and it genuinely surfaces on-path code that pure similarity misses. Whether it
-> yields *higher overall retrieval quality* than a strong hybrid baseline (BM25 +
-> dense, reciprocal-rank-fused) is under active benchmarking on objective,
-> bug-fix-derived ground truth. cognis does **not** claim to beat embedding
+> and it genuinely surfaces on-path code that pure similarity misses. On
+> objective, bug-fix-derived ground truth (276 queries across Python + Java, 5
+> public repos), the strongest *ranker* is reciprocal-rank fusion (RRF) of BM25 +
+> dense — **not** structural diffusion, which floods high-degree hubs. cognis
+> therefore **ranks with RRF** and uses CSAR as a low-contamination,
+> never-displacing **on-path context** layer (a property proven by construction),
+> not as the primary quality ranker. cognis does **not** claim to beat embedding
 > search in general — read the table above as *mechanism* differences, not a
-> proven quality ranking.
+> proven quality ranking. Full tier-tagged evidence:
+> [.benchmarks/public/RESULTS.md](.benchmarks/public/RESULTS.md).
 
 ## How it works (architecture)
 
@@ -179,8 +183,9 @@ See [docs/operations.md](docs/operations.md).
 | Area | Status |
 | --- | --- |
 | Indexer (TS / Python / Go) | Implemented |
-| **CSAR diffusion retrieval** | **Implemented — primary engine** |
-| Retrieval (lexical, semantic, structural) | Implemented (CSAR seed/fallback) |
+| **Hybrid retrieval (lexical + semantic, RRF-fused)** | **Implemented — primary ranker** |
+| CSAR diffusion (on-path context) | Implemented — low-contamination context layer (not the primary ranker; see benchmark) |
+| Retrieval layers (lexical, semantic, structural) | Implemented (also seed CSAR) |
 | MCP server (8 tools, stdio) | Implemented |
 | VS Code / Cursor extension | Implemented (`apps/cognis-vscode`) |
 | Embedder registry + local backend | Implemented; `voyage`/`openai` are selectable stubs |

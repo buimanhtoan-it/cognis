@@ -46,6 +46,7 @@ from cognis.config import (
     read_config_revision,
     write_config_revision,
 )
+from cognis.contract import handshake_payload
 
 # ---------------------------------------------------------------------------
 # .cognis/ layout constants
@@ -1011,6 +1012,23 @@ def cmd_paths(ctx: click.Context, python_exe: str | None) -> None:
     repo_root = _repo_root_from(ctx)
     payload = _build_workspace_paths(repo_root, python_exe=python_exe)
     click.echo(json.dumps(payload, indent=2, sort_keys=True))
+
+
+# --- handshake (extension version/capability negotiation) -------------------
+
+
+@cli.command("handshake")
+@click.pass_context
+def cmd_handshake(ctx: click.Context) -> None:
+    """Emit the extension ↔ backend contract handshake (JSON).
+
+    The extension calls this once at startup and compares ``contract_version``
+    against the version it was built with, so a version-skewed install degrades
+    with a clear message instead of breaking silently. Pure (no repo / DB
+    needed) so it works even before a workspace is set up.
+    """
+    del ctx  # no repo state needed; handshake is process-level.
+    click.echo(json.dumps(handshake_payload(), indent=2, sort_keys=True))
 
 
 # --- doctor (extension prerequisite checklist) ------------------------------

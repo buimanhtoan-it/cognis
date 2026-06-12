@@ -2,6 +2,7 @@
 .vscode-test/**
 src/**
 out/test/**
+out/test-host/**
 .gitignore
 tsconfig.json
 *.vsix

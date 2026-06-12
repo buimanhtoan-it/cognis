@@ -6,6 +6,55 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-06-12
+
+Reliability + observability release: close the extension ↔ backend integration
+gaps, make every user flow traceable, and cover all interaction paths end to end.
+
+### Added
+
+- **Structured diagnostics trace.** The extension writes append-only JSON Lines
+  to `diagnostics.jsonl` (size-rotated, mirrored to the Cognis output channel),
+  surfaced by the new **Cognis: Show Diagnostics Log** command and tuned by the
+  `cognis.logLevel` setting. Every CLI call (exit + duration), every command
+  flow (start/ok/fail + duration), every surfaced error, the startup handshake,
+  and unknown indexd phases are recorded — so a production bug is reconstructable.
+- **Contract version handshake.** `cognis-cli handshake` advertises
+  `{contract_version, engine_version, cli_commands, mcp_tools}` from a single
+  source of truth (`cognis/contract.py`); the extension negotiates it at startup
+  and warns actionably on version skew instead of failing silently.
+- **MCP tool output contracts** for all 8 tools (incl. flagship `diffuse_context`
+  `on_path`/`ppr_score` and the capsule schema), asserted against the real server.
+- **Resource-leak guards** (`pytest -m e2e -k memory`): real `cognis-mcpd` and
+  `cognis-indexd` under sustained load stay handle/RSS bounded.
+- **Full-stack host e2e** (`npm run test:host`, CI job `vscode-host-e2e`): the
+  real extension in a real VS Code against the real backend runs Set Up Workspace
+  and asserts the real `.cognis/` + `mcp.json` are written and traced.
+
+### Changed
+
+- **Removed all "AI" wording for concrete language.** "Set Up for AI" → **Set Up
+  Workspace**, "Connect to AI" → **Connect MCP**; commands renamed
+  (`cognis.setupForAi` → `cognis.setupWorkspace`, `cognis.connectToAi` →
+  `cognis.connectMcp`).
+- **Connect MCP now does the work concretely** — writes the real workspace
+  `mcp.json` and opens it, instead of printing a copy-paste guide.
+- Boundary parsing (`runCliJson`, indexd status) now traces contract/parse
+  failures instead of propagating a silent `undefined`.
+
+### Fixed
+
+- **Deterministic worker-thread DB cleanup in `cognis-mcpd`.** Each semantic tool
+  stage runs on a throwaway worker thread that opened a per-thread sqlite
+  connection; it is now closed in `_run_with_deadline`'s `finally`, keeping peak
+  handles/RSS low under bursts and eliminating the "unclosed database" warnings.
+- **De-flaked the e2e suite.** Benign cross-process `ResourceWarning`s (real
+  subprocess + async client teardown on Python 3.14) were misattributed by
+  pytest's unraisable plugin to random e2e tests under `filterwarnings = error`;
+  scoped a filter to `e2e`-marked items (quantitative leak detection moved to the
+  dedicated memory guards).
+
+
 ## [0.6.2] — 2026-06-12
 
 Patch release. CI/test-only fix (no engine or extension code change).

@@ -113,7 +113,7 @@ export interface PrerequisiteReport {
   combined_install_target: string;
 }
 
-/** Outcome of the end-to-end Set Up for AI flow. */
+/** Outcome of the end-to-end Set Up Workspace flow. */
 export interface SetupResult {
   bootstrap: BootstrapPayload;
   mcpConfigPath?: string;

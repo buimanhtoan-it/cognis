@@ -1,8 +1,8 @@
 {
   "name": "cognis-vscode",
   "displayName": "Cognis",
-  "description": "Managed Cognis setup for AI semantic search, MCP wiring, and live indexing across MCP-capable editors.",
-  "version": "0.6.2",
+  "description": "Managed Cognis setup: semantic code search, MCP wiring, and live indexing across MCP-capable editors.",
+  "version": "0.7.0",
   "publisher": "ToanBui",
   "license": "SEE LICENSE IN LICENSE.txt",
   "icon": "media/icon.png",
@@ -59,8 +59,8 @@
     },
     "commands": [
       {
-        "command": "cognis.setupForAi",
-        "title": "Cognis: Set Up for AI",
+        "command": "cognis.setupWorkspace",
+        "title": "Cognis: Set Up Workspace",
         "category": "Cognis",
         "icon": "media/command.png"
       },
@@ -83,8 +83,8 @@
         "icon": "media/command.png"
       },
       {
-        "command": "cognis.connectToAi",
-        "title": "Cognis: Connect to AI (MCP Setup Guide)",
+        "command": "cognis.connectMcp",
+        "title": "Cognis: Connect MCP (write mcp.json)",
         "category": "Cognis",
         "icon": "media/command.png"
       },
@@ -157,6 +157,12 @@
       {
         "command": "cognis.showOutput",
         "title": "Cognis: Show Output",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.showDiagnostics",
+        "title": "Cognis: Show Diagnostics Log",
         "category": "Cognis",
         "icon": "media/command.png"
       }
@@ -259,6 +265,17 @@
           "type": "boolean",
           "default": true,
           "description": "When true, generated MCP config sets COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP=1 so the embedder preloads on MCP server start and avoids first-query timeouts."
+        },
+        "cognis.logLevel": {
+          "type": "string",
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "default": "info",
+          "description": "Verbosity of the Cognis diagnostics log (Cognis: Show Diagnostics Log). Use debug to capture every CLI call and command with timings when reporting an issue."
         }
       }
     }
@@ -270,6 +287,7 @@
     "watch": "tsc -watch -p ./",
     "package": "vsce package",
     "test": "npm run compile && node --test out/test/*.test.js",
+    "test:host": "npm run compile && node out/test-host/runHostTests.js",
     "sim:build": "npm run compile && node out/sim/build.js",
     "test:e2e": "npm run sim:build && playwright test",
     "lint": "tsc -p ./ --noEmit"

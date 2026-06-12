@@ -133,3 +133,56 @@ jobs:
       - name: Extension unit + contract-parity tests
         working-directory: apps/cognis-vscode
         run: npm test
+
+  vscode-host-e2e:
+    name: vscode host e2e (real editor + real backend)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+
+      - name: Cache tree-sitter grammars and build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/tree_sitter
+            ~/.cache/tree-sitter
+            ./build-tree-sitter
+            ./tree_sitter_languages_build
+          key: tree-sitter-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            tree-sitter-${{ runner.os }}-
+
+      - name: Install production + dev dependencies (the real backend)
+        uses: ./.github/actions/install-prod
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/cognis-vscode/package.json
+
+      - name: Install and compile extension
+        working-directory: apps/cognis-vscode
+        run: |
+          npm ci 2>/dev/null || npm install
+          npm run compile
+
+      - name: Full-stack host e2e (real VS Code + real backend, headless)
+        working-directory: apps/cognis-vscode
+        # Launches a real VS Code under xvfb, points cognis.pythonPath at the
+        # backend installed above, runs cognis.setupWorkspace, and asserts the
+        # real .cognis/ + mcp.json are written and the flow is traced.
+        env:
+          COGNIS_TEST_PYTHON: python
+          COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP: "0"
+        run: xvfb-run -a npm run test:host

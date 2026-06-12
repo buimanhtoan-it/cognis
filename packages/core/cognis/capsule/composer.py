@@ -84,24 +84,53 @@ class ComposeError(Exception):
 
 
 def _dedupe_hits(hits: list[Hit]) -> list[Hit]:
-    """Deduplicate hits by ``symbol_id``, keeping the highest score per symbol.
+    """Deduplicate hits by ``symbol_id`` and order them by cross-layer RRF.
 
-    The output is sorted by descending score (deterministic tie-breaking by
-    symbol_id ensures CP-11 determinism).
+    Two things happen here, kept deliberately separate:
+
+    1. **Display score** — for each ``symbol_id`` the highest-scoring hit is
+       retained, so the surviving hit's ``.score`` is unchanged (this is the
+       tested capsule contract; RRF never rewrites a reported score).
+    2. **Ordering** — the union is ranked by Reciprocal Rank Fusion of the
+       per-layer ranks, not by raw score. Lexical (BM25) and semantic (cosine)
+       scores live on incompatible scales, so ordering the layer union by raw
+       score is scale-incoherent (whichever layer emits larger magnitudes wins
+       regardless of relevance). RRF fuses on ranks instead — scale-invariant
+       and the strongest fusion on the reproducible objective benchmark
+       (``.benchmarks/public/RESULTS.md``). This mirrors ``cognis_eval``'s live
+       retrieval path so the MCP capsule path ranks identically.
+
+    Ties in fused score are broken by the higher display score, then ascending
+    ``symbol_id`` — this keeps CP-11 determinism and, in the degenerate case
+    where every symbol is rank-1 in a single layer, falls back to score order.
+
+    The ``fuse_rankings`` primitive lives in ``cognis_retrieval`` (which depends
+    on ``cognis`` at runtime); importing it lazily here avoids an import-time
+    cycle while reusing the one canonical RRF implementation rather than
+    duplicating it.
 
     Args:
         hits: Raw hits from one or more retrieval layers.
 
     Returns:
-        Deduplicated, score-sorted list of hits.
+        Deduplicated list, one hit per symbol, ordered best-first by RRF.
     """
+    from cognis_retrieval.fusion import fuse_rankings
+
     best: dict[str, Hit] = {}
     for hit in hits:
         existing = best.get(hit.symbol_id)
         if existing is None or hit.score > existing.score:
             best[hit.symbol_id] = hit
-    # Stable sort: descending score, then ascending symbol_id for tie-break.
-    return sorted(best.values(), key=lambda h: (-h.score, h.symbol_id))
+
+    # RRF score per symbol from *all* layer appearances (uses the pre-dedupe
+    # ranks within each layer). Symbols absent from the fusion map (defensive)
+    # sort last via a 0.0 default.
+    fused: dict[str, float] = dict(fuse_rankings(hits))
+    return sorted(
+        best.values(),
+        key=lambda h: (-fused.get(h.symbol_id, 0.0), -h.score, h.symbol_id),
+    )
 
 
 def _make_source(symbol_id: str) -> CapsuleSource:
@@ -160,8 +189,11 @@ class CapsuleComposer:
 
         Pipeline steps (design §Cognitive Context Planner):
 
-        1. Score-merge hits: deduplicate by ``symbol_id``, keep highest score.
-        2. Sort by score descending (tie-break by symbol_id for determinism).
+        1. Merge hits: deduplicate by ``symbol_id``, keep the highest-scoring
+           hit per symbol (preserving its reported ``.score``).
+        2. Order by cross-layer Reciprocal Rank Fusion of the per-layer ranks
+           (scale-invariant), tie-broken by score then symbol_id for
+           determinism. RRF changes ordering/selection only, never a score.
         3. Hydrate symbol rows from the DB for top-N deduplicated hits.
         4. Fill sections based on *mode*:
            - ``bugfix`` → ``root_cause_candidates`` from structural hits;
@@ -195,7 +227,7 @@ class CapsuleComposer:
         Raises:
             ComposeError: If any populated section lacks a source entry.
         """
-        # Step 1+2: deduplicate and sort hits.
+        # Step 1+2: deduplicate (keep best score per symbol) and order by RRF.
         deduped = _dedupe_hits(hits)
 
         # Step 3: hydrate symbol rows.  We limit to the top-100 hits to avoid

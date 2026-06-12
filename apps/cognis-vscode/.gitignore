@@ -1,6 +1,10 @@
 # Build output
 out/
 
+# VS Code host e2e: downloaded VS Code build + test artifacts
+.vscode-test/
+host-run.log
+
 # Panel simulator (generated) + Playwright artifacts
 sim-dist/
 test-results/

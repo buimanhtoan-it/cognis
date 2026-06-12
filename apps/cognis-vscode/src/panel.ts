@@ -12,10 +12,10 @@ import type {
  * button posts an action that resolves to a real command (the UI contract).
  */
 export const ACTION_COMMANDS: Record<string, string> = {
-  setup: "cognis.setupForAi",
+  setup: "cognis.setupWorkspace",
   repair: "cognis.repairSetup",
   clearReindex: "cognis.clearAndReindex",
-  connectAi: "cognis.connectToAi",
+  connectMcp: "cognis.connectMcp",
   startMcp: "cognis.startMcpServer",
   stopMcp: "cognis.stopMcpServer",
   pauseSync: "cognis.pauseSync",
@@ -323,17 +323,17 @@ export function derivePanelView(ctx: PanelContext): PanelView {
       return {
         headline: "Install prerequisites",
         detail:
-          "Some required components are not installed yet. Use the checklist above to install them, then run Set Up for AI.",
+          "Some required components are not installed yet. Use the checklist above to install them, then run Set Up Workspace.",
         statusClass: "status-warn",
-        primary: { id: "setup", label: "Set Up for AI", disabled: true },
+        primary: { id: "setup", label: "Set Up Workspace", disabled: true },
       };
     }
     return {
       headline: "Setup required",
       detail:
-        "Set up Cognis for this workspace: it indexes your code and connects an MCP server to your editor so the AI can search it.",
+        "Set up Cognis for this workspace: it indexes your code and connects an MCP server to your editor so it can search your code.",
       statusClass: "status-muted",
-      primary: { id: "setup", label: "Set Up for AI" },
+      primary: { id: "setup", label: "Set Up Workspace" },
     };
   }
 
@@ -355,7 +355,7 @@ export function derivePanelView(ctx: PanelContext): PanelView {
     return {
       headline: "Cognis MCP server connected",
       detail:
-        "Semantic search and live indexing are active. If the Cognis tools don't appear in your editor's AI chat yet, reload the editor window.",
+        "Semantic search and live indexing are active. If the Cognis tools don't appear in your editor's chat yet, reload the editor window.",
       statusClass: "status-ok",
     };
   }
@@ -364,9 +364,9 @@ export function derivePanelView(ctx: PanelContext): PanelView {
     return {
       headline: "Connect Cognis to your editor (MCP)",
       detail:
-        "Your index is built. One step left: add Cognis as an MCP server so your editor's AI can search your code in chat. This writes a workspace mcp.json.",
+        "Your index is built. One step left: add Cognis as an MCP server so your editor can search your code in chat. This writes a workspace mcp.json.",
       statusClass: "status-ok",
-      primary: { id: "connectAi", label: "Set up MCP (mcp.json)" },
+      primary: { id: "connectMcp", label: "Connect MCP (mcp.json)" },
     };
   }
 
@@ -394,7 +394,7 @@ export function derivePanelView(ctx: PanelContext): PanelView {
     headline: "Checking status…",
     detail: "Waiting for workspace health information.",
     statusClass,
-    primary: { id: "setup", label: "Set Up for AI" },
+    primary: { id: "setup", label: "Set Up Workspace" },
   };
 }
 
@@ -438,7 +438,7 @@ export interface SetupStep {
  * first-time user always sees *where they are* and the single next action,
  * instead of decoding headlines like "Managed setup needs repair".
  *
- *   ① Backend   → ② Components → ③ Index synced → ④ AI connected
+ *   ① Backend   → ② Components → ③ Index synced → ④ MCP connected
  *
  * The steps are derived purely from the same context the panel already has, so
  * they never disagree with the status pill or the primary action.
@@ -549,7 +549,7 @@ function stepMarker(state: SetupStepState): { glyph: string; cls: string } {
 
 /**
  * Render the 4-step onboarding stepper. Gives a first-time user a fixed mental
- * model of the path (Backend → Components → Index → AI) and where they are,
+ * model of the path (Backend → Components → Index → MCP) and where they are,
  * instead of decoding free-form headlines.
  */
 export function renderStepperSection(context: PanelContext): string {
@@ -606,11 +606,11 @@ export function renderMcpSection(context: PanelContext): string {
   const connected = Boolean(context.mcpEnabled);
   const host = hostLabel(context.mcpHost);
   const statusText = connected
-    ? `Connected to ${escapeHtml(host)}. The editor launches the Cognis MCP server over stdio from this config — reload the editor window if the tools don't appear in AI chat yet.`
+    ? `Connected to ${escapeHtml(host)}. The editor launches the Cognis MCP server over stdio from this config — reload the editor window if the tools don't appear in chat yet.`
     : `Not connected yet. Add Cognis as an MCP server in ${escapeHtml(host)} — this writes a workspace mcp.json the editor reads to launch the server.`;
   const action = connected
-    ? `<button data-action="connectAi" title="Rewrite this workspace's MCP config (mcp.json) for the current editor.">Re-write mcp.json</button>`
-    : `<button data-action="connectAi" title="Write this workspace's MCP config (mcp.json) so the editor's AI can use Cognis.">Set up MCP (mcp.json)</button>`;
+    ? `<button data-action="connectMcp" title="Rewrite this workspace's MCP config (mcp.json) for the current editor.">Re-write mcp.json</button>`
+    : `<button data-action="connectMcp" title="Write this workspace's MCP config (mcp.json) so your editor can use Cognis.">Connect MCP (mcp.json)</button>`;
   const serverRow = context.mcpServerName
     ? `<div class="surface-detail">Server: <code>${escapeHtml(context.mcpServerName)}</code></div>`
     : "";
@@ -752,7 +752,7 @@ export function renderPrerequisitesSection(context: PanelContext): string {
     ? optionalMissing > 0
       ? `Ready — ${installedCount}/${total} components installed (${optionalMissing} optional available).`
       : `Ready — all ${total} components installed.`
-    : "Install the required components below before running Set Up for AI.";
+    : "Install the required components below before running Set Up Workspace.";
 
   const installAll =
     !report.ready && report.combined_install_target
@@ -1336,7 +1336,7 @@ function panelHtml(
           ? ` <span class="version-badge">v${escapeHtml(context.version)}</span>`
           : ""
       }</div>
-      <div class="subtitle">Semantic index and MCP setup for AI tooling.</div>
+      <div class="subtitle">Semantic index and MCP setup for your editor.</div>
     </div>
   </div>
 

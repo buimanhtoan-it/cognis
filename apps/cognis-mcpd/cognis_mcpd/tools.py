@@ -174,6 +174,26 @@ def _get_db() -> Database:
         return cached
 
 
+def _close_worker_db_connections() -> None:
+    """Close the calling thread's cached DB connections for every known Database.
+
+    ``_run_with_deadline`` runs blocking stages on a *fresh* daemon thread per
+    call. ``Database.connect()`` caches one sqlite connection per thread, so each
+    such worker opens its own connection that would otherwise live until the
+    thread object is garbage-collected — leaking a connection (memory + file
+    handle + WAL state) for the life of a long-running ``cognis-mcpd``. Calling
+    this from the worker's ``finally`` releases that connection deterministically
+    when the stage completes. The main-thread connection (reused across calls)
+    is untouched because this only closes connections cached for the *current*
+    thread.
+    """
+    for db in list(_DB_CACHE.values()):
+        try:
+            db.close_thread_connection()
+        except Exception:
+            logger.debug("worker DB connection close failed", exc_info=True)
+
+
 def _get_audit_path() -> Path:
     """Return the audit log path from env var or beside the active UCKG."""
     override = os.environ.get("COGNIS_AUDIT_LOG")
@@ -631,6 +651,11 @@ def _run_with_deadline(
         except Exception as exc:
             result_queue.put((False, exc))
         finally:
+            # This stage ran on a throwaway worker thread; release the sqlite
+            # connection it opened so it does not linger until GC (deterministic
+            # cleanup — keeps peak handles/RSS low under concurrent bursts and
+            # avoids the "unclosed database" finalizer warnings).
+            _close_worker_db_connections()
             if lock_acquired and exclusive_lock is not None:
                 exclusive_lock.release()
 

@@ -117,7 +117,7 @@ test("index ready but MCP not connected keeps the AI step active", () => {
   // The primary action connects the MCP server (writes mcp.json), not first-run
   // setup: the index is built, only MCP wiring remains.
   const view = derivePanelView(ctx);
-  assert.equal(view.primary?.id, "connectAi");
+  assert.equal(view.primary?.id, "connectMcp");
   assert.match(view.primary?.label ?? "", /mcp/i);
   assert.match(view.headline, /mcp/i);
 });
@@ -297,8 +297,8 @@ test("MCP section: not connected shows the mcp.json setup action + server/config
     mcpConfigPath: "/repo/.cursor/mcp.json",
   });
   assert.match(html, /not connected/i);
-  assert.match(html, /Set up MCP \(mcp\.json\)/);
-  assert.match(html, /data-action="connectAi"/);
+  assert.match(html, /Connect MCP \(mcp\.json\)/);
+  assert.match(html, /data-action="connectMcp"/);
   assert.match(html, /Cursor/);
   assert.match(html, /cognis-workspace-ab12cd/);
   assert.match(html, /\.cursor[\\/]mcp\.json/);
@@ -314,7 +314,7 @@ test("MCP section: connected shows connected status + a re-write action", () => 
   });
   assert.match(html, /MCP server — connected/);
   assert.match(html, /VS Code/);
-  assert.match(html, /data-action="connectAi"/);
+  assert.match(html, /data-action="connectMcp"/);
   assert.match(html, /Re-write mcp\.json/);
 });
 

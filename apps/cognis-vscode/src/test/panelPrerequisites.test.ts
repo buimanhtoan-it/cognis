@@ -72,7 +72,7 @@ test("checklist stays expanded (details open) when a required item is missing", 
   const html = renderPrerequisitesSection(ctx(report));
   assert.ok(/<details[^>]*\sopen/.test(html), "missing prereqs must keep the checklist open");
   assert.ok(html.includes("installAllPrerequisites"), "should offer Install all");
-  assert.ok(html.includes("Install before running Set Up for AI") || html.includes("Install the required"),
+  assert.ok(html.includes("Install the required"),
     "should prompt to install");
 });
 

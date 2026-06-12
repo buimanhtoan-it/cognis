@@ -164,7 +164,7 @@ export const FIXTURES: NamedFixture[] = [
   },
   {
     name: "ready-not-connected",
-    title: "Index ready — connect AI",
+    title: "Index ready — connect MCP",
     context: {
       status: "ready",
       health: healthOk,
@@ -176,7 +176,7 @@ export const FIXTURES: NamedFixture[] = [
   },
   {
     name: "ready-connected",
-    title: "AI search ready (fully connected)",
+    title: "Semantic search ready (fully connected)",
     context: {
       status: "mcpEnabled",
       health: healthOk,

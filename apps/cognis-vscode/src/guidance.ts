@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { getOutputChannel } from "./cli";
+import { trace } from "./diagnostics";
 import type { HealthReport, SetupResult } from "./types";
 import { resolvePythonExecutable } from "./python";
 
@@ -44,8 +45,8 @@ const INSTALL_BACKEND_ACTION: GuidanceAction = {
 };
 
 const SETUP_ACTION: GuidanceAction = {
-  label: "Set Up for AI",
-  command: "cognis.setupForAi",
+  label: "Set Up Workspace",
+  command: "cognis.setupWorkspace",
 };
 
 const HEALTH_ACTION: GuidanceAction = {
@@ -147,7 +148,7 @@ export function healthDegradedGuidance(report: HealthReport): UserGuidance {
     .map(([name]) => name);
 
   let message =
-    "Cognis health is degraded. Run Repair Setup to restore AI-ready state.";
+    "Cognis health is degraded. Run Repair Setup to restore a working state.";
   if (failed.includes("index") || failed.includes("version")) {
     message =
       "The code index is missing or out of date. Run Repair Setup to rebuild bootstrap and indexing.";
@@ -181,7 +182,7 @@ export function noWorkspaceGuidance(): UserGuidance {
 export function cancelledGuidance(): UserGuidance {
   return {
     title: "Cancelled",
-    message: "Cognis setup was cancelled. Run Set Up for AI or Repair Setup when you are ready to continue.",
+    message: "Cognis setup was cancelled. Run Set Up Workspace or Repair Setup when you are ready to continue.",
     severity: "info",
     actions: [SETUP_ACTION, REPAIR_ACTION],
   };
@@ -274,9 +275,9 @@ export function setupResultGuidance(result: SetupResult): UserGuidance | undefin
     !result.liveIndexingError
   ) {
     return {
-      title: "Ready for AI",
+      title: "Workspace ready",
       message:
-        "Cognis is ready and MCP is configured. Reload the window so your editor's AI picks up the Cognis tools.",
+        "Cognis is ready and MCP is configured. Reload the window so your editor picks up the Cognis tools.",
       severity: "info",
       actions: [RELOAD_ACTION, HEALTH_ACTION, OUTPUT_ACTION],
       technicalDetail: result.mcpConfigPath
@@ -361,5 +362,15 @@ export async function showErrorGuidance(
   err: unknown,
   context?: string
 ): Promise<void> {
-  await presentGuidance(classifyError(err, context));
+  const guidance = classifyError(err, context);
+  // Record every error surfaced to a user in the structured trace so a support
+  // report (Cognis: Show Diagnostics Log) carries the failing flow, the
+  // classified title, and the technical detail — the bug trace.
+  trace.error("flow-error", context ?? guidance.title, {
+    title: guidance.title,
+    severity: guidance.severity,
+    message: guidance.message,
+    detail: guidance.technicalDetail,
+  });
+  await presentGuidance(guidance);
 }

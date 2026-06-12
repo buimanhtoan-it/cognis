@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { getOutputChannel } from "./cli";
+import { trace, type TraceLevel } from "./diagnostics";
 import {
   initManagedBackend,
   installManagedBackend,
@@ -31,6 +32,8 @@ import {
   type PanelContext,
 } from "./panel";
 import { reconcileWorkspaceOnActivate } from "./reconcile";
+import { performHandshake } from "./handshake";
+import { handshakeWarning } from "./contract";
 import { enterLicenseKey, requireLicense } from "./license";
 import {
   addCognisToGitignore,
@@ -59,12 +62,12 @@ import {
   refreshPanelContext,
   rehydrateWorkspaceState,
   clearIndexAndReindex,
-  connectToAi,
+  connectMcp,
   pauseSync,
   removeFromWorkspace,
   repairSetup,
   resumeSync,
-  setupForAi,
+  setupWorkspace,
   showHealthReport,
   startLive,
 } from "./workspace";
@@ -126,7 +129,7 @@ async function refreshPrerequisites(): Promise<void> {
 
 function updateStatusBar(context: PanelContext): void {
   statusBarItem.text = outcomeLabelForContext(context);
-  statusBarItem.tooltip = "Cognis: click for indexing and AI setup status";
+  statusBarItem.tooltip = "Cognis: click for indexing and MCP setup status";
   statusBarItem.show();
   panelProvider?.updateContext(context);
 }
@@ -234,7 +237,9 @@ async function withProgress<T>(
             progress.report(value);
           },
         };
-        return task(reportingProgress, token);
+        // Trace every progress-wrapped flow uniformly: start, ok+duration, or
+        // failure — so a bug in any flow is reconstructable from the log.
+        return trace.span("flow", title, () => task(reportingProgress, token));
       }
     );
   } finally {
@@ -251,16 +256,16 @@ async function reportSetupResult(result: SetupResult): Promise<void> {
   }
 }
 
-async function runSetupForAi(): Promise<void> {
+async function runSetupWorkspace(): Promise<void> {
   // Paid-feature gate. No-op (returns true) in the open-source/source build,
   // which ships without an embedded license public key; only the prebuilt
   // commercial build enforces this.
-  if (extensionContext && !(await requireLicense(extensionContext, "Set Up for AI"))) {
+  if (extensionContext && !(await requireLicense(extensionContext, "Set Up Workspace"))) {
     return;
   }
   try {
-    const result = await withProgress("Cognis: Set Up for AI", (p, t) =>
-      setupForAi(p, t)
+    const result = await withProgress("Cognis: Set Up Workspace", (p, t) =>
+      setupWorkspace(p, t)
     );
     if (result) {
       startHealthPolling();
@@ -268,7 +273,7 @@ async function runSetupForAi(): Promise<void> {
       await reportSetupResult(result);
     }
   } catch (err) {
-    await showErrorGuidance(err, "Set Up for AI");
+    await showErrorGuidance(err, "Set Up Workspace");
   }
 }
 
@@ -359,16 +364,14 @@ async function runClearAndReindex(): Promise<void> {
 }
 
 /**
- * Open the "Connect to AI" MCP setup guide. Writes/refreshes the MCP config for
- * the current workspace, then presents copy-paste-ready instructions (collected
- * env + generated mcp.json + per-host reload steps) so the user can wire any
- * MCP client without hunting through docs.
+ * Connect MCP: write the workspace ``mcp.json`` on disk for the current editor
+ * and open it. Concrete wiring (no copy-paste guide) — see {@link connectMcp}.
  */
-async function runConnectToAi(): Promise<void> {
+async function runConnectMcp(): Promise<void> {
   try {
-    await connectToAi();
+    await connectMcp();
   } catch (err) {
-    await showErrorGuidance(err, "Connect to AI");
+    await showErrorGuidance(err, "Connect MCP");
   }
 }
 
@@ -384,15 +387,16 @@ async function runStartMcpServer(): Promise<void> {
     return;
   }
   const repoRoot = folder.uri.fsPath;
+  trace.info("flow", "Start MCP server requested", { repoRoot });
 
   // Pre-flight: warn with the exact next action instead of failing opaquely.
   if (!isWorkspaceConfigured(repoRoot)) {
     const pick = await vscode.window.showWarningMessage(
       "Set up Cognis for this workspace before starting the MCP server (it needs an index to serve).",
-      "Set Up for AI"
+      "Set Up Workspace"
     );
-    if (pick === "Set Up for AI") {
-      await runSetupForAi();
+    if (pick === "Set Up Workspace") {
+      await runSetupWorkspace();
     }
     return;
   }
@@ -409,6 +413,7 @@ async function runStartMcpServer(): Promise<void> {
     // Make it usable: point the editor's mcp.json at the running server.
     const { configPath } = writeHttpMcpConfig(repoRoot, state.url);
     setMcpEnabled(repoRoot, true);
+    trace.info("flow", "MCP server running", { url: state.url, configPath });
     await pollHealth();
     const choice = await vscode.window.showInformationMessage(
       `Cognis MCP server running at ${state.url}. Updated ${configPath} to use it. ` +
@@ -425,7 +430,7 @@ async function runStartMcpServer(): Promise<void> {
 
 /**
  * Stop the HTTP server and revert mcp.json to the editor-managed (stdio) form,
- * so the editor's AI keeps working (it auto-spawns stdio) instead of pointing at
+ * so the editor keeps working (it auto-spawns stdio) instead of pointing at
  * a dead URL. Tells the user a reload applies the change.
  */
 async function runStopMcpServer(): Promise<void> {
@@ -434,6 +439,7 @@ async function runStopMcpServer(): Promise<void> {
     return;
   }
   const repoRoot = folder.uri.fsPath;
+  trace.info("flow", "Stop MCP server requested", { repoRoot });
   await stopMcpServer(repoRoot);
   let reverted = false;
   try {
@@ -448,7 +454,7 @@ async function runStopMcpServer(): Promise<void> {
   }
   await pollHealth();
   const detail = reverted
-    ? "Reverted mcp.json to the editor-managed (stdio) config so your AI keeps working. Reload the window to apply."
+    ? "Reverted mcp.json to the editor-managed (stdio) config so your editor keeps working. Reload the window to apply."
     : "Could not rewrite mcp.json automatically — open the Cognis output log for details.";
   const choice = await vscode.window.showInformationMessage(
     `Cognis MCP server stopped. ${detail}`,
@@ -527,7 +533,7 @@ async function runRemoveFromWorkspace(scope: "workspace" | "all" = "workspace"):
     : "Remove Cognis from this workspace? This stops live indexing, disconnects the " +
       "MCP server from your editor, and deletes the local .cognis index directory " +
       "(database, caches, audit log). Your source code is not touched. You can run " +
-      "Set Up for AI again later to recreate it.";
+      "Set Up Workspace again later to recreate it.";
   const confirmLabel = purgeAllMcp ? "Remove Everything" : "Remove";
   const confirmation = await vscode.window.showWarningMessage(
     confirmMessage,
@@ -623,12 +629,12 @@ async function runInstallBackend(): Promise<void> {
     // sense of the cost and a confirmation it actually finished.
     const totalMs = outcome.timings.reduce((sum, t) => sum + t.ms, 0);
     const next = await vscode.window.showInformationMessage(
-      `Cognis backend installed ${where} in ${formatElapsed(totalMs)}. Set up this workspace for AI now?`,
-      "Set Up for AI",
+      `Cognis backend installed ${where} in ${formatElapsed(totalMs)}. Set up this workspace now?`,
+      "Set Up Workspace",
       "Later"
     );
-    if (next === "Set Up for AI") {
-      await runSetupForAi();
+    if (next === "Set Up Workspace") {
+      await runSetupWorkspace();
     }
   } catch (err) {
     if (err instanceof BackendInstallError) {
@@ -698,10 +704,64 @@ async function maybeUpgradeBackend(): Promise<void> {
   }
 }
 
+/**
+ * Verify the backend implements the contract version this extension was built
+ * against, and surface a clear, actionable warning when they disagree. This is
+ * the version-skew guard: the extension updates via the marketplace while the
+ * backend updates via PyPI, so a mismatch is a normal production state that the
+ * matched-version e2e suite cannot catch. Silent when the backend can't be
+ * reached (fresh machine) or the contract matches. Remembers a per-skew "skip"
+ * so it never nags.
+ */
+async function maybeCheckHandshake(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    return;
+  }
+  const result = await performHandshake(folder.uri.fsPath);
+  if (!result || result.compatibility === "ok") {
+    return;
+  }
+  const warning = handshakeWarning(result);
+  if (!warning) {
+    return;
+  }
+  const skipKey =
+    `cognis.skipHandshakeWarning.${result.compatibility}.` +
+    `${result.backendContractVersion ?? "x"}->${result.expectedContractVersion}`;
+  if (extensionContext?.globalState.get<boolean>(skipKey)) {
+    return;
+  }
+  const choice = await vscode.window.showWarningMessage(
+    warning,
+    "Install Backend",
+    "Show Diagnostics",
+    "Dismiss"
+  );
+  if (choice === "Install Backend") {
+    await runInstallBackend();
+  } else if (choice === "Show Diagnostics") {
+    void vscode.commands.executeCommand("cognis.showDiagnostics");
+  } else if (choice === "Dismiss") {
+    await extensionContext?.globalState.update(skipKey, true);
+  }
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   extensionContext = context;
   initStateStorage(context);
-  initManagedBackend(context, context.extension?.packageJSON?.version);
+  const extVersion = context.extension?.packageJSON?.version as string | undefined;
+  trace.init(context, extVersion);
+  const configuredLevel = vscode.workspace
+    .getConfiguration("cognis")
+    .get<string>("logLevel", "info");
+  trace.setMinLevel(
+    (["debug", "info", "warn", "error"].includes(configuredLevel)
+      ? configuredLevel
+      : "info") as TraceLevel
+  );
+  trace.info("activate", "Cognis extension activating", { extVersion });
+  initManagedBackend(context, extVersion);
   panelProvider = new CognisPanelProvider(
     context.extensionUri,
     context.extension?.packageJSON?.version
@@ -726,6 +786,26 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("cognis.showOutput", () => {
       output.show(true);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("cognis.showDiagnostics", async () => {
+      const file = trace.logFilePath();
+      if (!file) {
+        await vscode.window.showWarningMessage(
+          "Diagnostics log is not ready yet. Try again in a moment."
+        );
+        return;
+      }
+      try {
+        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+        await vscode.window.showTextDocument(doc);
+      } catch {
+        await vscode.window.showWarningMessage(
+          `Could not open the diagnostics log at ${file}.`
+        );
+      }
     })
   );
 
@@ -783,7 +863,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.setupForAi", () => runSetupForAi())
+    vscode.commands.registerCommand("cognis.setupWorkspace", () => runSetupWorkspace())
   );
 
   context.subscriptions.push(
@@ -797,8 +877,8 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.connectToAi", () =>
-      runConnectToAi()
+    vscode.commands.registerCommand("cognis.connectMcp", () =>
+      runConnectMcp()
     )
   );
 
@@ -924,6 +1004,11 @@ export function activate(context: vscode.ExtensionContext): void {
     // After an extension update the managed backend can lag behind. Offer a
     // one-click upgrade so the running backend matches the extension version.
     void maybeUpgradeBackend();
+
+    // Independently of the version *number*, verify the backend implements the
+    // contract this extension was built against, and warn on a skew before it
+    // manifests as a silent failure.
+    void maybeCheckHandshake();
 
     indexingActive = true;
     blockingIndexMessage = "Inspecting workspace and checking live indexing…";

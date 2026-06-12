@@ -62,7 +62,7 @@ async function maybeEnableMcp(
 
   if (promptBeforeWrite) {
     const choice = await vscode.window.showInformationMessage(
-      "Cognis can write MCP configuration so your AI agent can use semantic search for this workspace.",
+      "Cognis can write MCP configuration so your editor can use semantic search for this workspace.",
       "Enable MCP",
       "Not Now",
       "Don't Ask Again"
@@ -107,12 +107,12 @@ export async function reconcileWorkspaceOnActivate(
 
   // Do NOT provision an unconfigured workspace on activation. Creating
   // ``.cognis/`` (config, DB, caches) is a deliberate action the user takes by
-  // clicking "Set Up for AI". On activation we only *manage* a workspace that
+  // clicking "Set Up Workspace". On activation we only *manage* a workspace that
   // is already configured — otherwise we leave the repo untouched so opening a
   // folder never writes files the user didn't ask for.
   if (!isWorkspaceConfigured(repoRoot)) {
     channel.appendLine(
-      "[reconcile] Workspace not set up yet; leaving it untouched until the user runs Set Up for AI."
+      "[reconcile] Workspace not set up yet; leaving it untouched until the user runs Set Up Workspace."
     );
     return;
   }
@@ -166,7 +166,7 @@ export async function reconcileWorkspaceOnActivate(
 
   // A standalone HTTP MCP server is per-session: if a previous session left an
   // http-form mcp.json but no server is running now, the editor would point at
-  // a dead URL. Fall back to the editor-managed stdio config so AI tools keep
+  // a dead URL. Fall back to the editor-managed stdio config so the tools keep
   // working; the user can click Start again to switch back to http on demand.
   if (isHttpMcpConfiguredForRepo(repoRoot) && !isMcpServerRunning(repoRoot)) {
     try {

@@ -144,7 +144,9 @@ This is the formal version of "saves greping cost": instead of widening `k`
 (more embeddings / more lexical scans) to improve recall, CSAR expands recall by
 a *local* graph diffusion whose cost is capped a priori.
 
-## 4. Why this beats RRF for code
+## 4. What CSAR adds over RRF — and what the objective benchmark found
+
+CSAR contributes structural properties that pure rank fusion (RRF) does not:
 
 | Property | RRF | CSAR |
 | --- | --- | --- |
@@ -154,6 +156,17 @@ a *local* graph diffusion whose cost is capped a priori.
 | Cost vs. repo size | grows with `k` | `O(1/(αε))`, size-independent |
 | Tunable semantic⇄structural | no | yes, single `α` (Theorem 4) |
 | Reuses existing cheap signals | n/a | yes (seeds from FTS5 + small semantic top-k) |
+
+> **Honest verdict (evidence-backed, do not overclaim).** On objective,
+> bug-fix-derived ground truth (276 queries, 5 public repos, Python + Java), raw
+> PPR diffusion is **not** a competitive *ranker*: it floods high-degree hubs
+> (up to ~48% contamination) and posts the worst MRR, and every degree-corrected
+> or query-conditional structural variant tried fails to beat RRF (see
+> `.benchmarks/public/RESULTS.md`). The table above is therefore a list of
+> structural *mechanism* properties, **not** a quality-ranking claim. The
+> production engine ranks with **RRF fusion** of BM25 + dense; CSAR's value is the
+> PROVEN, never-displacing, lowest-contamination **on-path context** it adds on
+> top — and its size-independent cost — not primacy as the ranker.
 
 ## 5. Implementation & verification
 
@@ -172,7 +185,8 @@ a *local* graph diffusion whose cost is capped a priori.
 
 ## 6. MCP integration
 
-CSAR is the **primary retrieval engine** in cognis:
+CSAR is exposed as the **on-path context mechanism** in cognis (the cross-layer
+*ranking* is RRF fusion — see §4):
 
 - **`diffuse_context(query, k, alpha, eps, ...)`** — the flagship MCP tool.
   Seeds from lexical (`_fts_search_core`) + semantic (`_semantic_search_core`)

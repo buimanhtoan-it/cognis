@@ -380,6 +380,44 @@ class TestCapsuleComposer:
         assert len(capsule.relevant_symbols) == 1
         assert capsule.relevant_symbols[0].score == 0.9
 
+    def test_compose_orders_by_rrf_not_raw_score(self, populated_db: Database) -> None:
+        """Ordering fuses layer ranks (RRF), not raw cross-scale magnitudes.
+
+        ``db.query`` is rank-1 in lexical with a huge BM25-style magnitude
+        (1000); ``auth.validate`` is only rank-2 in lexical (score 5) but also
+        rank-1 in semantic (0.9). A raw-score merge would rank ``db.query``
+        first purely because 1000 > 5. RRF rewards the symbol that scores in
+        *both* layers, so ``auth.validate`` must come first — and its reported
+        score stays its own layer score (5.0), never rewritten by fusion.
+        """
+        hits = [
+            FakeHit("py:src/db.py:db.query@efgh1234", score=1000.0, layer="lexical", reason="lex"),
+            FakeHit(
+                "py:src/auth.py:auth.validate@abcd1234", score=5.0, layer="lexical", reason="lex"
+            ),
+            FakeHit(
+                "py:src/auth.py:auth.validate@abcd1234", score=0.9, layer="semantic", reason="sem"
+            ),
+        ]
+        composer = CapsuleComposer()
+        capsule = composer.compose(
+            task="find the query path",
+            mode="feature",
+            confidence=1.0,
+            hits=hits,  # type: ignore[arg-type]
+            max_tokens=4000,
+            db=populated_db,
+        )
+        ids = [rs.symbol_id for rs in capsule.relevant_symbols]
+        assert ids == [
+            "py:src/auth.py:auth.validate@abcd1234",
+            "py:src/db.py:db.query@efgh1234",
+        ]
+        # RRF reordered despite the first symbol's lower raw score (display
+        # score is untouched: it is the symbol's own best layer score).
+        assert capsule.relevant_symbols[0].score == 5.0
+        assert capsule.relevant_symbols[1].score == 1000.0
+
     def test_compose_sources_mandatory_raises_on_violation(self, db: Database) -> None:
         """ComposeError raised when a claim exists but no source is present."""
         # We synthesize a capsule that bypasses the composer to test the validator.

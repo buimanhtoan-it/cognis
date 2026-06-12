@@ -22,7 +22,7 @@ import {
   isGitRepository,
   shouldRemindGitignore,
 } from "../gitignore";
-import { isWorkspaceConfigured, setupForAi } from "../workspace";
+import { isWorkspaceConfigured, setupWorkspace } from "../workspace";
 
 function makeFreshRepo(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "cognis-prereq-"));
@@ -84,7 +84,7 @@ test("setupForAi refuses and creates nothing when a required prerequisite is mis
   resetHarness(repoRoot, { prerequisitesReady: false });
   try {
     await assert.rejects(
-      () => setupForAi(silentProgress(), noCancelToken()),
+      () => setupWorkspace(silentProgress(), noCancelToken()),
       (err: unknown) => {
         assert.ok(err instanceof CognisGuidanceError, "should throw guidance");
         return true;
@@ -110,7 +110,7 @@ test("setupForAi proceeds when prerequisites are satisfied", async () => {
   const repoRoot = makeFreshRepo();
   resetHarness(repoRoot, { prerequisitesReady: true });
   try {
-    const result = await setupForAi(silentProgress(), noCancelToken());
+    const result = await setupWorkspace(silentProgress(), noCancelToken());
     assert.ok(result.bootstrap);
     assert.equal(isWorkspaceConfigured(repoRoot), true);
   } finally {

@@ -221,7 +221,8 @@ class ContextCapsule(BaseModel):
     """Ranked root-cause hypotheses (populated for ``bugfix`` mode)."""
 
     relevant_symbols: list[RelevantSymbol] = Field(default_factory=list)
-    """Symbols most relevant to the task, ranked by score."""
+    """Symbols most relevant to the task, ranked by cross-layer rank fusion
+    (RRF); each entry's ``score`` is its originating layer score, unchanged."""
 
     call_chain: list[CallChainEdge] = Field(default_factory=list)
     """Call-graph edges for the structural context window."""

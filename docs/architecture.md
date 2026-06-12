@@ -83,22 +83,45 @@ model even if the backend changes later.
 
 ## Retrieval model
 
-cognis's primary retrieval engine is **CSAR — Code Spreading-Activation
-Retrieval** (`packages/retrieval/cognis_retrieval/csar.py`). CSAR diffuses a
-seed relevance distribution across the code knowledge graph using Personalized
-PageRank (random walk with restart), unifying the semantic and structural
-signals into one tunable operator. Its forward-push solver has a provable work
-bound `1/(α·ε)` that is independent of repository size. See
+cognis ranks retrieval results with **Reciprocal Rank Fusion (RRF)** of the
+lexical and semantic layers (`packages/retrieval/cognis_retrieval/fusion.py`).
+Each layer scores on its own scale (BM25 magnitudes vs. cosine similarities), so
+fusing on *ranks* rather than raw scores is scale-invariant and avoids letting
+whichever layer emits larger numbers dominate. RRF is the primary ranker in both
+production retrieval paths — the eval/live strategy (`cognis_eval/strategy.py`)
+and the MCP capsule composer (`cognis/capsule/composer.py`). It is the strongest
+ranker on the reproducible **objective** (PR-derived, bug-fix) benchmark across
+Python and Java; see [.benchmarks/public/RESULTS.md](../.benchmarks/public/RESULTS.md).
+
+On top of RRF, **CSAR — Code Spreading-Activation Retrieval**
+(`packages/retrieval/cognis_retrieval/csar.py`) supplies a structural
+**on-path context** signal: it diffuses a seed relevance distribution across the
+code knowledge graph using Personalized PageRank (random walk with restart) to
+recover symbols that sit on the call/flow path *between* matches but match no
+query words. CSAR's forward-push solver has a provable work bound `1/(α·ε)`
+independent of repository size, and its lift is degree-free (Theorem 1). See
 [csar.md](csar.md) for the mathematics and proofs.
 
-CSAR seeds from, and falls back to, three base layers:
+> **Roles, evidence-backed.** RRF is the *ranker*; CSAR is an *on-path context*
+> mechanism, not the primary ranker. On objective bug-fix ground truth, raw PPR
+> diffusion floods high-degree hubs and is not a competitive ranking signal, so
+> it is deliberately **not** used to order results. CSAR's bankable property is
+> that the additive (UNION) form never displaces a confident lexical/semantic hit
+> and keeps the lowest contamination of any structural variant (proven by
+> construction). The math (Theorems 1–5) is PROVEN; the ranking comparison is
+> EMPIRICALLY SUPPORTED on a finite, named sample.
+
+The retrieval layers:
 
 | Layer | Backend | Purpose |
 | --- | --- | --- |
-| Lexical | SQLite FTS5 | Fast keyword and exact-term matching (CSAR seed) |
-| Semantic | `sqlite-vec` | Meaning-based retrieval over embeddings (CSAR seed) |
+| Lexical | SQLite FTS5 | Fast keyword and exact-term matching (ranked; CSAR seed) |
+| Semantic | `sqlite-vec` | Meaning-based retrieval over embeddings (ranked; CSAR seed) |
 | Structural | Recursive SQL queries | Direct dependency / call-graph traversal |
-| **CSAR** | **Personalized PageRank over the UCKG** | **Unified diffusion ranking (flagship)** |
+| CSAR | Personalized PageRank over the UCKG | On-path context diffusion (seeds from lexical + semantic) |
+
+The **RRF fusion** step ranks the lexical + semantic union; CSAR contributes
+on-path symbols as additional context rather than reordering the fused result.
 
 Planned future signals include:
 
@@ -111,7 +134,10 @@ The planner decides which retrieval layers to use and how much result budget to
 allocate. The current planner is rule-based and deterministic.
 
 The capsule composer combines the selected evidence into a single MCP response.
-Depending on the tool, this may include:
+It deduplicates hits per symbol (keeping each symbol's best layer score for
+display) and orders the cross-layer union by **RRF fusion** of the per-layer
+ranks — fusion changes ordering and selection only, never a reported score.
+Depending on the tool, the response may include:
 
 - matching symbols
 - call chains
@@ -125,23 +151,24 @@ The MCP server exposes eight tools oriented toward agent-efficient retrieval:
 
 | Tool | Purpose |
 | --- | --- |
-| `diffuse_context` | **CSAR spreading-activation retrieval — flagship, recommended default** |
-| `discover_symbols` | Hybrid lexical + semantic discovery (RRF) |
+| `diffuse_context` | CSAR spreading-activation retrieval — recovers on-path flow in one round trip |
+| `discover_symbols` | Hybrid lexical + semantic discovery (RRF-ranked) |
 | `symbol_search` | Discover top-k symbols by lexical match |
 | `symbol_lookup` | Resolve one symbol by id, qualified name, or fuzzy match |
 | `resolve_symbols` | Batch hydrate up to 50 symbols |
 | `semantic_search` | Search by concept or intent with enriched payloads |
 | `dependency_trace` | Traverse callers or callees; hits include symbol metadata |
-| `retrieve_context_capsule` | Build a task-oriented context package (CSAR-powered) |
+| `retrieve_context_capsule` | Build a task-oriented context package (RRF-ranked; CSAR adds on-path context) |
 
 ### Agent-efficient retrieval flow
 
 Agents should prefer `diffuse_context` for "understand or trace this flow"
 intents — it seeds from lexical + semantic matches and diffuses across the call
 graph, recovering on-path symbols that independent ranking misses, in one round
-trip. Use `discover_symbols` for quick exploratory lookup, `resolve_symbols` to
-hydrate multiple ids, and `retrieve_context_capsule` when a task description is
-already available (its structural stage is CSAR-powered). `dependency_trace`
+trip. Use `discover_symbols` for quick exploratory lookup (RRF-ranked hybrid),
+`resolve_symbols` to hydrate multiple ids, and `retrieve_context_capsule` when a
+task description is already available — the capsule ranks its lexical + semantic
+union with RRF fusion and uses CSAR to add on-path context. `dependency_trace`
 returns enriched hit metadata (qualified name, kind, file path, line range) so
 follow-up lookups are often unnecessary.
 

@@ -3,10 +3,37 @@ import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import * as path from "path";
 import * as vscode from "vscode";
 import { getOutputChannel } from "./cli";
+import { trace } from "./diagnostics";
 import { resolvePythonExecutable } from "./python";
 import type { IndexStatusReport } from "./types";
 
 const INDEXD_MODULE = "cognis_indexd.main";
+
+/**
+ * Phases the panel knows how to render (see panel.ts deriveIndexingHeadline +
+ * deriveIndexSectionView). This is a cross-process contract: cognis-indexd
+ * chooses the phase string, the panel switches on it. If the daemon introduces
+ * a new phase the panel has no case for, the UI silently falls through to a
+ * generic message — exactly the kind of drift that passes e2e but degrades in
+ * production. We detect an unknown phase here, at the boundary where the value
+ * crosses in, and record it once so it is traceable instead of invisible.
+ */
+const KNOWN_PHASES: ReadonlySet<string> = new Set([
+  "starting",
+  "cold_index",
+  "rebuild",
+  "embedding",
+  "sweep",
+  "branch_change",
+  "incremental",
+  "watching",
+  "idle",
+  "stopped",
+  "error",
+]);
+
+/** Phases already reported as unknown, so we trace each novel value only once. */
+const reportedUnknownPhases = new Set<string>();
 
 interface LiveIndexingHandle {
   proc?: ChildProcessWithoutNullStreams;
@@ -38,10 +65,19 @@ function normalizeIndexStatus(raw: unknown): IndexStatusReport | undefined {
     return undefined;
   }
   const payload = raw as Record<string, unknown>;
+  const phase =
+    typeof payload.phase === "string" ? payload.phase : "starting";
+  if (!KNOWN_PHASES.has(phase) && !reportedUnknownPhases.has(phase)) {
+    reportedUnknownPhases.add(phase);
+    trace.warn("contract", "indexd reported an unknown status phase", {
+      phase,
+      known: [...KNOWN_PHASES],
+    });
+  }
   return {
     pid: typeof payload.pid === "number" ? payload.pid : undefined,
     active: Boolean(payload.active),
-    phase: typeof payload.phase === "string" ? payload.phase : "starting",
+    phase,
     message:
       typeof payload.message === "string"
         ? payload.message

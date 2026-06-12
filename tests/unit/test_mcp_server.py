@@ -557,15 +557,25 @@ class TestSemanticSearch:
             calls += 1
             started.set()
             if calls == 1:
-                assert release.wait(timeout=1.0)
+                assert release.wait(timeout=5.0)
             return []
 
         def _run_first() -> None:
             nonlocal first_result
             first_result = tools.semantic_search("auth flow", k=5)
 
+        # The numbers below are deliberately generous: the behavior under test is
+        # "a short overlap waits inside the budget instead of failing fast", which
+        # only requires the overlap (0.02s release delay) to be *small relative to*
+        # the budget — not that the budget itself be tight. Tight budgets here made
+        # the test flaky: a cold ``_get_db()`` open could miss a 0.1s ``started``
+        # wait, the failed assert would exit the ``patch`` block, and the still-
+        # running worker would then see the unpatched ``_semantic_index_available``
+        # and return ``[]``. Wide budgets keep the assertion meaningful and stable
+        # under CI load. Patched values are test-only and never touch the prod
+        # default (``_HARD_TIMEOUT_S`` from env, 10s).
         with patch.dict(os.environ, ctx.patch_env()):
-            with patch.object(tools, "_HARD_TIMEOUT_S", 0.2):
+            with patch.object(tools, "_HARD_TIMEOUT_S", 5.0):
                 with patch.object(tools, "_semantic_index_available", return_value=True):
                     with patch.object(
                         tools,
@@ -574,7 +584,7 @@ class TestSemanticSearch:
                     ):
                         thread = threading.Thread(target=_run_first)
                         thread.start()
-                        assert started.wait(timeout=0.1)
+                        assert started.wait(timeout=5.0)
 
                         def _release_soon() -> None:
                             time.sleep(0.02)
@@ -583,8 +593,8 @@ class TestSemanticSearch:
                         releaser = threading.Thread(target=_release_soon)
                         releaser.start()
                         second_result = tools.semantic_search("session flow", k=5)
-                        thread.join(timeout=1.0)
-                        releaser.join(timeout=1.0)
+                        thread.join(timeout=5.0)
+                        releaser.join(timeout=5.0)
 
         assert isinstance(first_result, list)
         assert not _is_error_envelope(first_result)

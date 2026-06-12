@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 # ---------------------------------------------------------------------------
 [project]
 name = "cognis-engine"
-version = "0.6.1"
+version = "0.6.2"
 description = "Software Cognition Engine — MCP-native context capsules for LLM coding agents."
 readme = "README.md"
 requires-python = ">=3.11"

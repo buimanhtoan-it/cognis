@@ -77,8 +77,7 @@ def _normalize_paths(payload: Any) -> Any:
     commands = out.get("commands")
     if isinstance(commands, dict):
         out["commands"] = {
-            k: (_PATH_OR_NULL if k in _NULLABLE_COMMAND_KEYS else v)
-            for k, v in commands.items()
+            k: (_PATH_OR_NULL if k in _NULLABLE_COMMAND_KEYS else v) for k, v in commands.items()
         }
     return out
 
@@ -143,6 +142,12 @@ def test_mcp_config_contract_snapshot(sample_repo: Path) -> None:
     if servers:
         first_block = _normalize_mcp_server_block(next(iter(servers.values())))
         normalized["config"] = {"mcpServers": {"<server>": first_block}}
+    # The top-level ``env`` mirrors the server block env: it carries the always
+    # present COGNIS_DB_PATH plus environment-specific timeout/passthrough keys
+    # (HF_*, COGNIS_MCP_*, ...). Pin only the stable key so the golden is
+    # portable across machines/CI.
+    if isinstance(normalized.get("env"), dict):
+        normalized["env"] = {"COGNIS_DB_PATH": normalized["env"].get("COGNIS_DB_PATH", "")}
     _assert_or_update("mcp_config.json", _key_skeleton(normalized))
 
 

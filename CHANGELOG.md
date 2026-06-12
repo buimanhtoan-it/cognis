@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-06-12
+
+Patch release. CI/test-only fix (no engine or extension code change).
+
+### Fixed
+
+- **`make lint` failed CI on a `ruff format` violation.** The 0.6.1 contract
+  helper `_normalize_paths` contained a dict comprehension that `ruff format`
+  wanted on a single line, so `ruff format --check` failed; because `make`
+  returns exit code 2 when any recipe fails, the `lint + unit` job died before
+  pytest ran on both py3.11 and py3.12. Reformatted to the canonical layout.
+- **mcp-config contract snapshot leaked environment-specific env keys.** The
+  snapshot pinned the server-block `env` but not the top-level `env`, so
+  passthrough keys (`HF_*`, `COGNIS_MCP_*`, ...) varied across machines and
+  failed the e2e sandbox on Linux CI. It now pins only the stable
+  `COGNIS_DB_PATH`.
+- **De-flaked the semantic inflight-wait unit test.** Its 0.1s/0.2s timing
+  budgets were too tight: under CI load a cold database open could miss the
+  `started` wait, exit the patch scope, and let the worker return `[]` against
+  the unpatched availability check. Widened to test-only budgets that keep the
+  overlap small relative to the deadline (production timeouts unchanged).
+
 ## [0.6.1] — 2026-06-11
 
 Patch release. CI/test-only fix (no engine or extension code change).

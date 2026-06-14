@@ -6,6 +6,57 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-06-14
+
+Honesty + correctness patch: the panel now reports MCP connectivity from the
+*real* running server (not just on-disk config), the eval gate stops asserting a
+quality number the project does not claim, and a single command keeps every
+version file from drifting at release time.
+
+### Added
+
+- **Live MCP runtime probe (`mcpRuntime.ts`).** The panel now detects the actual
+  editor-spawned `cognis_mcpd` stdio processes (Cursor-style), so "connected"
+  means *configured in `mcp.json` **and** a server is really running* — not just
+  that the config was written. The count is repo-scoped on Linux/macOS (verified
+  against each process's environment via `envMatchesRepo`); on Windows the OS
+  does not expose another process's environment through built-in tooling, so the
+  count is machine-wide and the panel says so plainly instead of overclaiming.
+- **One-command version bump (`scripts/bump_version.py`).** Writes the version to
+  `pyproject.toml`, the extension `package.json`, and its lockfile (both fields)
+  and scaffolds the CHANGELOG section. `--check` mode is now a CI gate that fails
+  the build on version drift across files (e.g. extension 0.7.x vs engine 0.6.x).
+- **`make bench-public` / `invoke bench-public`.** Runs the fair-harness
+  retrieval comparison (BM25/DENSE/RRF/2HOP/CSAR/UNION) over the public repos —
+  the reproducible numbers behind `.benchmarks/public/RESULTS.md`.
+
+### Changed
+
+- **Eval gate is now an explicit no-regression smoke gate.** `eval-baselines/phase1.json`
+  recorded aspirational minimums (Recall@10 ≥ 0.70, MRR ≥ 0.50) the engine never
+  met on the synthetic golden, so the build failed on an ungrounded absolute, not
+  a regression. It now records the *measured* Recall@k / MRR as a baseline and
+  fails only on a regression beyond `regression_tolerance` (default 0.05).
+  `scripts/compare_eval_baseline.py`, `docs/development-criteria.md`, and
+  `docs/eval/phase1-baseline.md` were aligned, with a legacy `*_min` fallback.
+- **`mypy` strict now covers `packages/indexer`** in addition to `packages/core`.
+- **README** shows a git-tag version badge (no hardcoded version) and an honest,
+  reproducible benchmarks section that states what the numbers do and do not claim.
+
+### Fixed
+
+- **Panel ↔ mcpd connectivity desync.** The panel previously showed "connected"
+  from the presence of the `mcp.json` entry alone, so it could claim a working
+  MCP server when the editor had not actually launched one. It now reflects the
+  live process state and distinguishes *not connected* / *configured (not
+  running)* / *connected*.
+- **False "duplicate MCP process" warning on Windows.** The warning fired on a
+  machine-wide count, so opening two workspaces flagged a spurious duplicate. It
+  is now gated to the repo-scoped count only.
+- **Windows path comparison in MCP env matching.** Drive-letter casing and
+  slash style (`D:\...` vs `d:/...`) no longer cause a false mismatch when
+  attributing a config/process to a repo (`pathsEqual` / `normalizePathForCompare`).
+
 ## [0.7.0] — 2026-06-12
 
 Reliability + observability release: close the extension ↔ backend integration

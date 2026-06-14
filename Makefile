@@ -27,6 +27,7 @@ help:
 	@echo "  make coverage    # full-flow coverage (unit+integration+pbt+e2e) + gap report"
 	@echo "  make coverage-html # same, plus htmlcov/ report"
 	@echo "  make bench       # pytest --benchmark-only"
+	@echo "  make bench-public # fair-harness retrieval comparison over public repos (RESULTS.md)"
 	@echo "  make eval        # cognis-cli eval (golden-set runner)"
 	@echo "  make clean       # remove build / cache artifacts"
 	@echo "  make install-dev # editable install + dev deps + extension compile"
@@ -95,6 +96,15 @@ bench:
 .PHONY: eval
 eval:
 	$(COGNIS_CLI) eval $(EVAL_ARGS)
+
+.PHONY: bench-public
+bench-public:
+	# Fair-harness retrieval comparison (BM25/DENSE/RRF/2HOP/CSAR/UNION) over the
+	# public repos — the honest, reproducible numbers behind RESULTS.md. Requires
+	# the repos already cloned + indexed + embedded under .benchmarks/public/
+	# (see the "Reproduce" steps in .benchmarks/public/RESULTS.md). Pass
+	# BENCH_ARGS="--suffix _pr" for the objective PR-derived ground truth.
+	$(PYTHON) .benchmarks/public/bench_all.py $(BENCH_ARGS)
 
 .PHONY: clean
 clean:

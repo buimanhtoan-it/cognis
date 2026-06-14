@@ -20,8 +20,8 @@ configuration.
    ```
 3. Open the target repository in VS Code or Cursor.
 4. Select the same Python interpreter used for the backend install.
-5. Run **Cognis: Set Up for AI**.
-6. If the workspace later drifts, run **Cognis: Repair Setup**.
+5. Run **Cognis: Set Up Workspace**.
+6. If the workspace later drifts, run **Cognis: Troubleshoot & Repair**.
 
 See [../apps/cognis-vscode/README.md](../apps/cognis-vscode/README.md) for the
 extension workflow.

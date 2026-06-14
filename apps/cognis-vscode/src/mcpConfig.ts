@@ -194,6 +194,13 @@ function findConfiguredServerBlockForRepo(
   return undefined;
 }
 
+/** Where this repo's Cognis MCP entry lives (workspace or global mcp.json). */
+export function getMcpConfigMatchForRepo(
+  repoRoot: string
+): RepoMcpMatch | undefined {
+  return findConfiguredServerBlockForRepo(repoRoot, resolveMcpHost());
+}
+
 function removeStaleCognisEntriesForRepo(
   servers: Record<string, unknown>,
   repoRoot: string,

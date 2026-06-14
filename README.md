@@ -8,7 +8,7 @@
 
 > **Software Cognition Engine** for MCP clients and coding agents.
 >
-> **Status: v0.7.0** — see [CHANGELOG.md](CHANGELOG.md).
+> **Status:** [![version](https://img.shields.io/github/v/tag/buimanhtoan-it/cognis?label=version&sort=semver)](https://github.com/buimanhtoan-it/cognis/releases) — release notes in [CHANGELOG.md](CHANGELOG.md).
 
 `cognis` is a **local, private** code-retrieval engine. It indexes your
 repository on your machine and exposes precise retrieval tools (symbol lookup,
@@ -79,6 +79,41 @@ seed, then adds the structural signal they're blind to.
 > proven quality ranking. Full tier-tagged evidence:
 > [.benchmarks/public/RESULTS.md](.benchmarks/public/RESULTS.md).
 
+## Benchmarks (reproducible, honest)
+
+We don't ask you to trust a marketing number — run the comparison yourself. The
+harness is *fair*: every method gets the **same** query embedding, the **same**
+tf‑idf, and the **same** seed set; only the ranking step differs. It reports
+Recall@k, Precision@k, MRR **and Contamination@k** (hub fraction) — the column
+most tools hide — per repo and macro.
+
+```bash
+make bench-public                 # concept golden sets
+make bench-public BENCH_ARGS="--suffix _pr"   # objective, PR-derived ground truth
+```
+
+(Build the indexed + embedded public repos first — see the "Reproduce" steps in
+[.benchmarks/public/RESULTS.md](.benchmarks/public/RESULTS.md).)
+
+**What the numbers actually say** (evidence-tagged; full log in RESULTS.md):
+
+- **On objective bug‑fix ground truth** (symbols changed in real fix commits;
+  163 queries, multi‑repo), the strongest *ranker* is **RRF of BM25 + dense** —
+  **not** structural diffusion. So cognis **ranks with RRF** and does **not**
+  claim to beat embeddings. *(empirically supported, n=163, single‑repo
+  dominated — not a population estimate.)*
+- The one structural property that *survives* objective truth and is genuinely
+  sellable: cognis's structure layer (UNION/CSAR‑as‑context) is **the
+  lowest‑contamination** ranker (≈6% vs ≈27% for raw diffusion) and **provably
+  never displaces a confident lexical/semantic hit** (monotone by construction).
+  *(proven by construction; reproduces on every query.)*
+- CSAR's cost is bounded by `1/(α·ε)`, independent of repo size. *(proven; see
+  [docs/csar.md](docs/csar.md).)*
+
+In short: a **local, mathematically‑grounded** retrieval engine — RRF‑ranked,
+with structure as a proven low‑contamination on‑path context layer — in active,
+reproducible validation. Honest caveats are kept in RESULTS.md, never omitted.
+
 ## How it works (architecture)
 
 ![Cognis architecture](assets/architecture.svg)
@@ -138,7 +173,7 @@ Threat model: [docs/security.md](docs/security.md).
 ## Install
 
 **One-click prebuilt build (recommended).** Install the `.vsix`, open the Cognis
-panel, click **Install backend**, then **Set Up for AI**. No terminal, no Python
+panel, click **Install backend**, then **Set Up Workspace**. No terminal, no Python
 setup. Buy it and you're running in two minutes; follow the `INSTALL.md` in your
 download.
 
@@ -152,7 +187,7 @@ python -m pip install -e ".[indexer,embed-local,vector,tokenizers,mcp]"
 ```
 
 Then either use the editor extension (`python scripts/setup_extension.py
---package`, install the `.vsix`, run **Cognis: Set Up for AI**) or the CLI:
+--package`, install the `.vsix`, run **Cognis: Set Up Workspace**) or the CLI:
 
 ```bash
 cognis-cli bootstrap .   # init + index + health
@@ -199,9 +234,11 @@ See [docs/operations.md](docs/operations.md).
 | Command | Runs |
 | --- | --- |
 | `make lint` | `ruff format --check` + `ruff check` |
-| `make typecheck` | `mypy` (strict on `packages/core`) |
+| `make typecheck` | `mypy` (strict on `packages/core` + `packages/indexer`) |
 | `make test` | `pytest` unit + property tests |
+| `make e2e` | cross-app end-to-end (real CLI + indexd + mcpd) |
 | `make eval` | golden-set runner |
+| `make bench-public` | fair-harness retrieval comparison over public repos (RESULTS.md) |
 
 `tasks.py` exposes the same recipes where `make` is unavailable (`invoke lint
 typecheck test`).

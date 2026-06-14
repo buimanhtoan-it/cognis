@@ -20,12 +20,12 @@ deadlocks only when driven over real stdio. The E2E layer closes that gap.
 
 ## What the E2E layer covers
 
-There are two complementary pieces.
+There are several complementary pieces.
 
 ### 1. Full-flow E2E (`tests/e2e/`, marker `e2e`)
 
 Drives the **real** entrypoints as subprocesses, in the exact order the
-extension's "Set Up for AI" flow uses them:
+extension's "Set Up Workspace" flow uses them:
 
 1. `cognis-cli paths` → resolve workspace paths + entrypoints
 2. `cognis-cli init` → materialize `.cognis/`
@@ -49,16 +49,54 @@ and asserts every field the extension's interfaces (`WorkspacePaths`,
 `McpConfigPayload`, `HealthReport`, `BootstrapPayload`, `IndexStatusReport`)
 actually read is present. A drift on either side fails a test.
 
+### 3. MCP tool output contracts (the AI-facing surface)
+
+`tests/e2e/test_mcp_tool_contracts.py` drives a **real** `cognis-mcpd` over HTTP
+and asserts the JSON each of the 8 tools returns to the agent keeps the keys the
+agent relies on — search/lookup/trace/resolve hits, hybrid `discover_symbols`,
+the flagship `diffuse_context` (`on_path` / `ppr_score` / `match_sources`), the
+`retrieve_context_capsule` schema, and the `{error:{code,message,retryable}}`
+envelope. The live tool set is asserted against `cognis.contract.MCP_TOOLS`.
+
+### 4. Contract-version handshake + lockstep
+
+`cognis-cli handshake` advertises `{contract_version, engine_version,
+cli_commands, mcp_tools}` from `cognis/contract.py`. The extension negotiates it
+at startup and warns on version skew. A lockstep test asserts the backend
+`CONTRACT_VERSION` equals the extension's `EXPECTED_CONTRACT_VERSION` (bump both
+together); the TS `contract.test.ts` covers the skew decision matrix.
+
+### 5. Resource-leak / memory guards
+
+`tests/e2e/test_memory.py` runs the real `cognis-mcpd` (all 8 tools, plus
+sustained lexical/semantic load) and the real `cognis-indexd` watcher under
+repeated edits, asserting bounded OS-handle and RSS growth — the deterministic
+fingerprint of a per-call connection/file leak. A near-linear handle climb fails.
+
+### 6. Full-stack VS Code host e2e
+
+`apps/cognis-vscode` `npm run test:host` (`src/test-host/`) is the only layer
+that runs the real `extension.ts` inside a **real VS Code** (via
+`@vscode/test-electron`) against the **real Python backend**. It runs
+`cognis.setupWorkspace` and asserts the real `.cognis/config.yaml` + workspace
+`mcp.json` are written and the flow appears in the diagnostics trace. Point it at
+a backend python with `COGNIS_TEST_PYTHON`; on Linux run under `xvfb-run -a`. CI
+job: `vscode-host-e2e`.
+
 ## Running
 
 ```bash
-# Python full-flow + contract snapshots (needs the indexer + mcp extras)
+# Python full-flow + contract snapshots + MCP tool contracts + memory guards
 make e2e                 # or: pytest -m e2e
 # or via invoke
 invoke e2e
 
-# TypeScript unit + contract-parity tests
+# TypeScript unit + contract-parity + handshake + diagnostics tests
 cd apps/cognis-vscode && npm test
+
+# Full-stack: real VS Code host + real backend (needs COGNIS_TEST_PYTHON)
+cd apps/cognis-vscode && npm run test:host        # Windows
+#   Linux: COGNIS_TEST_PYTHON=python xvfb-run -a npm run test:host
 ```
 
 The `e2e` marker is excluded from the default `make test` so push CI stays fast.

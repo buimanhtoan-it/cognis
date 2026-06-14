@@ -6,7 +6,7 @@ import {
   getWorkspaceMcpConfigPath,
   resolveMcpConfigPath,
 } from "../mcpConfigPaths";
-import { envMatchesExpected, envMatchesRepo } from "../mcpEnv";
+import { envMatchesExpected, envMatchesRepo, pathsEqual } from "../mcpEnv";
 import {
   deriveMcpServerName,
   isCognisMcpServerName,
@@ -103,6 +103,23 @@ test("envMatchesRepo accepts minimal env with only COGNIS_DB_PATH", () => {
     envMatchesRepo(repoRoot, {
       COGNIS_DB_PATH: "D:/repo/.cognis/uckg.db",
     }),
+    true
+  );
+});
+
+test("envMatchesRepo ignores Windows drive-letter casing", () => {
+  const repoRoot = "d:/PROGRAMING/cognis";
+  assert.equal(
+    envMatchesRepo(repoRoot, {
+      COGNIS_DB_PATH: "D:\\PROGRAMING\\cognis\\.cognis\\uckg.db",
+    }),
+    true
+  );
+});
+
+test("pathsEqual normalizes slash style on Windows paths", () => {
+  assert.equal(
+    pathsEqual("D:/PROGRAMING/cognis/.cognis/uckg.db", "d:\\PROGRAMING\\cognis\\.cognis\\uckg.db"),
     true
   );
 });

@@ -1,8 +1,9 @@
 {
-  "schema_version": "1",
-  "description": "Phase 1 golden-set gates for nightly eval regression (self-hosted v1).",
+  "schema_version": "2",
+  "description": "No-regression smoke gate for the synthetic fixture golden (tests/fixtures/eval/golden.jsonl over mini-ts/py/go). NOT a public quality claim: authoritative retrieval quality is the .benchmarks/ harness on objective PR-derived truth (docs/development-criteria.md, Pillar 1). Baselines are the MEASURED Recall@k / MRR on this golden, recorded from CI (empirically supported on n=126 synthetic queries, not proven, not an outperformance claim). The gate fails only on a regression beyond regression_tolerance. Refresh deliberately when retrieval changes on purpose.",
   "strategy": "hybrid",
   "k": 10,
-  "recall_at_k_min": 0.70,
-  "mrr_min": 0.50
+  "recall_at_k_baseline": 0.5045,
+  "mrr_baseline": 0.3323,
+  "regression_tolerance": 0.05
 }

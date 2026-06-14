@@ -59,6 +59,9 @@ jobs:
       - name: Lint (ruff format + check)
         run: make lint
 
+      - name: Version consistency (no drift across version files)
+        run: python scripts/bump_version.py --check
+
       - name: Typecheck (mypy strict on packages/core)
         run: make typecheck
 

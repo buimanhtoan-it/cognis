@@ -141,6 +141,22 @@ Two committed reference baselines under `tests/e2e/baselines/`:
 - `requests.json` — large real repo (psf/requests, 736 symbols); the perf/scaling
   trend reference (run locally, machine-specific latency, soft budgets).
 
+### Synthetic-golden eval gate (no-regression smoke, NOT a quality claim)
+
+The nightly job also runs the hybrid eval harness over the synthetic fixture
+golden (`tests/fixtures/eval/golden.jsonl` on the tiny `mini-ts/py/go` repos) and
+gates it with `scripts/compare_eval_baseline.py` against `eval-baselines/phase1.json`.
+This is a **regression smoke gate only**: `phase1.json` records the *measured*
+Recall@k / MRR on that hand-authored golden and fails only on a regression beyond
+`regression_tolerance`. It is **not** an absolute quality bar and **not** a public
+claim — authoritative retrieval quality is Pillar 1 (the `.benchmarks/` harness on
+objective PR-derived truth). The earlier hard minimums (0.70 / 0.50) were
+aspirational "phase 1" numbers the RRF-ranked engine never met on this concept-
+label golden, so they failed the build on an ungrounded absolute rather than a
+regression; recording the measured baseline + tolerance fixes that without
+lowering a previously-earned gate. Refresh the baseline deliberately (record the
+new measured value, note why) when retrieval changes on purpose.
+
 ## Practices to avoid
 
 - Quoting a finite-sample number as if it were a general guarantee.

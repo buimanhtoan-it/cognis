@@ -93,7 +93,7 @@ Install the package in VS Code or Cursor:
 3. Select **Install from VSIX...**
 4. Choose `cognis-vscode-<version>.vsix`.
 5. Select the same Python interpreter you used for the `cognis` install, or set `cognis.pythonPath`.
-6. Open the target repository and run **Cognis: Set Up for AI**.
+6. Open the target repository and run **Cognis: Set Up Workspace**.
 
 For VS Code / Cursor users, this is the recommended starting flow. The
 extension uses the selected Python interpreter directly, so it does not require

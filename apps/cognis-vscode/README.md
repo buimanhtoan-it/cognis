@@ -52,8 +52,8 @@ on its own.
 
 ### Step 3 — Set up the workspace
 
-Click **Set Up for AI** in the panel (Cognis also offers this right after the
-backend installs), or run **Cognis: Set Up for AI** from the Command Palette
+Click **Set Up Workspace** in the panel (Cognis also offers this right after the
+backend installs), or run **Cognis: Set Up Workspace** from the Command Palette
 (`Ctrl/Cmd+Shift+P`).
 
 This single action:
@@ -95,19 +95,20 @@ indexing now, and overall health.
 
 ---
 
-## Connect to AI (MCP setup guide)
+## Connect MCP (write mcp.json)
 
-Already indexed but want to (re)wire your AI client, or connect a second MCP
-client to the same workspace? Use **Connect to AI**:
+Already indexed but want to (re)wire your editor, or connect a second MCP
+client to the same workspace? Use **Connect MCP**:
 
-- Click **Connect to AI** in the panel when the index is built but MCP isn't
+- Click **Connect MCP** in the panel when the index is built but MCP isn't
   wired yet, or
-- run **Cognis: Connect to AI (MCP Setup Guide)** from the Command Palette.
+- run **Cognis: Connect MCP (write mcp.json)** from the Command Palette.
 
-Cognis writes the MCP config for your detected editor and opens a guide with the
-collected environment, the exact `mcpServers` JSON for this workspace, the
-on-disk config path, and per-host reload steps — so you can connect Cursor,
-VS Code, Claude Desktop, or any custom MCP client by hand if needed.
+Cognis writes the real workspace `mcp.json` for your detected editor and **opens
+it** so you can see exactly what changed, then offers a one-click **Reload
+Window**. For wiring a client Cognis didn't write to (a custom MCP host), the
+reference guide format — collected environment, the exact `mcpServers` JSON, and
+per-host reload steps — is still available.
 
 ---
 
@@ -175,8 +176,10 @@ and indexing, then tells you the next step.
 | AI tools don't appear in chat | Reload your editor / MCP host. If still missing, run **Troubleshoot & Repair**. |
 | Indexing or config errors | Run **Troubleshoot & Repair**; open **Cognis: Show Output** for details. |
 | Degraded health | Open **Cognis: Show Health**, then **Troubleshoot & Repair**. |
+| Filing a bug report | Run **Cognis: Show Diagnostics Log** — a structured JSON trace of every flow, command, and backend call (with timings) you can attach. Set `cognis.logLevel` to `debug` for more detail. |
 
-Full logs are always in **Cognis: Show Output** and the health report.
+Full logs are always in **Cognis: Show Output**, the structured **Cognis: Show
+Diagnostics Log**, and the health report.
 
 ---
 
@@ -196,6 +199,7 @@ Full logs are always in **Cognis: Show Output** and the health report.
 | `cognis.mcpHardTimeoutSeconds` | `0` | Override `COGNIS_MCP_HARD_TIMEOUT_S`; `0` keeps defaults. |
 | `cognis.mcpDiscoverSemanticTimeoutSeconds` | `0` | Override `COGNIS_MCP_DISCOVER_SEMANTIC_TIMEOUT_S`; `0` keeps defaults. |
 | `cognis.mcpSemanticCooldownSeconds` | `0` | Override `COGNIS_MCP_SEMANTIC_COOLDOWN_S`; `0` keeps defaults. |
+| `cognis.logLevel` | `info` | Verbosity of the diagnostics log (**Cognis: Show Diagnostics Log**). Use `debug` to capture every CLI call + command with timings when filing an issue. |
 
 On Windows, generated MCP config uses a safer automatic timeout budget for the
 first semantic query unless you override these explicitly.

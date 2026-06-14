@@ -21,7 +21,7 @@ you:
 2. install the `cognis-vscode` extension
 3. select the same Python interpreter used for the `cognis` install
 4. open the target repository
-5. run **Cognis: Set Up for AI** (or **Repair Setup** if the workspace was already configured)
+5. run **Cognis: Set Up Workspace** (or **Troubleshoot & Repair** if the workspace was already configured)
 
 The extension resolves absolute `COGNIS_DB_PATH`, `COGNIS_AUDIT_LOG`, and
 `COGNIS_REPO_ROOT` values and writes the configuration for the selected host.

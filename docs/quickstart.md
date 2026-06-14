@@ -138,7 +138,7 @@ repository root:
 2. install the generated `.vsix`
 3. open the target repository in the editor
 4. select the same Python interpreter used for the `cognis` install
-5. run **Cognis: Set Up for AI**
+5. run **Cognis: Set Up Workspace**
 
 See [../apps/cognis-vscode/README.md](../apps/cognis-vscode/README.md) for the
 extension workflow.

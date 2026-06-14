@@ -21,12 +21,14 @@ import {
   deriveMcpServerName,
   disableMcpForWorkspace,
   enableMcpForWorkspace,
+  getMcpConfigMatchForRepo,
   getWorkspaceMcpConfigPath,
   isCognisMcpConfiguredForRepo,
   removeAllCognisMcpEntries,
   resolveMcpHost,
   showMcpConfigPreview,
 } from "./mcpConfig";
+import { getCognisMcpdRuntime } from "./mcpRuntime";
 import { getMcpServerState } from "./mcpServer";
 import { verifyPythonEnvironment } from "./python";
 import { fetchPrerequisites } from "./prerequisites";
@@ -105,6 +107,11 @@ function syncMcpStateFromDisk(repoRoot: string): void {
   if (getState(repoRoot).mcpEnabled !== onDisk) {
     setMcpEnabled(repoRoot, onDisk);
   }
+}
+
+async function probeMcpRuntime(repoRoot: string): Promise<{ count: number; repoScoped: boolean }> {
+  const runtime = await getCognisMcpdRuntime(repoRoot);
+  return { count: runtime.count, repoScoped: runtime.repoScoped };
 }
 
 function syncLiveIndexingFromProcess(repoRoot: string): boolean {
@@ -973,6 +980,8 @@ export async function removeFromWorkspace(options?: {
 export async function refreshPanelContext(repoRoot: string): Promise<PanelContext> {
   try {
     syncMcpStateFromDisk(repoRoot);
+    const mcpRuntime = await probeMcpRuntime(repoRoot);
+    const mcpMatch = getMcpConfigMatchForRepo(repoRoot);
     const report = await fetchHealth(repoRoot);
     setLastHealth(repoRoot, report.overall);
     syncLiveIndexingFromProcess(repoRoot);
@@ -985,18 +994,24 @@ export async function refreshPanelContext(repoRoot: string): Promise<PanelContex
       health: report,
       liveIndexing: current.liveIndexing,
       mcpEnabled: current.mcpEnabled,
+      mcpRuntimeCount: mcpRuntime.count,
+      mcpRuntimeRepoScoped: mcpRuntime.repoScoped,
       syncPaused: current.syncPaused,
       indexStatus,
       configured: isWorkspaceConfigured(repoRoot),
       mcpHost,
       mcpServerName: deriveMcpServerName(repoRoot),
-      mcpConfigPath: getWorkspaceMcpConfigPath(repoRoot, mcpHost),
+      mcpConfigPath:
+        mcpMatch?.configPath ??
+        getWorkspaceMcpConfigPath(repoRoot, mcpHost),
       mcpServerPhase: mcpServer.phase,
       mcpServerUrl: mcpServer.url,
       mcpServerError: mcpServer.lastError,
     };
   } catch {
     syncMcpStateFromDisk(repoRoot);
+    const mcpRuntime = await probeMcpRuntime(repoRoot);
+    const mcpMatch = getMcpConfigMatchForRepo(repoRoot);
     const configured = isWorkspaceConfigured(repoRoot);
     const indexStatus = syncIndexStatusFromDaemon(repoRoot);
     const current = getState(repoRoot);
@@ -1007,12 +1022,16 @@ export async function refreshPanelContext(repoRoot: string): Promise<PanelContex
       setupHint: configured ? "python" : undefined,
       liveIndexing: current.liveIndexing,
       mcpEnabled: current.mcpEnabled,
+      mcpRuntimeCount: mcpRuntime.count,
+      mcpRuntimeRepoScoped: mcpRuntime.repoScoped,
       syncPaused: current.syncPaused,
       indexStatus,
       configured,
       mcpHost,
       mcpServerName: deriveMcpServerName(repoRoot),
-      mcpConfigPath: getWorkspaceMcpConfigPath(repoRoot, mcpHost),
+      mcpConfigPath:
+        mcpMatch?.configPath ??
+        getWorkspaceMcpConfigPath(repoRoot, mcpHost),
       mcpServerPhase: mcpServer.phase,
       mcpServerUrl: mcpServer.url,
       mcpServerError: mcpServer.lastError,

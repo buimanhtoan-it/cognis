@@ -1,7 +1,13 @@
 # Eval Baseline Reference
 
-This document describes the local eval baseline used to measure retrieval
-quality and release readiness.
+This document describes the local eval baseline used as a **no-regression smoke
+gate** on the synthetic fixture golden.
+
+> **Scope (read first).** This is **not** a public quality claim and **not** an
+> absolute quality bar. Authoritative retrieval quality is the `.benchmarks/`
+> harness on objective, PR-derived ground truth (see
+> [../development-criteria.md](../development-criteria.md), Pillar 1). The gate
+> here only catches accidental regressions on the hand-authored golden.
 
 ## What this baseline covers
 
@@ -9,14 +15,17 @@ The baseline is built from fixture repositories and a curated golden query set.
 It exists to answer two questions:
 
 1. does retrieval return the expected symbols consistently?
-2. do changes regress the current quality threshold?
+2. do changes regress the *currently measured* Recall@k / MRR beyond tolerance?
 
-CI compares local results against the thresholds in
-[../../eval-baselines/phase1.json](../../eval-baselines/phase1.json).
+CI compares local results against the recorded baseline in
+[../../eval-baselines/phase1.json](../../eval-baselines/phase1.json). That file
+records the **measured** `recall_at_k_baseline` / `mrr_baseline` and fails only
+on a regression beyond `regression_tolerance` (default `0.05` absolute) — never
+an aspirational minimum.
 
 ## Dataset summary
 
-- total queries: 110
+- total queries: 126 (synthetic, hand-authored concept labels)
 - task modes covered: `bugfix`, `feature`, `refactor`, `explain`, `review`, `migrate`
 - fixture repositories:
   - `mini-ts-app`
@@ -26,10 +35,13 @@ CI compares local results against the thresholds in
 
 ## Metrics
 
-| Metric | Meaning | Current threshold |
+Baselines are the measured values recorded in `eval-baselines/phase1.json`; the
+gate fails only on a regression beyond `regression_tolerance`.
+
+| Metric | Meaning | Recorded baseline |
 | --- | --- | --- |
-| Recall@10 | At least one expected symbol appears in the top 10 results | `>= 0.70` |
-| MRR | Mean reciprocal rank of the first expected symbol | informational |
+| Recall@10 | At least one expected symbol appears in the top 10 results | `0.5045` (no-regression, tol `0.05`) |
+| MRR | Mean reciprocal rank of the first expected symbol | `0.3323` (no-regression, tol `0.05`) |
 | Token efficiency | Relevant tokens divided by total capsule tokens | informational |
 | Latency p95 | Retrieval and capsule latency | see [../performance.md](../performance.md) |
 
@@ -78,11 +90,11 @@ When the baseline regresses, check:
 - whether result weighting or query rewriting changed
 - whether capsule truncation is removing relevant evidence
 
-## Current placeholder status
+## Refreshing the baseline
 
-The measured tables in this document are still placeholders until updated from a
-real eval run. Replace placeholder values with current outputs before using this
-document as a release sign-off artifact.
+Refresh `eval-baselines/phase1.json` **deliberately** when retrieval changes on
+purpose: record the new measured Recall@k / MRR from a CI run and note why in the
+commit. Never bump it silently just to make a build pass.
 
 ## Tuning areas
 

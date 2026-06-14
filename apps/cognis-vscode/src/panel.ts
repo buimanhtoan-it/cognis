@@ -48,6 +48,10 @@ export interface PanelContext {
   mcpHost?: string;
   /** Path to the workspace MCP config (mcp.json) Cognis writes for the host. */
   mcpConfigPath?: string;
+  /** Live stdio MCP server processes the editor has spawned (``cognis_mcpd``). */
+  mcpRuntimeCount?: number;
+  /** True when ``mcpRuntimeCount`` is verified to belong to this repo (env-scoped). */
+  mcpRuntimeRepoScoped?: boolean;
   /** Phase of the panel-managed standalone HTTP MCP server, when running. */
   mcpServerPhase?: "stopped" | "starting" | "running" | "error";
   /** URL of the panel-managed HTTP MCP server (``http://host:port/mcp``). */
@@ -487,9 +491,10 @@ export function deriveSetupSteps(ctx: PanelContext): SetupStep[] {
 
   // ④ MCP tools connected to the editor.
   let connected: SetupStepState;
+  const mcpRuntimeActive = (ctx.mcpRuntimeCount ?? 0) > 0;
   if (indexed !== "done") {
     connected = "pending";
-  } else if (mcpEnabled && liveIndexing) {
+  } else if (mcpEnabled && mcpRuntimeActive) {
     connected = "done";
   } else if (mcpEnabled) {
     connected = "active";
@@ -603,12 +608,26 @@ export function renderMcpSection(context: PanelContext): string {
   if (!context.configured && !context.mcpEnabled) {
     return "";
   }
-  const connected = Boolean(context.mcpEnabled);
+  const configured = Boolean(context.mcpEnabled);
+  const runtimeCount = context.mcpRuntimeCount ?? 0;
+  const runtimeActive = runtimeCount > 0;
+  const repoScoped = context.mcpRuntimeRepoScoped ?? false;
+  // Cursor-style: wired in mcp.json *and* the editor has spawned cognis_mcpd.
+  const connected = configured && runtimeActive;
   const host = hostLabel(context.mcpHost);
-  const statusText = connected
-    ? `Connected to ${escapeHtml(host)}. The editor launches the Cognis MCP server over stdio from this config — reload the editor window if the tools don't appear in chat yet.`
-    : `Not connected yet. Add Cognis as an MCP server in ${escapeHtml(host)} — this writes a workspace mcp.json the editor reads to launch the server.`;
-  const action = connected
+  let statusText: string;
+  if (connected && repoScoped) {
+    statusText = `Connected to ${escapeHtml(host)}. The editor is running the Cognis MCP server for this repo (${runtimeCount} process${runtimeCount === 1 ? "" : "es"}).`;
+  } else if (connected) {
+    // Machine-wide best effort (e.g. Windows can't read per-process env): the
+    // server is up, but we can't prove it's bound to *this* repo's database.
+    statusText = `Connected to ${escapeHtml(host)}. A Cognis MCP server is running (detected machine-wide; this OS can't confirm it's bound to this repo).`;
+  } else if (configured) {
+    statusText = `Configured in mcp.json but no live MCP process yet. Open MCP tools in ${escapeHtml(host)} or reload the window.`;
+  } else {
+    statusText = `Not connected yet. Add Cognis as an MCP server in ${escapeHtml(host)} — this writes a workspace mcp.json the editor reads to launch the server.`;
+  }
+  const action = configured
     ? `<button data-action="connectMcp" title="Rewrite this workspace's MCP config (mcp.json) for the current editor.">Re-write mcp.json</button>`
     : `<button data-action="connectMcp" title="Write this workspace's MCP config (mcp.json) so your editor can use Cognis.">Connect MCP (mcp.json)</button>`;
   const serverRow = context.mcpServerName
@@ -617,8 +636,19 @@ export function renderMcpSection(context: PanelContext): string {
   const pathRow = context.mcpConfigPath
     ? `<div class="surface-detail">Config: <code>${escapeHtml(context.mcpConfigPath)}</code></div>`
     : "";
-  const mark = connected ? "✓" : "•";
-  const markCls = connected ? "prereq-ok" : "prereq-required";
+  // Only warn about duplicates when the count is repo-scoped: a machine-wide
+  // count is legitimately > 1 when several workspaces are open at once.
+  const duplicateRow =
+    repoScoped && runtimeCount > 1
+      ? `<div class="surface-detail surface-warn">Warning: ${runtimeCount} Cognis MCP processes are running for this repo. Cursor may have spawned duplicates — reload the window to clean up.</div>`
+      : "";
+  const mark = connected ? "✓" : configured ? "•" : "•";
+  const markCls = connected ? "prereq-ok" : configured ? "prereq-required" : "prereq-required";
+  const headline = connected
+    ? "connected"
+    : configured
+      ? "configured (not running)"
+      : "not connected";
   // Collapsed once connected (status is enough); expanded when action is needed.
   const openAttr = connected ? "" : " open";
   return `<div class="surface">
@@ -626,7 +656,7 @@ export function renderMcpSection(context: PanelContext): string {
       <summary class="prereq-summary">
         <span class="prereq-summary-mark ${markCls}">${mark}</span>
         <span class="prereq-summary-text">
-          <span class="surface-title">MCP server — ${connected ? "connected" : "not connected"}</span>
+          <span class="surface-title">MCP server — ${headline}</span>
           <span class="surface-detail">${statusText}</span>
         </span>
         <span class="prereq-chevron" aria-hidden="true">▸</span>
@@ -635,6 +665,7 @@ export function renderMcpSection(context: PanelContext): string {
         <div class="surface-actions">${action}</div>
         ${serverRow}
         ${pathRow}
+        ${duplicateRow}
         <div class="surface-detail">The editor starts and stops the MCP server automatically from this config (stdio transport) — there is no separate server URL to manage.</div>
         ${renderMcpHttpSubsection(context)}
       </div>
@@ -957,6 +988,9 @@ function panelHtml(
       color: var(--muted);
       line-height: 1.45;
       margin-top: 4px;
+    }
+    .surface-detail.surface-warn {
+      color: var(--warm);
     }
     .surface-actions {
       display: flex;

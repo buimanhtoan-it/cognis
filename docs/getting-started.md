@@ -9,7 +9,7 @@ The recommended path is:
 1. install the `cognis` backend from source
 2. install the VS Code / Cursor extension
 3. open the repository you want to index
-4. run **Cognis: Set Up for AI**
+4. run **Cognis: Set Up Workspace**
 5. verify that MCP tools are available
 
 ## Before You Start
@@ -118,7 +118,7 @@ folder.
 Then run:
 
 ```text
-Cognis: Set Up for AI
+Cognis: Set Up Workspace
 ```
 
 You can run it from the Command Palette or from the Cognis sidebar. This command
@@ -214,11 +214,11 @@ On Windows, that usually looks like:
 D:\PROGRAMING\cognis\.venv\Scripts\python.exe
 ```
 
-Then run **Cognis: Repair Setup**.
+Then run **Cognis: Troubleshoot & Repair**.
 
 ### MCP Tools Are Missing
 
-Run **Cognis: Repair Setup**, then reload the editor or MCP host. If you
+Run **Cognis: Troubleshoot & Repair**, then reload the editor or MCP host. If you
 configured MCP manually, check that `COGNIS_DB_PATH`, `COGNIS_AUDIT_LOG`, and
 `COGNIS_REPO_ROOT` point to the target repository.
 

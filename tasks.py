@@ -73,6 +73,17 @@ def bench(ctx: Context, args: str = "") -> None:
     _py(ctx, "-m", "pytest", "-m benchmark --benchmark-only", args)
 
 
+@task(help={"args": "Extra args forwarded to bench_all.py (e.g. '--suffix _pr')."})
+def bench_public(ctx: Context, args: str = "") -> None:
+    """Fair-harness retrieval comparison over the public repos (see RESULTS.md).
+
+    Requires the public repos already cloned + indexed + embedded under
+    .benchmarks/public/ (see the "Reproduce" steps in
+    .benchmarks/public/RESULTS.md).
+    """
+    _py(ctx, ".benchmarks/public/bench_all.py", args)
+
+
 @task(help={"args": "Extra args forwarded to cognis-cli eval."})
 def run_eval(ctx: Context, args: str = "") -> None:
     """Run the golden-set eval harness via cognis-cli."""

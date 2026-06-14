@@ -92,6 +92,7 @@ test("fully wired workspace marks every step done and hides the stepper", () => 
     prerequisites: readyPrereqs(true),
     configured: true,
     mcpEnabled: true,
+    mcpRuntimeCount: 1,
     liveIndexing: true,
   };
   for (const step of deriveSetupSteps(ctx)) {
@@ -309,6 +310,7 @@ test("MCP section: connected shows connected status + a re-write action", () => 
     status: "mcpEnabled",
     configured: true,
     mcpEnabled: true,
+    mcpRuntimeCount: 1,
     mcpHost: "vscode",
     mcpServerName: "cognis-workspace-ab12cd",
   });
@@ -316,6 +318,69 @@ test("MCP section: connected shows connected status + a re-write action", () => 
   assert.match(html, /VS Code/);
   assert.match(html, /data-action="connectMcp"/);
   assert.match(html, /Re-write mcp\.json/);
+});
+
+test("MCP section: configured but no runtime process shows waiting state", () => {
+  const html = renderMcpSection({
+    status: "ready",
+    configured: true,
+    mcpEnabled: true,
+    mcpRuntimeCount: 0,
+    mcpHost: "cursor",
+  });
+  assert.match(html, /configured \(not running\)/i);
+  assert.match(html, /no live MCP process/i);
+});
+
+test("MCP section: connected but machine-wide (unscoped) is honest about repo binding", () => {
+  const html = renderMcpSection({
+    status: "mcpEnabled",
+    configured: true,
+    mcpEnabled: true,
+    mcpRuntimeCount: 1,
+    mcpRuntimeRepoScoped: false,
+    mcpHost: "vscode",
+  });
+  assert.match(html, /MCP server — connected/);
+  assert.match(html, /machine-wide/i);
+  assert.match(html, /can't confirm it's bound to this repo/i);
+});
+
+test("MCP section: connected and repo-scoped names this repo", () => {
+  const html = renderMcpSection({
+    status: "mcpEnabled",
+    configured: true,
+    mcpEnabled: true,
+    mcpRuntimeCount: 1,
+    mcpRuntimeRepoScoped: true,
+    mcpHost: "vscode",
+  });
+  assert.match(html, /running the Cognis MCP server for this repo/i);
+});
+
+test("MCP section: warns when duplicate MCP processes are running", () => {
+  const html = renderMcpSection({
+    status: "mcpEnabled",
+    configured: true,
+    mcpEnabled: true,
+    mcpRuntimeCount: 4,
+    mcpRuntimeRepoScoped: true,
+    mcpHost: "cursor",
+  });
+  assert.match(html, /Warning: 4 Cognis MCP processes/);
+  assert.match(html, /reload the window/i);
+});
+
+test("MCP section: does NOT warn about duplicates when count is unscoped (machine-wide)", () => {
+  const html = renderMcpSection({
+    status: "mcpEnabled",
+    configured: true,
+    mcpEnabled: true,
+    mcpRuntimeCount: 4,
+    mcpRuntimeRepoScoped: false,
+    mcpHost: "cursor",
+  });
+  assert.doesNotMatch(html, /Warning:/);
 });
 
 test("connected panel headline names the MCP server (not vague 'AI search ready')", () => {

@@ -8,6 +8,8 @@
   <meta property="og:title" content="Cognis — Software Cognition Engine" />
   <meta property="og:description" content="Local, private code retrieval for AI coding agents. Built on CSAR — relevance that follows the call graph." />
   <meta property="og:type" content="website" />
+  <meta property="og:image" content="assets/logo.png" />
+  <link rel="icon" type="image/png" href="assets/logo.png" />
   <style>
     :root {
       --blue: #0040b0;
@@ -73,9 +75,8 @@
       border-bottom: 1px solid var(--line);
     }
     nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 62px; }
-    .brand { display: flex; align-items: baseline; gap: 8px; font-weight: 700; font-size: 19px; color: var(--ink); letter-spacing: -.01em; }
-    .brand .mark { width: 11px; height: 11px; border-radius: 3px; background: var(--blue); position: relative; top: 1px; }
-    .brand .mark::after { content: ""; position: absolute; right: -4px; top: -4px; width: 6px; height: 6px; border-radius: 2px; background: var(--orange); }
+    .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 19px; color: var(--ink); letter-spacing: -.01em; }
+    .brand .logo { height: 28px; width: 28px; display: block; }
     .nav-links { display: flex; align-items: center; gap: 24px; }
     .nav-links a { color: var(--muted); font-size: 14.5px; font-weight: 500; }
     .nav-links a:hover { color: var(--ink); text-decoration: none; }
@@ -169,7 +170,7 @@
 <body>
   <nav>
     <div class="wrap">
-      <div class="brand"><span class="mark"></span> cognis</div>
+      <div class="brand"><img class="logo" src="assets/logo.png" alt="Cognis logo" /> cognis</div>
       <div class="nav-links">
         <a href="#problem" class="hide-sm">Problem</a>
         <a href="#method" class="hide-sm">How it works</a>

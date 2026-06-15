@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cognis Pro — Software Cognition Engine for AI coding agents</title>
+  <meta name="description" content="Cognis is a local, private code-retrieval engine for MCP clients and AI coding agents. Built on CSAR — Code Spreading-Activation Retrieval." />
+  <meta property="og:title" content="Cognis Pro — Software Cognition Engine" />
+  <meta property="og:description" content="Local, private code retrieval for AI coding agents. Built on CSAR." />
+  <meta property="og:type" content="website" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>" />
+  <style>
+    :root {
+      --bg: #0b0e14;
+      --panel: #121722;
+      --panel-2: #161c29;
+      --text: #e6e9ef;
+      --muted: #97a0b3;
+      --accent: #5b8cff;
+      --accent-2: #7c5cff;
+      --border: #232b3a;
+      --ok: #36d399;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+    .btn {
+      display: inline-block;
+      padding: 14px 26px;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 16px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: transform .08s ease, box-shadow .2s ease;
+    }
+    .btn:hover { text-decoration: none; transform: translateY(-1px); }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #fff;
+      box-shadow: 0 8px 28px rgba(91,140,255,.28);
+    }
+    .btn-ghost { background: var(--panel-2); color: var(--text); border-color: var(--border); }
+
+    /* Nav */
+    nav {
+      position: sticky; top: 0; z-index: 10;
+      background: rgba(11,14,20,.82);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+    nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
+    .brand .dot { width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+    .nav-links { display: flex; align-items: center; gap: 22px; }
+    .nav-links a { color: var(--muted); font-size: 15px; }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+    @media (max-width: 640px) { .nav-links .hide-sm { display: none; } }
+
+    /* Hero */
+    header { padding: 88px 0 64px; text-align: center; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 14px; border-radius: 999px;
+      background: var(--panel); border: 1px solid var(--border);
+      color: var(--muted); font-size: 13px; margin-bottom: 26px;
+    }
+    .pill .live { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 4px rgba(54,211,153,.15); }
+    h1 { font-size: clamp(34px, 6vw, 56px); line-height: 1.08; letter-spacing: -.02em; margin-bottom: 20px; }
+    h1 .grad { background: linear-gradient(135deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .lede { font-size: clamp(17px, 2.4vw, 20px); color: var(--muted); max-width: 680px; margin: 0 auto 34px; }
+    .cta-row { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+    .micro { margin-top: 16px; font-size: 14px; color: var(--muted); }
+
+    /* Sections */
+    section { padding: 56px 0; border-top: 1px solid var(--border); }
+    h2 { font-size: clamp(24px, 4vw, 34px); letter-spacing: -.01em; margin-bottom: 14px; text-align: center; }
+    .sub { color: var(--muted); text-align: center; max-width: 640px; margin: 0 auto 40px; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 24px; }
+    .card h3 { font-size: 18px; margin-bottom: 8px; }
+    .card p { color: var(--muted); font-size: 15px; }
+    .card .ic { font-size: 22px; margin-bottom: 12px; display: block; }
+
+    /* Problem block */
+    .eq {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px;
+      padding: 18px 20px; color: #cfe0ff; font-size: 15px; overflow-x: auto; margin: 22px auto 0; max-width: 720px;
+    }
+
+    /* Compare table */
+    table { width: 100%; border-collapse: collapse; font-size: 15px; }
+    th, td { padding: 12px 14px; border-bottom: 1px solid var(--border); text-align: left; }
+    th { color: var(--muted); font-weight: 600; }
+    td.good { color: var(--ok); }
+    .tbl-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+
+    /* Pricing */
+    .price-card { max-width: 460px; margin: 0 auto; background: var(--panel); border: 1px solid var(--border); border-radius: 18px; padding: 34px; text-align: center; position: relative; }
+    .price-card .tag { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; font-size: 12px; font-weight: 700; padding: 5px 14px; border-radius: 999px; }
+    .price { font-size: 52px; font-weight: 800; letter-spacing: -.02em; }
+    .price span { font-size: 17px; color: var(--muted); font-weight: 500; }
+    .price-card ul { list-style: none; text-align: left; margin: 24px 0 28px; }
+    .price-card li { padding: 8px 0 8px 28px; position: relative; color: var(--text); }
+    .price-card li::before { content: "✓"; position: absolute; left: 0; color: var(--ok); font-weight: 700; }
+
+    footer { padding: 48px 0; border-top: 1px solid var(--border); color: var(--muted); font-size: 14px; text-align: center; }
+    footer a { color: var(--muted); }
+    .legal { margin-top: 10px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="wrap">
+      <div class="brand"><span class="dot"></span> Cognis</div>
+      <div class="nav-links">
+        <a href="#how" class="hide-sm">How it works</a>
+        <a href="#features" class="hide-sm">Features</a>
+        <a href="#pricing">Pricing</a>
+        <a class="js-gh" href="https://github.com/buimanhtoan-it/cognis" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <header>
+    <div class="wrap">
+      <span class="pill"><span class="live"></span> <span class="js-product">Cognis Pro</span> — <span class="js-version">v0.7</span> · one-time purchase</span>
+      <h1>Give your AI agent <span class="grad">the context it keeps missing</span></h1>
+      <p class="lede">
+        Cognis is a local, private code-retrieval engine for MCP clients and coding
+        agents. It indexes your repo on your machine and recovers the on-path code
+        that embedding + keyword search leaves out.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary js-buy" href="https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW" target="_blank" rel="noopener">Buy <span class="js-product">Cognis Pro</span> — <span class="js-price">$9.90</span></a>
+        <a class="btn btn-ghost js-gh" href="https://github.com/buimanhtoan-it/cognis" target="_blank" rel="noopener">View on GitHub</a>
+      </div>
+      <p class="micro">Local-first · works offline · Cursor, Copilot, Claude &amp; any MCP client</p>
+    </div>
+  </header>
+
+  <section id="problem">
+    <div class="wrap">
+      <h2>The problem it solves</h2>
+      <p class="sub">
+        Ask <em>"where is the JWT token validated on login?"</em> Embedding + BM25
+        rank every symbol on its own. They find the two ends that mention "login"
+        and "validate" — but the middleware that actually runs the check matches no
+        query words, so it never surfaces. The agent gets a flow with a hole in it.
+      </p>
+      <div class="eq">r = α·s + (1−α)·P·r&nbsp;&nbsp;&nbsp;&nbsp;# relevance = your own match (s) + relevance flowing in from neighbors (P·r)</div>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="wrap">
+      <h2>Built on CSAR</h2>
+      <p class="sub">Code Spreading-Activation Retrieval. Treat relevance like water poured onto matched nodes and let it flow along the call graph.</p>
+      <div class="grid">
+        <div class="card">
+          <span class="ic">💧</span>
+          <h3>1 · Seed</h3>
+          <p>Pour relevance onto the same cheap lexical + semantic matches you already get.</p>
+        </div>
+        <div class="card">
+          <span class="ic">🌊</span>
+          <h3>2 · Diffuse</h3>
+          <p>Each step keeps a fraction α and pushes (1−α) to neighbors along calls/imports. The middle node fills from both sides.</p>
+        </div>
+        <div class="card">
+          <span class="ic">📊</span>
+          <h3>3 · Rank</h3>
+          <p>Sort by accumulated mass. The on-path node rises next to the seeds — recovered in a single round trip.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <h2>What you get</h2>
+      <p class="sub">A finished, code-specialized retrieval engine — not a RAG toolkit to assemble.</p>
+      <div class="grid">
+        <div class="card"><span class="ic">🔒</span><h3>Local &amp; private</h3><p>Your code is indexed on your machine. No cloud, works offline, behind firewalls.</p></div>
+        <div class="card"><span class="ic">🔌</span><h3>MCP-native</h3><p>One retrieval backend across every agent — Cursor, Copilot, Claude, and more.</p></div>
+        <div class="card"><span class="ic">⚡</span><h3>One-click setup</h3><p>Install the extension, click Install backend, then Set Up Workspace. No terminal.</p></div>
+        <div class="card"><span class="ic">🧮</span><h3>Bounded cost</h3><p>Solver work is bounded by 1/(α·ε) — independent of repo size. 5 CSAR theorems verified in code.</p></div>
+        <div class="card"><span class="ic">🛡️</span><h3>Safe by design</h3><p>Secret scrubbing, read-only tools, hard caps, hashed audit log. Standard SHA-256 — no custom crypto.</p></div>
+        <div class="card"><span class="ic">🧰</span><h3>8 retrieval tools</h3><p>Symbol lookup, semantic search, dependency tracing, task-focused context capsules.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="compare">
+    <div class="wrap">
+      <h2>How it compares</h2>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr><th></th><th>Embedding / vector KNN</th><th>Keyword (BM25)</th><th>CSAR (Cognis)</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Scores symbols independently</td><td>Yes</td><td>Yes</td><td class="good">No — diffuses along the graph</td></tr>
+            <tr><td>Recovers on-path middleware</td><td>No</td><td>No</td><td class="good">Yes</td></tr>
+            <tr><td>Cost vs. repo size</td><td>Grows</td><td>Grows</td><td class="good">Bounded by 1/(α·ε)</td></tr>
+            <tr><td>Runs locally / offline</td><td>Varies</td><td>Yes</td><td class="good">Yes</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="pricing">
+    <div class="wrap">
+      <h2>Pricing</h2>
+      <p class="sub">One-time purchase per minor version. A <span class="js-version">v0.7</span> license unlocks every <span class="js-patch">0.7.x</span> patch. Polar is the merchant of record and handles tax/VAT.</p>
+      <div class="price-card">
+        <span class="tag"><span class="js-product-upper">COGNIS PRO</span> — <span class="js-version">v0.7</span></span>
+        <div class="price"><span class="js-price">$9.90</span> <span>one-time</span></div>
+        <ul>
+          <li>Prebuilt one-click VS Code / Cursor extension</li>
+          <li>Full CSAR engine + all 8 MCP retrieval tools</li>
+          <li>Local semantic + structural search</li>
+          <li>Every <span class="js-patch">0.7.x</span> patch update included</li>
+          <li>Works offline · email support</li>
+        </ul>
+        <a class="btn btn-primary js-buy" href="https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW" target="_blank" rel="noopener" style="width:100%">Buy now — <span class="js-price">$9.90</span></a>
+        <p class="micro" style="margin-top:14px">Secure checkout via Polar · one-time charge</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <div>Cognis — Software Cognition Engine · Sold by Alpha Chain Co., Ltd.</div>
+      <div class="legal">
+        <a class="js-gh" href="https://github.com/buimanhtoan-it/cognis" target="_blank" rel="noopener">GitHub</a> ·
+        <a class="js-changelog" href="https://github.com/buimanhtoan-it/cognis/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a> ·
+        <a class="js-support" href="mailto:buimanhtoan.it@gmail.com">Support</a>
+      </div>
+      <div class="legal">Engine is open source (Apache-2.0). The Pro client is commercial.</div>
+    </div>
+  </footer>
+
+  <script>
+    // ------------------------------------------------------------------
+    // Single source of truth: site/config.json (release-specific values)
+    // + the live version from the GitHub Releases API. The page markup is
+    // version-agnostic — bumping the core never requires editing this file.
+    // Baked defaults keep the page working offline / opened via file://.
+    // ------------------------------------------------------------------
+    (function () {
+      "use strict";
+      var DEFAULTS = {
+        productName: "Cognis Pro",
+        repo: "buimanhtoan-it/cognis",
+        buyUrl: "https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW",
+        price: "$9.90",
+        supportEmail: "buimanhtoan.it@gmail.com",
+        fallbackVersion: "0.7.2"
+      };
+
+      function setText(selector, value) {
+        document.querySelectorAll(selector).forEach(function (el) { el.textContent = value; });
+      }
+      function setHref(selector, value) {
+        document.querySelectorAll(selector).forEach(function (el) { el.setAttribute("href", value); });
+      }
+      function minorBand(version) {
+        var m = String(version).replace(/^v/, "").match(/^(\d+)\.(\d+)/);
+        return m ? m[1] + "." + m[2] : null;
+      }
+
+      function applyConfig(cfg) {
+        setText(".js-product", cfg.productName);
+        setText(".js-product-upper", cfg.productName.toUpperCase());
+        setText(".js-price", cfg.price);
+        setHref(".js-buy", cfg.buyUrl);
+        setHref(".js-gh", "https://github.com/" + cfg.repo);
+        setHref(".js-changelog", "https://github.com/" + cfg.repo + "/blob/main/CHANGELOG.md");
+        setHref(".js-support", "mailto:" + cfg.supportEmail);
+      }
+      function applyVersion(minor) {
+        if (!minor) return;
+        setText(".js-version", "v" + minor);
+        setText(".js-patch", minor + ".x");
+      }
+
+      function fetchLatestVersion(repo) {
+        // Prefer the GitHub Release (release.yml creates one per v* tag);
+        // fall back to the newest tag; then to the config fallback.
+        return fetch("https://api.github.com/repos/" + repo + "/releases/latest", {
+          headers: { Accept: "application/vnd.github+json" }
+        })
+          .then(function (r) { if (!r.ok) throw new Error("no release"); return r.json(); })
+          .then(function (j) { return j.tag_name; })
+          .catch(function () {
+            return fetch("https://api.github.com/repos/" + repo + "/tags")
+              .then(function (r) { if (!r.ok) throw new Error("no tags"); return r.json(); })
+              .then(function (tags) { return tags && tags.length ? tags[0].name : null; });
+          });
+      }
+
+      // 1) Load config (single edit point), falling back to baked defaults.
+      fetch("config.json", { cache: "no-cache" })
+        .then(function (r) { return r.ok ? r.json() : {}; })
+        .catch(function () { return {}; })
+        .then(function (loaded) {
+          var cfg = Object.assign({}, DEFAULTS, loaded || {});
+          applyConfig(cfg);
+          // Show the fallback band immediately so nothing flashes empty.
+          applyVersion(minorBand(cfg.fallbackVersion));
+          // 2) Then upgrade to the live version (best-effort, never blocking).
+          fetchLatestVersion(cfg.repo)
+            .then(function (tag) { var mb = minorBand(tag); if (mb) applyVersion(mb); })
+            .catch(function () { /* keep fallback band */ });
+        });
+    })();
+  </script>
+</body>
+</html>

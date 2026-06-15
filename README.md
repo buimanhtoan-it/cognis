@@ -174,8 +174,8 @@ Threat model: [docs/security.md](docs/security.md).
 
 **One-click prebuilt build (recommended).** Install the `.vsix`, open the Cognis
 panel, click **Install backend**, then **Set Up Workspace**. No terminal, no Python
-setup. Buy it and you're running in two minutes; follow the `INSTALL.md` in your
-download.
+setup. [**Buy Cognis Pro**](https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW)
+and you're running in two minutes; follow the `INSTALL.md` in your download.
 
 **From source (for experts).** Requires Python ≥ 3.11 and Git.
 

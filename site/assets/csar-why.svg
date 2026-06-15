@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="620" viewBox="0 0 900 620" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="aw" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#0040b0"/>
+    </marker>
+    <style>
+      .step { font-size:13px; font-weight:700; fill:#15233b; }
+      .cap { font-size:11px; fill:#5b6b7b; }
+      .node { stroke:#c3ccd6; stroke-width:1.5; }
+      .nlabel { font-size:11px; font-weight:600; fill:#15233b; }
+      .flow { stroke:#0040b0; fill:none; marker-end:url(#aw); }
+      .water { font-size:10px; fill:#0040b0; font-weight:700; }
+      .formula { font-size:13px; fill:#15233b; }
+      .muted { fill:#8a97a5; }
+    </style>
+  </defs>
+
+  <text x="20" y="30" font-size="15" font-weight="700" fill="#15233b">Why CSAR finds the middle node: relevance flows like water through the call graph</text>
+
+  <text x="20" y="62" class="step">Think of each match as a cup of water poured onto a node.</text>
+  <text x="20" y="82" class="cap">Water (relevance "mass") spills along the call/import edges to neighbors. A node that sits between two sources collects water from BOTH sides.</text>
+
+  <!-- STAGE 1: SEED -->
+  <text x="60" y="130" class="step">1 · Seed</text>
+  <text x="60" y="148" class="cap">pour on lexical/semantic matches</text>
+
+  <circle class="node" cx="150" cy="210" r="34" fill="#cfe0fb"/>
+  <text x="150" y="206" text-anchor="middle" class="nlabel">postLogin</text>
+  <text x="150" y="222" text-anchor="middle" class="water">0.5</text>
+
+  <circle class="node" cx="150" cy="330" r="30" fill="#ffffff"/>
+  <text x="150" y="326" text-anchor="middle" class="nlabel">requireAuth</text>
+  <text x="150" y="342" text-anchor="middle" class="water muted">0.0</text>
+
+  <circle class="node" cx="150" cy="450" r="34" fill="#cfe0fb"/>
+  <text x="150" y="446" text-anchor="middle" class="nlabel">validate</text>
+  <text x="150" y="462" text-anchor="middle" class="water">0.5</text>
+
+  <line x1="150" y1="244" x2="150" y2="300" stroke="#c3ccd6" stroke-width="1.5"/>
+  <line x1="150" y1="360" x2="150" y2="416" stroke="#c3ccd6" stroke-width="1.5"/>
+  <text x="60" y="510" class="cap">Seeds are normalized to sum to 1; the middle</text>
+  <text x="60" y="527" class="cap">node starts dry — no keyword/vector match.</text>
+
+  <!-- STAGE 2: DIFFUSE -->
+  <text x="332" y="130" class="step">2 · Diffuse (random walk with restart)</text>
+  <text x="332" y="148" class="cap">each step: keep a fraction at home (α), push the rest (1−α) to neighbors — edges are bidirectional</text>
+
+  <circle class="node" cx="430" cy="210" r="34" fill="#9fb8e8"/>
+  <text x="430" y="206" text-anchor="middle" class="nlabel">postLogin</text>
+  <text x="430" y="222" text-anchor="middle" class="water">0.34</text>
+
+  <circle class="node" cx="430" cy="330" r="28" fill="#ffd9c2" stroke="#f06000"/>
+  <text x="430" y="326" text-anchor="middle" class="nlabel">requireAuth</text>
+  <text x="430" y="342" text-anchor="middle" class="water" fill="#f06000">0.21 ↑</text>
+
+  <circle class="node" cx="430" cy="450" r="34" fill="#9fb8e8"/>
+  <text x="430" y="446" text-anchor="middle" class="nlabel">validate</text>
+  <text x="430" y="462" text-anchor="middle" class="water">0.34</text>
+
+  <path class="flow" d="M430,244 L430,298"/>
+  <path class="flow" d="M430,416 L430,362"/>
+  <text x="468" y="280" class="water">flows down</text>
+  <text x="468" y="392" class="water">flows up</text>
+
+  <text x="332" y="510" class="cap">requireAuth fills from above AND below, so it</text>
+  <text x="332" y="527" class="cap">goes from invisible to a real, rankable score.</text>
+
+  <!-- STAGE 3: RANK -->
+  <text x="650" y="130" class="step">3 · Rank by water level</text>
+  <text x="650" y="148" class="cap">sort nodes by accumulated mass (high → low)</text>
+
+  <rect x="640" y="190" width="230" height="34" rx="7" fill="#eaf1fc" stroke="#0040b0" stroke-width="1.5"/>
+  <text x="654" y="212" class="nlabel">1. postLogin · 0.34  (seed)</text>
+
+  <rect x="640" y="232" width="230" height="34" rx="7" fill="#eaf1fc" stroke="#0040b0" stroke-width="1.5"/>
+  <text x="654" y="254" class="nlabel">2. validate · 0.34  (seed)</text>
+
+  <rect x="640" y="274" width="230" height="34" rx="7" fill="#fff1e8" stroke="#f06000" stroke-width="2"/>
+  <text x="654" y="296" class="nlabel">3. requireAuth · 0.21  (recovered)</text>
+
+  <text x="640" y="345" class="cap">The middle node — invisible to plain</text>
+  <text x="640" y="362" class="cap">embedding — is now recovered right</text>
+  <text x="640" y="379" class="cap">below the seeds, on the same flow.</text>
+
+  <!-- formula band -->
+  <rect x="20" y="556" width="860" height="48" rx="10" fill="#f4f7fb" stroke="#dbe4ee"/>
+  <text x="36" y="578" class="formula"><tspan font-weight="700">The rule, in one line:</tspan>  r = α·s + (1−α)·P·r   —  "relevance = your own match (s), plus relevance flowing in from neighbors (P·r)".</text>
+  <text x="36" y="596" class="cap">α tunes the balance: α→1 ignores structure (pure embedding); α→0 is pure structure. Solving it costs at most 1/(α·ε) work — no matter how large the repo is.</text>
+</svg>

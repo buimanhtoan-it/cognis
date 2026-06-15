@@ -3,23 +3,24 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cognis Pro — Software Cognition Engine for AI coding agents</title>
-  <meta name="description" content="Cognis is a local, private code-retrieval engine for MCP clients and AI coding agents. Built on CSAR — Code Spreading-Activation Retrieval." />
-  <meta property="og:title" content="Cognis Pro — Software Cognition Engine" />
-  <meta property="og:description" content="Local, private code retrieval for AI coding agents. Built on CSAR." />
+  <title>Cognis — Software Cognition Engine for AI coding agents</title>
+  <meta name="description" content="Cognis is a local, private code-retrieval engine for MCP clients and AI coding agents. CSAR diffuses relevance along the call graph to recover on-path code that embedding and keyword search miss." />
+  <meta property="og:title" content="Cognis — Software Cognition Engine" />
+  <meta property="og:description" content="Local, private code retrieval for AI coding agents. Built on CSAR — relevance that follows the call graph." />
   <meta property="og:type" content="website" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>" />
   <style>
     :root {
-      --bg: #0b0e14;
-      --panel: #121722;
-      --panel-2: #161c29;
-      --text: #e6e9ef;
-      --muted: #97a0b3;
-      --accent: #5b8cff;
-      --accent-2: #7c5cff;
-      --border: #232b3a;
-      --ok: #36d399;
+      --blue: #0040b0;
+      --blue-700: #00337f;
+      --blue-050: #eef3fc;
+      --orange: #f06000;
+      --ink: #15233b;
+      --text: #2a3645;
+      --muted: #5b6b7b;
+      --line: #dde5ef;
+      --bg: #ffffff;
+      --bg-soft: #f7f9fc;
+      --code-bg: #f4f7fb;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html { scroll-behavior: smooth; }
@@ -27,106 +28,153 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       background: var(--bg);
       color: var(--text);
-      line-height: 1.6;
+      line-height: 1.65;
       -webkit-font-smoothing: antialiased;
+      font-size: 16px;
     }
-    a { color: var(--accent); text-decoration: none; }
+    a { color: var(--blue); text-decoration: none; }
     a:hover { text-decoration: underline; }
-    .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+    .narrow { max-width: 760px; }
+
+    code, .mono {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: .92em;
+    }
+    code {
+      background: var(--code-bg);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 1px 6px;
+      color: var(--blue-700);
+    }
+
     .btn {
       display: inline-block;
-      padding: 14px 26px;
-      border-radius: 10px;
+      padding: 12px 24px;
+      border-radius: 7px;
       font-weight: 600;
-      font-size: 16px;
+      font-size: 15px;
       cursor: pointer;
-      border: 1px solid transparent;
-      transition: transform .08s ease, box-shadow .2s ease;
+      border: 1.5px solid transparent;
+      transition: background .15s ease, border-color .15s ease, color .15s ease;
     }
-    .btn:hover { text-decoration: none; transform: translateY(-1px); }
-    .btn-primary {
-      background: linear-gradient(135deg, var(--accent), var(--accent-2));
-      color: #fff;
-      box-shadow: 0 8px 28px rgba(91,140,255,.28);
-    }
-    .btn-ghost { background: var(--panel-2); color: var(--text); border-color: var(--border); }
+    .btn:hover { text-decoration: none; }
+    .btn-primary { background: var(--blue); color: #fff; }
+    .btn-primary:hover { background: var(--blue-700); }
+    .btn-outline { background: #fff; color: var(--blue); border-color: var(--line); }
+    .btn-outline:hover { border-color: var(--blue); }
 
     /* Nav */
     nav {
       position: sticky; top: 0; z-index: 10;
-      background: rgba(11,14,20,.82);
-      backdrop-filter: blur(10px);
-      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,.9);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--line);
     }
-    nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
-    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
-    .brand .dot { width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
-    .nav-links { display: flex; align-items: center; gap: 22px; }
-    .nav-links a { color: var(--muted); font-size: 15px; }
-    .nav-links a:hover { color: var(--text); text-decoration: none; }
-    @media (max-width: 640px) { .nav-links .hide-sm { display: none; } }
+    nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 62px; }
+    .brand { display: flex; align-items: baseline; gap: 8px; font-weight: 700; font-size: 19px; color: var(--ink); letter-spacing: -.01em; }
+    .brand .mark { width: 11px; height: 11px; border-radius: 3px; background: var(--blue); position: relative; top: 1px; }
+    .brand .mark::after { content: ""; position: absolute; right: -4px; top: -4px; width: 6px; height: 6px; border-radius: 2px; background: var(--orange); }
+    .nav-links { display: flex; align-items: center; gap: 24px; }
+    .nav-links a { color: var(--muted); font-size: 14.5px; font-weight: 500; }
+    .nav-links a:hover { color: var(--ink); text-decoration: none; }
+    @media (max-width: 720px) { .nav-links .hide-sm { display: none; } }
 
     /* Hero */
-    header { padding: 88px 0 64px; text-align: center; }
-    .pill {
-      display: inline-flex; align-items: center; gap: 8px;
-      padding: 6px 14px; border-radius: 999px;
-      background: var(--panel); border: 1px solid var(--border);
-      color: var(--muted); font-size: 13px; margin-bottom: 26px;
-    }
-    .pill .live { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 4px rgba(54,211,153,.15); }
-    h1 { font-size: clamp(34px, 6vw, 56px); line-height: 1.08; letter-spacing: -.02em; margin-bottom: 20px; }
-    h1 .grad { background: linear-gradient(135deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
-    .lede { font-size: clamp(17px, 2.4vw, 20px); color: var(--muted); max-width: 680px; margin: 0 auto 34px; }
-    .cta-row { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
-    .micro { margin-top: 16px; font-size: 14px; color: var(--muted); }
+    header { padding: 72px 0 56px; border-bottom: 1px solid var(--line); }
+    .eyebrow { color: var(--blue); font-weight: 600; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 18px; }
+    h1 { font-size: clamp(32px, 5.2vw, 50px); line-height: 1.1; letter-spacing: -.025em; color: var(--ink); margin-bottom: 20px; max-width: 760px; }
+    .lede { font-size: clamp(17px, 2.2vw, 19px); color: var(--muted); max-width: 640px; margin-bottom: 30px; }
+    .cta-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    .meta { margin-top: 22px; font-size: 14px; color: var(--muted); }
+    .meta strong { color: var(--ink); font-weight: 600; }
 
     /* Sections */
-    section { padding: 56px 0; border-top: 1px solid var(--border); }
-    h2 { font-size: clamp(24px, 4vw, 34px); letter-spacing: -.01em; margin-bottom: 14px; text-align: center; }
-    .sub { color: var(--muted); text-align: center; max-width: 640px; margin: 0 auto 40px; }
+    section { padding: 64px 0; border-bottom: 1px solid var(--line); }
+    section.soft { background: var(--bg-soft); }
+    .kicker { color: var(--orange); font-weight: 700; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 12px; }
+    h2 { font-size: clamp(25px, 3.6vw, 33px); letter-spacing: -.02em; color: var(--ink); margin-bottom: 16px; line-height: 1.2; }
+    h3 { font-size: 18px; color: var(--ink); margin-bottom: 8px; letter-spacing: -.01em; }
+    .section-lede { color: var(--muted); font-size: 17px; max-width: 680px; margin-bottom: 36px; }
+    p + p { margin-top: 14px; }
 
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
-    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 24px; }
-    .card h3 { font-size: 18px; margin-bottom: 8px; }
-    .card p { color: var(--muted); font-size: 15px; }
-    .card .ic { font-size: 22px; margin-bottom: 12px; display: block; }
+    figure { margin: 36px 0 8px; }
+    figure svg, figure img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+    figcaption { margin-top: 12px; font-size: 13.5px; color: var(--muted); text-align: center; }
 
-    /* Problem block */
-    .eq {
-      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px;
-      padding: 18px 20px; color: #cfe0ff; font-size: 15px; overflow-x: auto; margin: 22px auto 0; max-width: 720px;
+    /* Equation block */
+    .equation {
+      background: var(--blue-050);
+      border: 1px solid #d4e0f5;
+      border-left: 4px solid var(--blue);
+      border-radius: 10px;
+      padding: 30px 28px;
+      margin: 28px 0;
     }
+    .equation .eq {
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(24px, 4vw, 34px);
+      color: var(--ink);
+      text-align: center;
+      letter-spacing: .01em;
+      line-height: 1.3;
+    }
+    .equation .eq .v { color: var(--blue); font-style: italic; }
+    .equation .eq .accent { color: var(--orange); font-style: italic; }
+    .equation .gloss { text-align: center; color: var(--muted); font-size: 15px; margin-top: 14px; }
+    .legend { list-style: none; margin: 22px auto 0; max-width: 620px; display: grid; gap: 8px; }
+    .legend li { display: grid; grid-template-columns: 52px 1fr; gap: 14px; align-items: baseline; font-size: 15px; }
+    .legend .sym { font-family: Georgia, serif; font-style: italic; font-size: 19px; color: var(--blue); text-align: right; }
 
-    /* Compare table */
-    table { width: 100%; border-collapse: collapse; font-size: 15px; }
-    th, td { padding: 12px 14px; border-bottom: 1px solid var(--border); text-align: left; }
-    th { color: var(--muted); font-weight: 600; }
-    td.good { color: var(--ok); }
-    .tbl-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+    /* Steps */
+    .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-top: 8px; }
+    .steps .step { background: #fff; padding: 24px; }
+    .steps .num { font-family: Georgia, serif; font-size: 14px; font-weight: 700; color: var(--blue); margin-bottom: 8px; }
+    .steps p { color: var(--muted); font-size: 14.5px; }
+
+    /* Two-column feature grid */
+    .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 28px 40px; }
+    .feature h3 { display: flex; align-items: baseline; gap: 10px; }
+    .feature p { color: var(--muted); font-size: 15px; }
+
+    /* Definition list for tools */
+    .tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0 40px; }
+    .tools dt { font-family: "SFMono-Regular", Consolas, monospace; font-size: 14.5px; color: var(--blue-700); font-weight: 600; margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+    .tools dt .flag { font-family: -apple-system, "Segoe UI", sans-serif; font-size: 11px; font-weight: 700; color: #fff; background: var(--orange); border-radius: 4px; padding: 1px 7px; margin-left: 8px; vertical-align: middle; letter-spacing: .03em; }
+    .tools dd { color: var(--muted); font-size: 14.5px; margin-top: 4px; }
+
+    /* Table */
+    .tbl { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 8px; }
+    .tbl th, .tbl td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    .tbl th { color: var(--ink); font-weight: 600; }
+    .tbl td.score { font-weight: 700; color: var(--blue); white-space: nowrap; }
 
     /* Pricing */
-    .price-card { max-width: 460px; margin: 0 auto; background: var(--panel); border: 1px solid var(--border); border-radius: 18px; padding: 34px; text-align: center; position: relative; }
-    .price-card .tag { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; font-size: 12px; font-weight: 700; padding: 5px 14px; border-radius: 999px; }
-    .price { font-size: 52px; font-weight: 800; letter-spacing: -.02em; }
-    .price span { font-size: 17px; color: var(--muted); font-weight: 500; }
-    .price-card ul { list-style: none; text-align: left; margin: 24px 0 28px; }
-    .price-card li { padding: 8px 0 8px 28px; position: relative; color: var(--text); }
-    .price-card li::before { content: "✓"; position: absolute; left: 0; color: var(--ok); font-weight: 700; }
+    .price-card { max-width: 440px; background: #fff; border: 1px solid var(--line); border-top: 4px solid var(--blue); border-radius: 12px; padding: 32px; }
+    .price-card .pname { font-weight: 700; color: var(--ink); font-size: 15px; letter-spacing: .02em; }
+    .price { font-size: 46px; font-weight: 800; color: var(--ink); letter-spacing: -.02em; margin: 6px 0 2px; }
+    .price small { font-size: 16px; color: var(--muted); font-weight: 500; }
+    .price-card ul { list-style: none; margin: 22px 0 26px; }
+    .price-card li { padding: 7px 0 7px 24px; position: relative; color: var(--text); font-size: 15px; }
+    .price-card li::before { content: ""; position: absolute; left: 2px; top: 13px; width: 8px; height: 8px; border-radius: 2px; background: var(--blue); }
+    .note { font-size: 13.5px; color: var(--muted); margin-top: 14px; }
 
-    footer { padding: 48px 0; border-top: 1px solid var(--border); color: var(--muted); font-size: 14px; text-align: center; }
+    footer { padding: 44px 0; color: var(--muted); font-size: 14px; }
+    footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
     footer a { color: var(--muted); }
-    .legal { margin-top: 10px; font-size: 13px; }
+    footer a:hover { color: var(--ink); }
   </style>
 </head>
 <body>
   <nav>
     <div class="wrap">
-      <div class="brand"><span class="dot"></span> Cognis</div>
+      <div class="brand"><span class="mark"></span> cognis</div>
       <div class="nav-links">
-        <a href="#how" class="hide-sm">How it works</a>
-        <a href="#features" class="hide-sm">Features</a>
+        <a href="#problem" class="hide-sm">Problem</a>
+        <a href="#method" class="hide-sm">How it works</a>
+        <a href="#architecture" class="hide-sm">Architecture</a>
+        <a href="#tools" class="hide-sm">Tooling</a>
         <a href="#pricing">Pricing</a>
         <a class="js-gh" href="https://github.com/buimanhtoan-it/cognis" target="_blank" rel="noopener">GitHub</a>
       </div>
@@ -135,108 +183,193 @@
 
   <header>
     <div class="wrap">
-      <span class="pill"><span class="live"></span> <span class="js-product">Cognis Pro</span> — <span class="js-version">v0.7</span> · one-time purchase</span>
-      <h1>Give your AI agent <span class="grad">the context it keeps missing</span></h1>
+      <div class="eyebrow">Software Cognition Engine · open-source core (Apache-2.0)</div>
+      <h1>Code retrieval that follows the call graph, not just the keywords.</h1>
       <p class="lede">
-        Cognis is a local, private code-retrieval engine for MCP clients and coding
-        agents. It indexes your repo on your machine and recovers the on-path code
-        that embedding + keyword search leaves out.
+        Cognis indexes your repository locally and serves precise retrieval to any
+        MCP-compatible coding agent. Its CSAR engine starts from ordinary lexical and
+        semantic matches, then diffuses relevance along <code>calls</code> and
+        <code>imports</code> edges — recovering the on-path code that embedding and
+        keyword search leave out.
       </p>
       <div class="cta-row">
-        <a class="btn btn-primary js-buy" href="https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW" target="_blank" rel="noopener">Buy <span class="js-product">Cognis Pro</span> — <span class="js-price">$9.90</span></a>
-        <a class="btn btn-ghost js-gh" href="https://github.com/buimanhtoan-it/cognis" target="_blank" rel="noopener">View on GitHub</a>
+        <a class="btn btn-primary js-buy" href="https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW" target="_blank" rel="noopener">Buy the <span class="js-product">Cognis Pro</span> build — <span class="js-price">$9.90</span></a>
+        <a class="btn btn-outline js-gh" href="https://github.com/buimanhtoan-it/cognis" target="_blank" rel="noopener">Read the source</a>
       </div>
-      <p class="micro">Local-first · works offline · Cursor, Copilot, Claude &amp; any MCP client</p>
+      <p class="meta">
+        <strong>Local-first</strong> — your code never leaves the machine · works offline ·
+        languages: <strong>TypeScript/JavaScript, Python, Go</strong> · runs in Cursor, Copilot, Claude and any MCP client.
+      </p>
     </div>
   </header>
 
   <section id="problem">
     <div class="wrap">
-      <h2>The problem it solves</h2>
-      <p class="sub">
-        Ask <em>"where is the JWT token validated on login?"</em> Embedding + BM25
-        rank every symbol on its own. They find the two ends that mention "login"
-        and "validate" — but the middleware that actually runs the check matches no
-        query words, so it never surfaces. The agent gets a flow with a hole in it.
+      <div class="kicker">The problem</div>
+      <h2>Independent ranking leaves a hole in the middle of the flow.</h2>
+      <p class="section-lede">
+        Ask an agent <em>"where is the JWT token validated on login?"</em> Embedding and
+        BM25 score every symbol on its own. They find the two ends that mention "login" and
+        "validate" — but the middleware that actually runs the check matches no query words,
+        so it never surfaces. The agent gets a flow with a gap and guesses.
       </p>
-      <div class="eq">r = α·s + (1−α)·P·r&nbsp;&nbsp;&nbsp;&nbsp;# relevance = your own match (s) + relevance flowing in from neighbors (P·r)</div>
+      <figure>
+        <img src="assets/csar-vs-embedding.svg" alt="Plain embedding misses the on-path requireAuth middleware; CSAR recovers it by diffusing along call edges." loading="lazy" />
+        <figcaption>Same query, two retrieval strategies. Independent scoring (left) drops the middleware; CSAR (right) recovers it from the call flow.</figcaption>
+      </figure>
     </div>
   </section>
 
-  <section id="how">
+  <section id="method" class="soft">
     <div class="wrap">
-      <h2>Built on CSAR</h2>
-      <p class="sub">Code Spreading-Activation Retrieval. Treat relevance like water poured onto matched nodes and let it flow along the call graph.</p>
-      <div class="grid">
-        <div class="card">
-          <span class="ic">💧</span>
-          <h3>1 · Seed</h3>
-          <p>Pour relevance onto the same cheap lexical + semantic matches you already get.</p>
+      <div class="kicker">The method — CSAR</div>
+      <h2>Relevance is a fixed point, not a similarity score.</h2>
+      <p class="section-lede">
+        Code Spreading-Activation Retrieval treats relevance like water poured onto the
+        matched nodes and let it flow along the call graph. A node between two matches
+        collects mass from both sides, so it ranks high even with zero direct match. The
+        whole model is one equation.
+      </p>
+
+      <div class="equation">
+        <div class="eq">
+          <span class="v">r</span> = α<span class="v">s</span> + (1 − α)<span class="v">P</span><span class="v">r</span>
         </div>
-        <div class="card">
-          <span class="ic">🌊</span>
-          <h3>2 · Diffuse</h3>
-          <p>Each step keeps a fraction α and pushes (1−α) to neighbors along calls/imports. The middle node fills from both sides.</p>
+        <div class="gloss">relevance = your own match (<span class="mono">α s</span>) + relevance flowing in from neighbors (<span class="mono">(1−α) P r</span>)</div>
+        <ul class="legend">
+          <li><span class="sym">r</span><span>the relevance vector being solved for — the final ranking over all symbols.</span></li>
+          <li><span class="sym">s</span><span>the seed: cheap lexical + semantic matches, normalized to sum to 1.</span></li>
+          <li><span class="sym">P</span><span>the column-stochastic transition matrix over <code>calls</code> / <code>imports</code> edges.</span></li>
+          <li><span class="sym">α</span><span>the single knob. α→1 is pure embedding; α→0 is pure structure.</span></li>
+          <li><span class="sym">ε</span><span>the residual threshold. Forward-push solves <span class="mono">r</span> in at most <span class="mono">1/(α·ε)</span> work — <strong>independent of repo size</strong>.</span></li>
+        </ul>
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <div class="num">1 — Seed</div>
+          <p>Pour relevance onto the same lexical and semantic matches a normal index already produces.</p>
         </div>
-        <div class="card">
-          <span class="ic">📊</span>
-          <h3>3 · Rank</h3>
-          <p>Sort by accumulated mass. The on-path node rises next to the seeds — recovered in a single round trip.</p>
+        <div class="step">
+          <div class="num">2 — Diffuse</div>
+          <p>Each step keeps a fraction α at home and pushes (1−α) to neighbors. The middle node fills from both sides.</p>
+        </div>
+        <div class="step">
+          <div class="num">3 — Rank</div>
+          <p>Sort by accumulated mass. The on-path node rises next to the seeds, recovered in a single round trip.</p>
         </div>
       </div>
+
+      <figure>
+        <img src="assets/csar-why.svg" alt="Step-by-step: seeding, diffusion filling the middle node, and the final ranking with the recovered node." loading="lazy" />
+        <figcaption>The diffusion in three stages — the dry middle node ends up ranked right below the seeds.</figcaption>
+      </figure>
     </div>
   </section>
 
-  <section id="features">
+  <section id="architecture">
     <div class="wrap">
-      <h2>What you get</h2>
-      <p class="sub">A finished, code-specialized retrieval engine — not a RAG toolkit to assemble.</p>
-      <div class="grid">
-        <div class="card"><span class="ic">🔒</span><h3>Local &amp; private</h3><p>Your code is indexed on your machine. No cloud, works offline, behind firewalls.</p></div>
-        <div class="card"><span class="ic">🔌</span><h3>MCP-native</h3><p>One retrieval backend across every agent — Cursor, Copilot, Claude, and more.</p></div>
-        <div class="card"><span class="ic">⚡</span><h3>One-click setup</h3><p>Install the extension, click Install backend, then Set Up Workspace. No terminal.</p></div>
-        <div class="card"><span class="ic">🧮</span><h3>Bounded cost</h3><p>Solver work is bounded by 1/(α·ε) — independent of repo size. 5 CSAR theorems verified in code.</p></div>
-        <div class="card"><span class="ic">🛡️</span><h3>Safe by design</h3><p>Secret scrubbing, read-only tools, hard caps, hashed audit log. Standard SHA-256 — no custom crypto.</p></div>
-        <div class="card"><span class="ic">🧰</span><h3>8 retrieval tools</h3><p>Symbol lookup, semantic search, dependency tracing, task-focused context capsules.</p></div>
+      <div class="kicker">Architecture</div>
+      <h2>A finished pipeline, not a RAG toolkit to assemble.</h2>
+      <p class="section-lede">
+        Four stages run entirely on your machine: an incremental indexer, a local SQLite
+        knowledge graph (UCKG), the CSAR retriever, and a read-only MCP server. Embedders
+        and rerankers are swappable behind a registry without touching the engine.
+      </p>
+      <figure>
+        <img src="assets/architecture.svg" alt="Cognis architecture: index, store in local SQLite UCKG, retrieve with CSAR, serve over MCP to the agent." loading="lazy" />
+      </figure>
+    </div>
+  </section>
+
+  <section id="tools" class="soft">
+    <div class="wrap">
+      <div class="kicker">Tooling</div>
+      <h2>Eight read-only MCP tools.</h2>
+      <p class="section-lede">
+        One retrieval backend across every agent. All tools are bounded (depth ≤ 8, k ≤ 50,
+        ≤ 32k tokens, 10s) and write a hashed audit log — never raw arguments.
+      </p>
+      <dl class="tools">
+        <dt>diffuse_context<span class="flag">FLAGSHIP</span></dt>
+        <dd>Full CSAR retrieval: seed, diffuse over the graph, return ranked on-path context for a task.</dd>
+        <dt>discover_symbols</dt>
+        <dd>Ranked discovery fusing lexical and semantic signals (reciprocal-rank fusion).</dd>
+        <dt>semantic_search</dt>
+        <dd>Embedding search over the local sqlite-vec index.</dd>
+        <dt>symbol_search</dt>
+        <dd>Ranked multi-hit lexical search with kind and path filters.</dd>
+        <dt>symbol_lookup</dt>
+        <dd>Resolve a single symbol by exact id, qualified name, or fuzzy name.</dd>
+        <dt>dependency_trace</dt>
+        <dd>Walk the call graph inbound, outbound, or both, with bounded depth.</dd>
+        <dt>resolve_symbols</dt>
+        <dd>Hydrate up to 50 symbols — including bodies — in a single call.</dd>
+        <dt>retrieve_context_capsule</dt>
+        <dd>Compose a task-focused context capsule that fits a token budget.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section id="rigor">
+    <div class="wrap">
+      <div class="kicker">Rigor &amp; safety</div>
+      <h2>Verified math. Standard cryptography. Hard limits.</h2>
+      <div class="cols" style="margin-bottom:40px">
+        <div class="feature">
+          <h3>Proven, not hand-waved</h3>
+          <p>All five CSAR / Personalized-PageRank theorems are verified in code and property-based tests, including both α endpoints. The cost bound 1/(α·ε) holds regardless of repository size.</p>
+        </div>
+        <div class="feature">
+          <h3>Private by construction</h3>
+          <p>Indexing and retrieval run locally; nothing is sent to a server. Secrets are scrubbed during enrichment, MCP tools are read-only, and every call is recorded in a hashed audit log.</p>
+        </div>
+        <div class="feature">
+          <h3>No custom crypto</h3>
+          <p>Security uses standard SHA-256 hashing only. Offline license verification uses Ed25519 — a vetted standard, never a home-rolled cipher.</p>
+        </div>
+        <div class="feature">
+          <h3>Bounded and observable</h3>
+          <p>Depth, result count, token budget, and wall-clock are all capped per call, so an agent cannot make the engine run away on a large monorepo.</p>
+        </div>
       </div>
+
+      <h3 style="margin-bottom:6px">Self-assessment</h3>
+      <table class="tbl">
+        <thead>
+          <tr><th>Dimension</th><th>Rating</th><th>Basis</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Retrieval quality</td><td class="score">8 / 10</td><td>recovers on-path flow; reuses cheap seed signals</td></tr>
+          <tr><td>Mathematical rigor</td><td class="score">9 / 10</td><td>5 PPR theorems, verified in code &amp; property tests</td></tr>
+          <tr><td>Security posture</td><td class="score">8 / 10</td><td>secret scrubbing, read-only tools, hard caps, hashed audit log</td></tr>
+          <tr><td>Scope / maturity</td><td class="score">7 / 10</td><td>3 languages (TS/JS, Python, Go); local-first</td></tr>
+        </tbody>
+      </table>
     </div>
   </section>
 
-  <section id="compare">
+  <section id="pricing" class="soft">
     <div class="wrap">
-      <h2>How it compares</h2>
-      <div class="tbl-wrap">
-        <table>
-          <thead>
-            <tr><th></th><th>Embedding / vector KNN</th><th>Keyword (BM25)</th><th>CSAR (Cognis)</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>Scores symbols independently</td><td>Yes</td><td>Yes</td><td class="good">No — diffuses along the graph</td></tr>
-            <tr><td>Recovers on-path middleware</td><td>No</td><td>No</td><td class="good">Yes</td></tr>
-            <tr><td>Cost vs. repo size</td><td>Grows</td><td>Grows</td><td class="good">Bounded by 1/(α·ε)</td></tr>
-            <tr><td>Runs locally / offline</td><td>Varies</td><td>Yes</td><td class="good">Yes</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
-  <section id="pricing">
-    <div class="wrap">
-      <h2>Pricing</h2>
-      <p class="sub">One-time purchase per minor version. A <span class="js-version">v0.7</span> license unlocks every <span class="js-patch">0.7.x</span> patch. Polar is the merchant of record and handles tax/VAT.</p>
+      <div class="kicker">Pricing</div>
+      <h2>One prebuilt client. One-time price.</h2>
+      <p class="section-lede">
+        The engine is open source and free forever. The paid build is the polished,
+        one-click VS Code / Cursor client — no terminal, no Python setup. Polar is the
+        merchant of record and handles tax and VAT.
+      </p>
       <div class="price-card">
-        <span class="tag"><span class="js-product-upper">COGNIS PRO</span> — <span class="js-version">v0.7</span></span>
-        <div class="price"><span class="js-price">$9.90</span> <span>one-time</span></div>
+        <div class="pname"><span class="js-product-upper">COGNIS PRO</span> · <span class="js-version">v0.7</span></div>
+        <div class="price"><span class="js-price">$9.90</span> <small>one-time</small></div>
         <ul>
           <li>Prebuilt one-click VS Code / Cursor extension</li>
           <li>Full CSAR engine + all 8 MCP retrieval tools</li>
-          <li>Local semantic + structural search</li>
+          <li>Local semantic and structural search</li>
           <li>Every <span class="js-patch">0.7.x</span> patch update included</li>
           <li>Works offline · email support</li>
         </ul>
-        <a class="btn btn-primary js-buy" href="https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW" target="_blank" rel="noopener" style="width:100%">Buy now — <span class="js-price">$9.90</span></a>
-        <p class="micro" style="margin-top:14px">Secure checkout via Polar · one-time charge</p>
+        <a class="btn btn-primary js-buy" href="https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW" target="_blank" rel="noopener" style="display:block;text-align:center">Buy now — <span class="js-price">$9.90</span></a>
+        <p class="note">Secure checkout via Polar · one-time charge. A <span class="js-version">v0.7</span> license unlocks every <span class="js-patch">0.7.x</span> patch.</p>
       </div>
     </div>
   </section>
@@ -244,13 +377,13 @@
   <footer>
     <div class="wrap">
       <div>Cognis — Software Cognition Engine · Sold by Alpha Chain Co., Ltd.</div>
-      <div class="legal">
+      <div>
         <a class="js-gh" href="https://github.com/buimanhtoan-it/cognis" target="_blank" rel="noopener">GitHub</a> ·
         <a class="js-changelog" href="https://github.com/buimanhtoan-it/cognis/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a> ·
         <a class="js-support" href="mailto:buimanhtoan.it@gmail.com">Support</a>
       </div>
-      <div class="legal">Engine is open source (Apache-2.0). The Pro client is commercial.</div>
     </div>
+    <div class="wrap" style="margin-top:10px; font-size:13px;">Engine is open source (Apache-2.0). The Pro client is commercial.</div>
   </footer>
 
   <script>
@@ -298,8 +431,6 @@
       }
 
       function fetchLatestVersion(repo) {
-        // Prefer the GitHub Release (release.yml creates one per v* tag);
-        // fall back to the newest tag; then to the config fallback.
         return fetch("https://api.github.com/repos/" + repo + "/releases/latest", {
           headers: { Accept: "application/vnd.github+json" }
         })
@@ -312,16 +443,13 @@
           });
       }
 
-      // 1) Load config (single edit point), falling back to baked defaults.
       fetch("config.json", { cache: "no-cache" })
         .then(function (r) { return r.ok ? r.json() : {}; })
         .catch(function () { return {}; })
         .then(function (loaded) {
           var cfg = Object.assign({}, DEFAULTS, loaded || {});
           applyConfig(cfg);
-          // Show the fallback band immediately so nothing flashes empty.
           applyVersion(minorBand(cfg.fallbackVersion));
-          // 2) Then upgrade to the live version (best-effort, never blocking).
           fetchLatestVersion(cfg.repo)
             .then(function (tag) { var mb = minorBand(tag); if (mb) applyVersion(mb); })
             .catch(function () { /* keep fallback band */ });

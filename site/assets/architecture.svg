@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600" viewBox="0 0 900 600" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#5b6b7b"/>
+    </marker>
+    <style>
+      .box { fill:#ffffff; stroke:#c3ccd6; stroke-width:1.5; rx:10; }
+      .stage { fill:#eef3fc; stroke:#0040b0; }
+      .store { fill:#f4f7fb; stroke:#9bb2d8; }
+      .engine { fill:#fff1e8; stroke:#f06000; }
+      .mcp { fill:#eef3fc; stroke:#0040b0; }
+      .plug { fill:#fbfdff; stroke:#b9c6d6; stroke-dasharray:4 3; }
+      .title { font-size:15px; font-weight:700; fill:#15233b; }
+      .sub { font-size:11px; fill:#5b6b7b; }
+      .lane { font-size:12px; font-weight:700; fill:#8a97a5; letter-spacing:0.08em; }
+      .edge { stroke:#5b6b7b; stroke-width:1.6; fill:none; marker-end:url(#arrow); }
+      .plugedge { stroke:#9aa7b5; stroke-width:1.3; fill:none; stroke-dasharray:4 3; }
+      .pin { font-size:10px; font-weight:700; fill:#6b7b8b; letter-spacing:0.04em; }
+    </style>
+  </defs>
+
+  <text x="20" y="30" class="lane">1 · INDEX (cognis-indexd)</text>
+
+  <rect class="box" x="20"  y="46" width="150" height="64" rx="10"/>
+  <text x="95" y="74" text-anchor="middle" class="title">Source + Git</text>
+  <text x="95" y="92" text-anchor="middle" class="sub">your repository</text>
+
+  <rect class="box stage" x="200" y="46" width="680" height="64" rx="10"/>
+  <text x="540" y="70" text-anchor="middle" class="title">Indexer pipeline</text>
+  <text x="540" y="92" text-anchor="middle" class="sub">watch → parse (tree-sitter) → resolve → enrich (+secret scrub) → embed → write</text>
+
+  <path class="edge" d="M170,78 L198,78"/>
+
+  <text x="20" y="160" class="lane">2 · STORE</text>
+  <rect class="box store" x="200" y="176" width="680" height="64" rx="10"/>
+  <text x="540" y="200" text-anchor="middle" class="title">Local SQLite — UCKG (.cognis/uckg.db)</text>
+  <text x="540" y="222" text-anchor="middle" class="sub">symbols + edges · FTS5 lexical · sqlite-vec embeddings (dim follows the model) · 100% on your machine</text>
+  <path class="edge" d="M540,110 L540,174"/>
+
+  <text x="20" y="290" class="lane">3 · RETRIEVE</text>
+  <rect class="box engine" x="200" y="306" width="680" height="92" rx="10"/>
+  <text x="540" y="332" text-anchor="middle" class="title">CSAR — Code Spreading-Activation Retrieval</text>
+  <text x="540" y="352" text-anchor="middle" class="sub">seed from lexical + semantic, then diffuse over the code graph</text>
+  <text x="540" y="370" text-anchor="middle" class="sub">Personalized PageRank (forward-push) · cost bound 1/(α·ε), independent of repo size</text>
+  <text x="540" y="388" text-anchor="middle" class="sub">→ optional rerank (off by default) → compose context capsule (token budget)</text>
+  <path class="edge" d="M540,240 L540,304"/>
+
+  <text x="20" y="448" class="lane">4 · SERVE (cognis-mcpd)</text>
+  <rect class="box mcp" x="200" y="464" width="430" height="78" rx="10"/>
+  <text x="415" y="490" text-anchor="middle" class="title">MCP tools (read-only)</text>
+  <text x="415" y="510" text-anchor="middle" class="sub">diffuse_context (flagship) · discover_symbols · dependency_trace</text>
+  <text x="415" y="528" text-anchor="middle" class="sub">caps: depth≤8, k≤50, ≤32k tok, 10s · audit log (hashed args)</text>
+  <path class="edge" d="M540,398 L540,462"/>
+
+  <rect class="box" x="680" y="464" width="200" height="78" rx="10"/>
+  <text x="780" y="498" text-anchor="middle" class="title">AI agent</text>
+  <text x="780" y="518" text-anchor="middle" class="sub">Cursor · Copilot · Claude</text>
+  <path class="edge" d="M630,503 L678,503"/>
+
+  <rect class="box plug" x="20" y="306" width="150" height="92" rx="10"/>
+  <text x="95" y="330" text-anchor="middle" class="title" font-size="13">Model registry</text>
+  <text x="95" y="349" text-anchor="middle" class="sub">embedder: local /</text>
+  <text x="95" y="363" text-anchor="middle" class="sub">voyage / openai*</text>
+  <text x="95" y="380" text-anchor="middle" class="sub">reranker: off* / local*</text>
+  <path class="plugedge" d="M170,352 L198,352"/>
+
+  <text x="20" y="566" class="sub">* selectable backends / seam: stub or off by default — swap without touching the engine flow (config + registry)</text>
+</svg>

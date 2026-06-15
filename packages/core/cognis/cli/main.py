@@ -558,7 +558,8 @@ def _check_version(repo_root: Path) -> HealthCheck:
     - DB absent → ``warn`` ("not initialized — run `cognis-cli init`").
     - DB present, ``meta`` table missing → ``warn`` (migrations land in task 3).
     - ``index_version`` matches runtime → ``ok``.
-    - ``index_version`` differs → ``warn``.
+    - ``index_version`` differs → ``fail`` (a stale index must be rebuilt before
+      it is served; the extension's auto-manage treats this as "needs rebuild").
     """
     db_path = _resolve_db_path(repo_root)
     if not db_path.exists():
@@ -1429,11 +1430,8 @@ def cmd_index(
             full=full,
             skip_embeddings=skip_embeddings,
         )
-        if full and not ci:
-            from cognis.db import _write_meta
-
-            with db.write() as conn:
-                _write_meta(conn, "index_version", __version__)
+        # ``meta.index_version`` is stamped inside ``index_repo`` on a full
+        # index, so the CLI and the daemon share one source of truth (no drift).
     finally:
         pipeline.close()
 

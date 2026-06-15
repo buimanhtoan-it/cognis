@@ -673,6 +673,25 @@ class IndexerPipeline:
                 phase_s.get("embed", 0.0),
                 max(0.0, phase_s.get("write", 0.0)),
             )
+
+        # A full/cold index re-materializes the whole DB from the current
+        # runtime, so stamp ``meta.index_version`` here — the single source of
+        # truth for the ``health`` version check. Both entrypoints reach a full
+        # index through this method (CLI ``index --full/--clear`` and the
+        # ``cognis-indexd`` cold rebuild's two phases), so neither can drift.
+        # Previously only the CLI wrote it; a daemon-built index stayed pinned
+        # to a stale ``index_version`` after an upgrade, so the version check
+        # failed forever. Worse, the extension's auto-manage treats a failing
+        # version check as "needs rebuild" and keeps forcing ``--full-rebuild``,
+        # so the stale index drove an endless rebuild loop. Incremental walks
+        # (``full=False``) intentionally leave the stamp untouched.
+        if full:
+            from cognis import __version__
+            from cognis.db import _write_meta
+
+            with self.db.write() as conn:
+                _write_meta(conn, "index_version", __version__)
+
         return stats
 
     def index_changed_files(

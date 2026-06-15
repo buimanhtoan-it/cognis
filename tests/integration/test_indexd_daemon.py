@@ -177,6 +177,47 @@ async def test_full_rebuild_cold_indexes_fresh_repo(
         db.close_thread_connection()
 
 
+async def test_full_rebuild_stamps_index_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A daemon cold rebuild must stamp ``meta.index_version`` with the runtime.
+
+    Regression: previously only the CLI ``index --full/--clear`` path wrote
+    ``index_version``; the daemon's ``--full-rebuild`` rebuilt the index but
+    left the stamp untouched. After a version upgrade that left the ``version``
+    health check failing forever, and the extension's auto-manage — which forces
+    a full rebuild whenever the version check fails — re-triggered the rebuild
+    on every activation (an endless loop). The stamp now lives in
+    ``index_repo`` so the daemon and the CLI can never drift.
+    """
+    from cognis import __version__
+
+    await _run_with_embedder_disabled(monkeypatch)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_repo(repo_root)
+    db_path = tmp_path / ".cognis" / "uckg.db"
+    status_path = tmp_path / ".cognis" / "indexd-status.json"
+
+    daemon = _DaemonHandle(repo_root, db_path, status_path)
+    await daemon.start(force_full_rebuild=True, monkeypatch=monkeypatch)
+    try:
+        await daemon.wait_until_watching()
+    finally:
+        await daemon.stop()
+
+    db = Database(str(db_path))
+    try:
+        row = db.connect().execute("SELECT value FROM meta WHERE key = 'index_version'").fetchone()
+    finally:
+        db.close_thread_connection()
+    assert row is not None, "daemon full rebuild must record meta.index_version"
+    assert row[0] == __version__, (
+        f"index_version={row[0]!r} should match runtime {__version__!r} so the "
+        "health version check passes and auto-manage stops forcing rebuilds"
+    )
+
+
 async def test_status_file_transitions_to_watching_then_stopped(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

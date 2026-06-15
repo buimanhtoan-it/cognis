@@ -172,6 +172,62 @@ def test_cold_index_mini_go_svc(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Version stamping
+# ---------------------------------------------------------------------------
+
+
+def test_full_index_stamps_index_version(tmp_path: Path) -> None:
+    """A full index records ``meta.index_version`` = runtime so health passes.
+
+    The stamp lives in ``index_repo`` (not the CLI wrapper) precisely so the
+    daemon's ``--full-rebuild`` and the CLI ``index --full`` share one source of
+    truth. A stale stamp is what made the ``health`` version check fail forever
+    after an upgrade and drove the extension's auto-manage into an endless
+    rebuild loop.
+    """
+    from cognis import __version__
+    from cognis.db import _write_meta
+
+    pipeline, db = _make_pipeline(tmp_path)
+    try:
+        # Simulate a stale on-disk index built by an older runtime, then prove a
+        # full index re-stamps it. (DB creation migrations also stamp it, so
+        # seeding a stale value first is what makes this assert the fix, not the
+        # migration.)
+        with db.write() as conn:
+            _write_meta(conn, "index_version", "0.0.0-stale")
+        pipeline.index_repo(TS_FIXTURE, full=True, skip_embeddings=True)
+    finally:
+        pipeline.close()
+
+    conn = db.connect()
+    row = conn.execute("SELECT value FROM meta WHERE key = 'index_version'").fetchone()
+    assert row is not None and row[0] == __version__
+
+
+def test_incremental_index_does_not_touch_index_version(tmp_path: Path) -> None:
+    """An incremental (``full=False``) walk leaves an existing stamp untouched."""
+    from cognis import __version__
+    from cognis.db import _write_meta
+
+    pipeline, db = _make_pipeline(tmp_path)
+    try:
+        # Seed a deliberately stale stamp, then run an incremental sweep.
+        with db.write() as conn:
+            _write_meta(conn, "index_version", "0.0.0-stale")
+        pipeline.index_repo(TS_FIXTURE, full=False, skip_embeddings=True)
+    finally:
+        pipeline.close()
+
+    conn = db.connect()
+    row = conn.execute("SELECT value FROM meta WHERE key = 'index_version'").fetchone()
+    assert row is not None and row[0] == "0.0.0-stale", (
+        "incremental walks must not rewrite index_version; only a full index does"
+    )
+    assert row[0] != __version__
+
+
+# ---------------------------------------------------------------------------
 # Idempotency
 # ---------------------------------------------------------------------------
 

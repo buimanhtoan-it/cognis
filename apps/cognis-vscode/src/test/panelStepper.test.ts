@@ -465,3 +465,97 @@ test("HTTP MCP subsection: error surfaces the message and offers Start to retry"
   assert.match(html, /code=1/);
   assert.match(html, /data-action="startMcp"/);
 });
+
+// ---------------------------------------------------------------------------
+// Regression: steady-state "watching" must NOT mask a genuine health failure.
+// Reported bug: after an extension upgrade the on-disk index_version is stale
+// (e.g. 0.3.0 vs runtime 0.7.1), so the `version` check fails and
+// health.overall === "fail". indexd has long settled to phase "watching"
+// (active: true, nothing pending/inflight). The old guard bypassed health on
+// any `indexStatus.active`, so the headline showed "Watching for file changes"
+// while the onboarding stepper (which reads health.overall directly) showed the
+// Index-synced step as an error — the two panels disagreed, and the MCP step
+// was stuck pending even though MCP was connected. The bypass must only fire
+// for genuine in-flight work, not steady-state watching.
+// ---------------------------------------------------------------------------
+
+function versionFailHealth(): HealthReport {
+  const ok = { status: "ok", message: "ok" };
+  return {
+    runtime_version: "0.7.1",
+    overall: "fail",
+    checks: {
+      config: ok,
+      db: ok,
+      index: ok,
+      vector: ok,
+      embedder: ok,
+      version: {
+        status: "fail",
+        message:
+          "index_version=0.3.0 differs from runtime 0.7.1; re-index with `cognis-cli index --full .`",
+      },
+    },
+  };
+}
+
+function watchingStatus(): PanelContext["indexStatus"] {
+  return {
+    active: true,
+    phase: "watching",
+    message: "Watching for file changes",
+    progressPercent: 100,
+    pendingCount: 0,
+    pendingFiles: [],
+    inflightCount: 0,
+    inflightFiles: [],
+    recentFiles: [],
+    updatedAt: Date.now(),
+  };
+}
+
+function watchingVersionFailCtx(): PanelContext {
+  return {
+    status: "ready",
+    health: versionFailHealth(),
+    prerequisites: readyPrereqs(true),
+    configured: true,
+    mcpEnabled: true,
+    mcpRuntimeCount: 1,
+    liveIndexing: true,
+    indexStatus: watchingStatus(),
+  };
+}
+
+test("steady-state watching surfaces a stale-index version failure (not 'watching')", () => {
+  const view = derivePanelView(watchingVersionFailCtx());
+  // The genuine failure must surface so the headline matches the stepper.
+  assert.match(view.headline, /version mismatch/i);
+  assert.doesNotMatch(view.headline, /watching for file changes/i);
+  assert.equal(view.primary?.id, "repair");
+});
+
+test("headline and stepper agree when index_version is stale during watching", () => {
+  const ctx = watchingVersionFailCtx();
+  // Stepper reads health.overall: Index-synced is an error, which cascades the
+  // MCP step to pending.
+  assert.equal(stepState(ctx, "indexed"), "error");
+  assert.equal(stepState(ctx, "connected"), "pending");
+  // The headline must reflect the same problem rather than a green "watching".
+  const view = derivePanelView(ctx);
+  assert.equal(view.statusClass, "status-warn");
+  assert.match(view.detail ?? "", /index_version=0\.3\.0/);
+});
+
+test("active embedding still masks a transient health failure (bypass preserved)", () => {
+  // The narrowing must not break the original cold-start protection: genuine
+  // in-flight work (embedding) keeps showing progress, never Troubleshoot.
+  const view = derivePanelView({
+    status: "ready",
+    configured: true,
+    health: vectorFailHealth(),
+    indexStatus: embeddingStatus(),
+  });
+  assert.match(view.headline, /generating embeddings/i);
+  assert.notEqual(view.primary?.id, "repair");
+});

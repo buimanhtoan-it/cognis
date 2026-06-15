@@ -5,6 +5,7 @@ import type {
   PrerequisiteReport,
   WorkspaceStatus,
 } from "./types";
+import { isIndexStatusBusy } from "./state";
 
 /**
  * Maps webview `data-action` ids to the VS Code commands they invoke. Exported
@@ -266,7 +267,7 @@ export function derivePanelView(ctx: PanelContext): PanelView {
   const { status, health, liveIndexing, mcpEnabled } = ctx;
   const statusClass = STATUS_CLASSES[status] ?? STATUS_CLASSES.unknown;
 
-  // While the daemon reports an active index operation (the cold index or the
+  // While the daemon reports *active indexing work* (the cold index or the
   // embedding backfill), health is transiently inconsistent: the DB is being
   // written and the vector table is not complete yet, so a poll can momentarily
   // read a failing "vector"/"index" check or fail to open the WAL-locked DB.
@@ -274,7 +275,14 @@ export function derivePanelView(ctx: PanelContext): PanelView {
   // first-run "Generating…" → "Set Up for AI" regression and a repeated
   // "Troubleshoot" loop. Show progress and let the next poll settle once
   // embeddings finish.
-  if (status === "indexing" || ctx.indexStatus?.active) {
+  //
+  // Gate this on genuine in-flight work (isIndexStatusBusy) rather than the
+  // broad `indexStatus.active`: in the steady-state `watching`/`idle` phase the
+  // DB is settled and health is trustworthy, so a real failing check (e.g. a
+  // stale `index_version` after an upgrade) must surface here instead of being
+  // masked by "Watching for file changes" — otherwise the headline and the
+  // onboarding stepper disagree (stepper reads health.overall directly).
+  if (status === "indexing" || isIndexStatusBusy(ctx.indexStatus)) {
     return {
       headline: deriveIndexingHeadline(ctx),
       detail: deriveIndexingDetail(ctx),

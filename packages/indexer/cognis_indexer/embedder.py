@@ -41,7 +41,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 # ``numpy`` ships under the ``embed-local`` optional extra. Import it lazily so
 # this module — and the whole indexer pipeline that imports it — stays
@@ -372,7 +372,13 @@ class LocalEmbedder:
 
         from sentence_transformers import SentenceTransformer
 
-        model: SentenceTransformer = self._model  # type: ignore[assignment]
+        # ``self._model`` is annotated ``object`` to keep this module importable
+        # without the optional ``embed-local`` extra. Narrow it to the concrete
+        # type here via ``cast`` rather than an annotated assignment: ``cast`` is
+        # stable whether ``sentence-transformers`` exposes types (newer releases
+        # ship ``py.typed``) or is treated as ``Any``, so it never trips
+        # ``warn_unused_ignores`` when the dependency version floats.
+        model = cast(SentenceTransformer, self._model)
         result = model.encode(
             texts,
             batch_size=self._batch_size,

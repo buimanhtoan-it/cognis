@@ -6,6 +6,47 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.2] — 2026-06-15
+
+Status-honesty patch: a stale on-disk index version no longer gets stuck
+mid-onboarding while quietly driving an endless rebuild loop. The fix is in the
+indexer itself, so every entrypoint (CLI and daemon) agrees.
+
+### Fixed
+
+- **Daemon full rebuilds now stamp `meta.index_version` (root cause of a stuck
+  "Index synced" step + rebuild loop).** Only the CLI `index --full/--clear`
+  path wrote `index_version`; the `cognis-indexd` `--full-rebuild` rebuilt the
+  index but left the stamp untouched. After an upgrade (e.g. an index built by
+  0.3.0 served by 0.7.1), the `health` version check failed *forever*, the
+  onboarding stepper's **Index synced** step showed an error, and — because the
+  extension's auto-manage treats a failing version check as "needs rebuild" — it
+  re-forced `--full-rebuild` on every activation, an endless loop that never
+  cleared the mismatch. The stamp now lives in `IndexerPipeline.index_repo`
+  (written on any `full=True` index), so the CLI and daemon share one source of
+  truth and a forced rebuild actually resolves the mismatch.
+- **Onboarding stepper and headline no longer disagree during `watching`.** The
+  panel's "active indexing" bypass was gated on the broad `indexStatus.active`,
+  which is still true in the steady-state `watching` phase — so a genuine health
+  failure (like the stale `index_version` above) was masked by "Watching for
+  file changes" in the headline while the stepper (which reads `health.overall`)
+  showed an error. The bypass is now gated on `isIndexStatusBusy` (genuine
+  in-flight work), so a real failure surfaces consistently; the cold-index /
+  embedding progress protection is preserved.
+
+### Changed
+
+- **`health` version-check docstring** now matches behavior (`index_version`
+  drift → `fail`, not `warn`): a stale index must be rebuilt before it is served.
+- **CI typing stability for the embedder.** `LocalEmbedder.embed_batch` now
+  narrows the `object`-typed model handle with `typing.cast` instead of an
+  annotated assignment. Newer `sentence-transformers` releases ship `py.typed`,
+  which turned the previously-fine assignment into a mypy `[assignment]` error
+  on a fresh dependency resolve; `cast` is stable whether the dependency exposes
+  types or is treated as `Any`, so the `lint + unit` gate no longer breaks on a
+  dependency-version float.
+
+
 ## [0.7.1] — 2026-06-14
 
 Honesty + correctness patch: the panel now reports MCP connectivity from the

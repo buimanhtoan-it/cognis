@@ -84,6 +84,8 @@ _LANG_BY_EXT: dict[str, str] = {
     ".tsx": "typescript",
     ".py": "python",
     ".go": "go",
+    ".cs": "csharp",
+    ".java": "java",
 }
 """Map filename extension to the language id used by the parser registry."""
 
@@ -247,6 +249,14 @@ class IndexerPipeline:
                 from cognis_indexer.parsers.go import GoParser
 
                 parser = GoParser()
+            elif language == "csharp":
+                from cognis_indexer.parsers.csharp import CSharpParser
+
+                parser = CSharpParser()
+            elif language == "java":
+                from cognis_indexer.parsers.java import JavaParser
+
+                parser = JavaParser()
             else:
                 # Unknown language id — defensive arm; should never happen
                 # because the ext map only emits known languages.

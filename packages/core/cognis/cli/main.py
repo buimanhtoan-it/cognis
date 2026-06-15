@@ -1251,7 +1251,7 @@ def _diagnose_empty_index(repo_root: Path) -> list[str]:
     from cognis_indexer.watcher.gitignore import GitignoreFilter
 
     cfg = Config.load(repo_root)
-    supported_exts = {".ts", ".tsx", ".py", ".go"}
+    supported_exts = {".ts", ".tsx", ".py", ".go", ".cs", ".java"}
     enabled = set(cfg.languages.enabled)
     gitignore = GitignoreFilter.from_repo(repo_root, extra_patterns=list(cfg.repo.ignore))
 
@@ -1285,18 +1285,18 @@ def _diagnose_empty_index(repo_root: Path) -> list[str]:
     lines: list[str] = []
     lines.append(
         f"  diagnosis       : walked {total_files} files; "
-        f"{supported_total} in supported languages (.ts/.tsx/.py/.go), "
+        f"{supported_total} in supported languages (.ts/.tsx/.py/.go/.cs/.java), "
         f"{supported_after_ignore} left after ignore rules"
     )
     if supported_total == 0:
         top_exts = sorted(ext_counts.items(), key=lambda kv: -kv[1])[:6]
         ext_summary = ", ".join(f"{ext} x{n}" for ext, n in top_exts) or "(none)"
         lines.append(
-            "  hint            : no TypeScript/Python/Go source files found. "
+            "  hint            : no TypeScript/Python/Go/C#/Java source files found. "
             f"Most common file types here: {ext_summary}. "
-            "cognis indexes only .ts/.tsx/.py/.go today."
+            "cognis indexes only .ts/.tsx/.py/.go/.cs/.java today."
         )
-        if enabled != {"typescript", "python", "go"}:
+        if enabled != {"typescript", "python", "go", "csharp", "java"}:
             lines.append(f"  languages.enabled = {sorted(enabled)} (check .cognis/config.yaml)")
     elif supported_after_ignore == 0:
         lines.append(

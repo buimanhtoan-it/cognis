@@ -56,7 +56,7 @@ The indexer pipeline is responsible for turning raw files into structured data:
    Detects repository changes and batches file events.
 
 2. **Parser**  
-   Uses tree-sitter grammars for TypeScript, Python, and Go.
+   Uses tree-sitter grammars for TypeScript, Python, Go, C#, and Java.
 
 3. **Resolver**  
    Connects symbols through imports, calls, and other detectable relations.

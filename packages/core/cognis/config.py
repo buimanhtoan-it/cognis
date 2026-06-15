@@ -10,7 +10,7 @@ the design document's *Configuration* section verbatim:
       ignore: [node_modules, .git, dist, target, __pycache__, .venv, reference]
 
     languages:
-      enabled: [typescript, python, go]
+      enabled: [typescript, python, go, csharp, java]
 
     embedder:
       backend: local
@@ -270,11 +270,13 @@ class RepoConfig(BaseModel):
 
 
 class LanguagesConfig(BaseModel):
-    """``languages:`` section. MVP supports TS/Python/Go (REQ-IDX-1)."""
+    """``languages:`` section. Supports TS/Python/Go/C#/Java."""
 
     model_config = _SECTION_MODEL_CONFIG
 
-    enabled: list[str] = Field(default_factory=lambda: ["typescript", "python", "go"])
+    enabled: list[str] = Field(
+        default_factory=lambda: ["typescript", "python", "go", "csharp", "java"]
+    )
 
 
 class EmbedderConfig(BaseModel):

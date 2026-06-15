@@ -17,7 +17,9 @@ import pytest
 # Guard: skip entire module if tree-sitter optional deps are not installed.
 # ---------------------------------------------------------------------------
 try:
+    from cognis_indexer.parsers.csharp import CSharpParser
     from cognis_indexer.parsers.go import GoParser
+    from cognis_indexer.parsers.java import JavaParser
     from cognis_indexer.parsers.python import PythonParser
     from cognis_indexer.parsers.typescript import TypeScriptParser
 
@@ -80,6 +82,20 @@ class TestLanguageParserProtocol:
         p = GoParser()
         assert isinstance(p, LanguageParser)
         assert p.language == "go"
+
+    def test_csharp_satisfies_protocol(self) -> None:
+        from cognis_indexer.parsers.base import LanguageParser
+
+        p = CSharpParser()
+        assert isinstance(p, LanguageParser)
+        assert p.language == "csharp"
+
+    def test_java_satisfies_protocol(self) -> None:
+        from cognis_indexer.parsers.base import LanguageParser
+
+        p = JavaParser()
+        assert isinstance(p, LanguageParser)
+        assert p.language == "java"
 
     def test_parsed_symbol_line_range(self) -> None:
         p = PythonParser()
@@ -444,3 +460,129 @@ class TestNormalize:
         a = 'def foo():\n    """This docstring."""\n    pass'
         b = "def foo():\n    pass"
         assert content_hash(a) == content_hash(b)
+
+
+# ===========================================================================
+# C# parser
+# ===========================================================================
+
+
+@skip_if_no_parsers
+class TestCSharpParser:
+    """Tests for CSharpParser covering classes, interfaces, methods, enums, records."""
+
+    def _p(self) -> CSharpParser:
+        return CSharpParser()
+
+    def test_class_and_methods(self) -> None:
+        src = (
+            "namespace App.Auth {\n"
+            "    public class JwtValidator {\n"
+            "        public JwtValidator() {}\n"
+            "        public bool Validate(string token) { return true; }\n"
+            "    }\n"
+            "}\n"
+        )
+        syms = self._p().parse(src, "src/Auth/JwtValidator.cs")
+        by_qual = {s.qualified_name.split(":")[-1]: s for s in syms}
+        assert by_qual["JwtValidator"].kind == "class"
+        # constructor + method qualified by the enclosing type
+        assert by_qual["JwtValidator.JwtValidator"].kind == "method"
+        assert by_qual["JwtValidator.Validate"].kind == "method"
+
+    def test_interface(self) -> None:
+        src = "public interface IValidator { bool Validate(string t); }\n"
+        syms = self._p().parse(src, "src/IValidator.cs")
+        iface = next(s for s in syms if s.name == "IValidator")
+        assert iface.kind == "interface"
+
+    def test_enum_and_record_are_classes(self) -> None:
+        src = "public enum Color { Red, Green }\npublic record Pair(int A, int B);\n"
+        syms = self._p().parse(src, "src/Types.cs")
+        kinds_by_name = {s.name: s.kind for s in syms}
+        assert kinds_by_name["Color"] == "class"
+        assert kinds_by_name["Pair"] == "class"
+
+    def test_nested_types_qualified(self) -> None:
+        src = "public class Outer {\n    public class Inner {\n        public void Run() {}\n    }\n}\n"
+        syms = self._p().parse(src, "src/Outer.cs")
+        quals = {s.qualified_name.split(":")[-1] for s in syms}
+        assert "Outer.Inner" in quals
+        assert "Outer.Inner.Run" in quals
+
+    def test_xml_doc_comment_extracted(self) -> None:
+        src = "/// <summary>Validates tokens.</summary>\npublic class JwtValidator {}\n"
+        syms = self._p().parse(src, "src/JwtValidator.cs")
+        cls = next(s for s in syms if s.name == "JwtValidator")
+        assert cls.docstring is not None
+        assert "Validates tokens" in cls.docstring
+
+    def test_ids_stable_under_whitespace(self) -> None:
+        a = self._p().parse("public class A { public void M() {} }\n", "src/A.cs")
+        b = self._p().parse("public class A {\n    public void M() {}\n}\n", "src/A.cs")
+        assert {s.id for s in a} == {s.id for s in b}
+
+    def test_empty_source_returns_empty(self) -> None:
+        assert self._p().parse("", "src/Empty.cs") == []
+
+
+# ===========================================================================
+# Java parser
+# ===========================================================================
+
+
+@skip_if_no_parsers
+class TestJavaParser:
+    """Tests for JavaParser covering classes, interfaces, methods, enums, records."""
+
+    def _p(self) -> JavaParser:
+        return JavaParser()
+
+    def test_class_and_methods(self) -> None:
+        src = (
+            "package app.auth;\n"
+            "public class JwtValidator {\n"
+            "    public JwtValidator() {}\n"
+            "    public boolean validate(String token) { return true; }\n"
+            "}\n"
+        )
+        syms = self._p().parse(src, "src/auth/JwtValidator.java")
+        by_qual = {s.qualified_name.split(":")[-1]: s for s in syms}
+        assert by_qual["JwtValidator"].kind == "class"
+        assert by_qual["JwtValidator.JwtValidator"].kind == "method"
+        assert by_qual["JwtValidator.validate"].kind == "method"
+
+    def test_interface(self) -> None:
+        src = "public interface IValidator { boolean validate(String t); }\n"
+        syms = self._p().parse(src, "src/IValidator.java")
+        iface = next(s for s in syms if s.name == "IValidator")
+        assert iface.kind == "interface"
+
+    def test_enum_and_record_are_classes(self) -> None:
+        src = "enum Color { RED, GREEN }\nrecord Pair(int a, int b) {}\n"
+        syms = self._p().parse(src, "src/Types.java")
+        kinds_by_name = {s.name: s.kind for s in syms}
+        assert kinds_by_name["Color"] == "class"
+        assert kinds_by_name["Pair"] == "class"
+
+    def test_nested_types_qualified(self) -> None:
+        src = "class Outer {\n    static class Inner {\n        void run() {}\n    }\n}\n"
+        syms = self._p().parse(src, "src/Outer.java")
+        quals = {s.qualified_name.split(":")[-1] for s in syms}
+        assert "Outer.Inner" in quals
+        assert "Outer.Inner.run" in quals
+
+    def test_javadoc_extracted(self) -> None:
+        src = "/** Validates tokens. */\npublic class JwtValidator {}\n"
+        syms = self._p().parse(src, "src/JwtValidator.java")
+        cls = next(s for s in syms if s.name == "JwtValidator")
+        assert cls.docstring is not None
+        assert "Validates tokens" in cls.docstring
+
+    def test_ids_stable_under_whitespace(self) -> None:
+        a = self._p().parse("class A { void m() {} }\n", "src/A.java")
+        b = self._p().parse("class A {\n    void m() {}\n}\n", "src/A.java")
+        assert {s.id for s in a} == {s.id for s in b}
+
+    def test_empty_source_returns_empty(self) -> None:
+        assert self._p().parse("", "src/Empty.java") == []

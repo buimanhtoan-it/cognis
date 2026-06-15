@@ -25,6 +25,7 @@ from cognis_indexer.resolver.base import ResolvedEdge
 from cognis_indexer.resolver.heuristic import HeuristicResolver
 from cognis_indexer.resolver.lsp import LspResolver
 from cognis_indexer.resolver.lsp import detect as lsp_detect
+from cognis_indexer.resolver.oop import OOPRelationshipResolver
 
 # Threshold below which an edge is flagged ambiguous in ``Edge.meta``.
 # Aligns with design *Resolved Open Questions → "Edge confidence threshold"*.
@@ -60,6 +61,9 @@ def resolve_edges(
     heuristic = HeuristicResolver()
     heuristic_edges = heuristic.resolve(symbols)
 
+    # Phase 1b — OOP relationships (C#/Java inherits/implements; no-op otherwise)
+    oop_edges = OOPRelationshipResolver().resolve(symbols)
+
     # Phase 2 — LSP (when detected)
     lsp_edges: list[ResolvedEdge] = []
     if repo_root is not None and lsp_detect(repo_root):
@@ -68,7 +72,7 @@ def resolve_edges(
 
     # Merge: keep highest confidence per (src_id, dst_id, kind).
     best: dict[tuple[str, str, str], ResolvedEdge] = {}
-    for edge in heuristic_edges + lsp_edges:
+    for edge in heuristic_edges + oop_edges + lsp_edges:
         key = (edge.src_id, edge.dst_id, edge.kind)
         existing = best.get(key)
         if existing is None or edge.confidence > existing.confidence:

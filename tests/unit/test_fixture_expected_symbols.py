@@ -15,7 +15,7 @@ import pytest
 
 FIXTURES_ROOT = Path(__file__).resolve().parent.parent / "fixtures" / "repos"
 
-FIXTURE_NAMES = ["mini-ts-app", "mini-py-svc", "mini-go-svc"]
+FIXTURE_NAMES = ["mini-ts-app", "mini-py-svc", "mini-go-svc", "mini-cs-app", "mini-java-svc"]
 
 
 def _load_expected_symbols(fixture: str) -> dict:
@@ -35,7 +35,7 @@ class TestExpectedSymbolsSchema:
         data = _load_expected_symbols(fixture)
         assert isinstance(data, dict)
         assert data["version"] == 1
-        assert data["language"] in ("typescript", "python", "go")
+        assert data["language"] in ("typescript", "python", "go", "csharp", "java")
         assert data["fixture"] == fixture
         assert isinstance(data["symbols"], list)
 

@@ -53,7 +53,7 @@ def test_default_config_matches_design_section() -> None:
         "reference",
     ]
 
-    assert cfg.languages.enabled == ["typescript", "python", "go"]
+    assert cfg.languages.enabled == ["typescript", "python", "go", "csharp", "java"]
 
     assert cfg.embedder.backend == "local"
     assert cfg.embedder.model == "BAAI/bge-small-en-v1.5"

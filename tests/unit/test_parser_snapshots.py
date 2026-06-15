@@ -30,7 +30,9 @@ import pytest
 # Skip if optional tree-sitter deps not installed
 # ---------------------------------------------------------------------------
 try:
+    from cognis_indexer.parsers.csharp import CSharpParser
     from cognis_indexer.parsers.go import GoParser
+    from cognis_indexer.parsers.java import JavaParser
     from cognis_indexer.parsers.python import PythonParser
     from cognis_indexer.parsers.typescript import TypeScriptParser
 
@@ -229,6 +231,90 @@ class TestGoSnapshot:
             for sym in symbols:
                 assert sym.id, f"empty id in {file_path}"
                 assert sym.qualified_name.startswith("go:"), sym.qualified_name
+                assert sym.line_start >= 1
+                assert sym.line_end >= sym.line_start
+                assert len(sym.content_hash) == 16
+
+
+# ---------------------------------------------------------------------------
+# C# snapshot test
+# ---------------------------------------------------------------------------
+
+
+@skip_if_no_parsers
+class TestCSharpSnapshot:
+    """Snapshot: C# parser against mini-cs-app/expected_symbols.json."""
+
+    def test_all_expected_cs_symbols_found(self) -> None:
+        fixture_dir = FIXTURES_DIR / "mini-cs-app"
+        if not fixture_dir.exists():
+            pytest.skip("mini-cs-app fixture not present")
+
+        expected = _load_expected(fixture_dir)
+        parser = CSharpParser()
+        found_qnames = _parse_all(parser, fixture_dir, ".cs")
+
+        missing = [s["qualified_name"] for s in expected if s["qualified_name"] not in found_qnames]
+        if missing:
+            sample = missing[:10]
+            pytest.fail(
+                f"{len(missing)} expected symbol(s) not found in C# parse output.\n"
+                f"First up to 10 missing:\n" + "\n".join(f"  - {q}" for q in sample)
+            )
+
+    def test_cs_symbols_have_valid_fields(self) -> None:
+        fixture_dir = FIXTURES_DIR / "mini-cs-app"
+        if not fixture_dir.exists():
+            pytest.skip("mini-cs-app fixture not present")
+
+        parser = CSharpParser()
+        for file_path, source in _walk_source_files(fixture_dir, ".cs"):
+            symbols = parser.parse(source, file_path)
+            for sym in symbols:
+                assert sym.id, f"empty id in {file_path}"
+                assert sym.qualified_name.startswith("cs:"), sym.qualified_name
+                assert sym.line_start >= 1
+                assert sym.line_end >= sym.line_start
+                assert len(sym.content_hash) == 16
+
+
+# ---------------------------------------------------------------------------
+# Java snapshot test
+# ---------------------------------------------------------------------------
+
+
+@skip_if_no_parsers
+class TestJavaSnapshot:
+    """Snapshot: Java parser against mini-java-svc/expected_symbols.json."""
+
+    def test_all_expected_java_symbols_found(self) -> None:
+        fixture_dir = FIXTURES_DIR / "mini-java-svc"
+        if not fixture_dir.exists():
+            pytest.skip("mini-java-svc fixture not present")
+
+        expected = _load_expected(fixture_dir)
+        parser = JavaParser()
+        found_qnames = _parse_all(parser, fixture_dir, ".java")
+
+        missing = [s["qualified_name"] for s in expected if s["qualified_name"] not in found_qnames]
+        if missing:
+            sample = missing[:10]
+            pytest.fail(
+                f"{len(missing)} expected symbol(s) not found in Java parse output.\n"
+                f"First up to 10 missing:\n" + "\n".join(f"  - {q}" for q in sample)
+            )
+
+    def test_java_symbols_have_valid_fields(self) -> None:
+        fixture_dir = FIXTURES_DIR / "mini-java-svc"
+        if not fixture_dir.exists():
+            pytest.skip("mini-java-svc fixture not present")
+
+        parser = JavaParser()
+        for file_path, source in _walk_source_files(fixture_dir, ".java"):
+            symbols = parser.parse(source, file_path)
+            for sym in symbols:
+                assert sym.id, f"empty id in {file_path}"
+                assert sym.qualified_name.startswith("java:"), sym.qualified_name
                 assert sym.line_start >= 1
                 assert sym.line_end >= sym.line_start
                 assert len(sym.content_hash) == 16

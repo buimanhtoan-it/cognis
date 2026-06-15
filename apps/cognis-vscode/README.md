@@ -222,7 +222,7 @@ first semantic query unless you override these explicitly.
 
 - VS Code 1.85+ or Cursor (any MCP-capable editor).
 - Python 3.11+ available on your machine (the backend installs in one click).
-- Languages indexed today: **TypeScript / JavaScript, Python, Go**.
+- Languages indexed today: **TypeScript / JavaScript, Python, Go, C#, Java**.
 
 ---
 

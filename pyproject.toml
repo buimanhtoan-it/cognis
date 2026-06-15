@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 # ---------------------------------------------------------------------------
 [project]
 name = "cognis-engine"
-version = "0.7.2"
+version = "0.7.3"
 description = "Software Cognition Engine — MCP-native context capsules for LLM coding agents."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -42,6 +42,8 @@ indexer = [
     "tree-sitter-python>=0.21",
     "tree-sitter-typescript>=0.21",
     "tree-sitter-go>=0.21",
+    "tree-sitter-c-sharp>=0.21",
+    "tree-sitter-java>=0.21",
     "watchdog>=4.0",
 ]
 embed-local = [

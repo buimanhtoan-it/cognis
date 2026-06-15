@@ -6,6 +6,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.3] — 2026-06-15
+
+Two new languages: C# and Java are now first-class. The retrieval core is
+unchanged — CSAR is language-agnostic — so this is purely new parser coverage
+plus the wiring to enable it by default.
+
+### Added
+
+- **C# parser** (`.cs`, tree-sitter-c-sharp) and **Java parser** (`.java`,
+  tree-sitter-java). Both extract classes, interfaces, methods, and
+  constructors; structs/records/enums map to `class` (the model has no dedicated
+  enum/struct kind). Nested types are qualified (`Outer.Inner.method`), and
+  XML-doc (`///`) / Javadoc (`/** */`) comments are captured as docstrings.
+  Symbol IDs are stable under cosmetic edits (CP-2), matching the other parsers.
+- **C#/Java OOP edges.** A language-aware resolver
+  (`OOPRelationshipResolver`) emits `inherits` / `implements` edges from class
+  headers (`: Base, IFoo` in C#; `extends`/`implements` in Java). It only links
+  to types that exist in the repo (external bases like `System.Object` /
+  `java.lang.Object` produce no noise), and the edges feed both CSAR diffusion
+  (`build_code_graph` includes all kinds) and `dependency_trace`.
+- **Snapshot fixtures** `mini-cs-app` and `mini-java-svc` with curated
+  `expected_symbols.json`, wired into the parser snapshot suite.
+- `languages.enabled` now defaults to
+  `[typescript, python, go, csharp, java]`; the indexer maps `.cs → csharp` and
+  `.java → java`. Existing workspaces pick the new languages up on the next full
+  index.
+
+### Changed
+
+- `cognis-engine[indexer]` now also pulls `tree-sitter-c-sharp` and
+  `tree-sitter-java`. A missing grammar degrades gracefully — those files are
+  skipped, the rest of the index still builds.
+
 ## [0.7.2] — 2026-06-15
 
 Status-honesty patch: a stale on-disk index version no longer gets stuck

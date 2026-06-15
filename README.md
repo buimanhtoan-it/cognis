@@ -164,7 +164,7 @@ The math and security were reviewed against the actual code and tests
 | Retrieval quality | 8 / 10 | recovers on-path flow; reuses cheap seed signals |
 | Mathematical rigor | 9 / 10 | 5 PPR theorems, verified in code & property tests |
 | Security posture | 8 / 10 | secret scrubbing, read-only tools, hard caps, hashed audit log |
-| Scope / maturity | 7 / 10 | 3 languages (TS/JS, Py, Go); local-first |
+| Scope / maturity | 7 / 10 | 5 languages (TS/JS, Py, Go, C#, Java); local-first |
 
 All five CSAR theorems are verified in code/tests; both `α` endpoints included.
 Security uses only standard hashing (SHA-256) — **no custom cryptography**.

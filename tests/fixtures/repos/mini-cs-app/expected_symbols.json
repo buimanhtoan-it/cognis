@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "language": "csharp",
+  "fixture": "mini-cs-app",
+  "symbols": [
+    {
+      "qualified_name": "cs:src/Auth/AuthService.cs:AuthService",
+      "kind": "class",
+      "file_path": "src/Auth/AuthService.cs",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "cs:src/Auth/AuthService.cs:AuthService.AuthService",
+      "kind": "method",
+      "file_path": "src/Auth/AuthService.cs",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "cs:src/Auth/AuthService.cs:AuthService.Login",
+      "kind": "method",
+      "file_path": "src/Auth/AuthService.cs",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "cs:src/Auth/IValidator.cs:IValidator",
+      "kind": "interface",
+      "file_path": "src/Auth/IValidator.cs",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "cs:src/Auth/IValidator.cs:IValidator.Validate",
+      "kind": "method",
+      "file_path": "src/Auth/IValidator.cs",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "cs:src/Auth/JwtValidator.cs:JwtValidator",
+      "kind": "class",
+      "file_path": "src/Auth/JwtValidator.cs",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "cs:src/Auth/JwtValidator.cs:JwtValidator.Decode",
+      "kind": "method",
+      "file_path": "src/Auth/JwtValidator.cs",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "cs:src/Auth/JwtValidator.cs:JwtValidator.Validate",
+      "kind": "method",
+      "file_path": "src/Auth/JwtValidator.cs",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "cs:src/Models/User.cs:Role",
+      "kind": "class",
+      "file_path": "src/Models/User.cs",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "cs:src/Models/User.cs:User",
+      "kind": "class",
+      "file_path": "src/Models/User.cs",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "cs:src/Program.cs:Program",
+      "kind": "class",
+      "file_path": "src/Program.cs",
+      "exported": true,
+      "tags": []
+    },
+    {
+      "qualified_name": "cs:src/Program.cs:Program.Main",
+      "kind": "method",
+      "file_path": "src/Program.cs",
+      "exported": true,
+      "tags": []
+    }
+  ]
+}

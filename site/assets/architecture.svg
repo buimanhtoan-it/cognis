@@ -59,8 +59,8 @@
 
   <rect class="box plug" x="20" y="306" width="150" height="92" rx="10"/>
   <text x="95" y="330" text-anchor="middle" class="title" font-size="13">Model registry</text>
-  <text x="95" y="349" text-anchor="middle" class="sub">embedder: local /</text>
-  <text x="95" y="363" text-anchor="middle" class="sub">voyage / openai*</text>
+  <text x="95" y="349" text-anchor="middle" class="sub">embedder: onnx-local</text>
+  <text x="95" y="363" text-anchor="middle" class="sub">(bge-small) / stub</text>
   <text x="95" y="380" text-anchor="middle" class="sub">reranker: off* / local*</text>
   <path class="plugedge" d="M170,352 L198,352"/>
 

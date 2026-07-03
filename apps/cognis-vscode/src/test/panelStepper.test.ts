@@ -26,9 +26,8 @@ function okHealth(): HealthReport {
 
 function readyPrereqs(ready = true): PrerequisiteReport {
   return {
-    python: "python",
     ready,
-    combined_install_target: ready ? "" : ".[indexer]",
+    combined_install_target: "",
     items: [
       {
         id: "indexer",
@@ -36,7 +35,7 @@ function readyPrereqs(ready = true): PrerequisiteReport {
         description: "Parses code.",
         status: ready ? "ok" : "missing",
         required: true,
-        install_target: ".[indexer]",
+        install_target: "",
         detail: ready ? "Installed." : "Missing.",
       },
     ],
@@ -73,16 +72,6 @@ test("indexing in progress marks the index step active", () => {
   };
   assert.equal(stepState(ctx, "components"), "done");
   assert.equal(stepState(ctx, "indexed"), "active");
-});
-
-test("broken python interpreter flags the backend step as error", () => {
-  const ctx: PanelContext = {
-    status: "unknown",
-    setupHint: "python",
-    configured: true,
-  };
-  assert.equal(stepState(ctx, "backend"), "error");
-  assert.equal(stepState(ctx, "components"), "pending");
 });
 
 test("fully wired workspace marks every step done and hides the stepper", () => {

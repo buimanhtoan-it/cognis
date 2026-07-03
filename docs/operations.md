@@ -20,8 +20,8 @@ From the `cognis` repository root:
 ```bash
 export WORKSPACE_HOST_PATH=/path/to/your/codebase
 docker compose -f deploy/compose.yaml build
-docker compose -f deploy/compose.yaml run --rm mcpd cognis-cli init
-docker compose -f deploy/compose.yaml run --rm mcpd cognis-cli index --full /workspace
+docker compose -f deploy/compose.yaml run --rm mcpd cognis init
+docker compose -f deploy/compose.yaml run --rm mcpd cognis index --full /workspace
 docker compose -f deploy/compose.yaml up -d
 ```
 
@@ -38,7 +38,7 @@ What these commands do:
 Run the health check from the running container:
 
 ```bash
-docker compose -f deploy/compose.yaml exec mcpd python -m cognis.cli.main health
+docker compose -f deploy/compose.yaml exec mcpd cognis health
 ```
 
 Treat the deployment as ready only when:
@@ -71,8 +71,8 @@ docker compose -f deploy/compose.yaml up -d
 If you are working from a source checkout, you can also use:
 
 ```bash
-cognis-cli up
-cognis-cli down
+docker compose -f deploy/compose.yaml up -d
+docker compose -f deploy/compose.yaml down
 ```
 
 ## Audit trail
@@ -97,11 +97,11 @@ When upgrading the deployment:
 
 1. pull or rebuild the new image
 2. restart the services
-3. run `cognis-cli health`
+3. run `cognis health`
 4. if the version check fails, run a full re-index:
 
 ```bash
-docker compose -f deploy/compose.yaml exec mcpd python -m cognis.cli.main index --full /workspace
+docker compose -f deploy/compose.yaml exec mcpd cognis index --full /workspace
 ```
 
 ## Recovery notes
@@ -111,4 +111,4 @@ If the database becomes unusable after an interrupted upgrade or index run:
 1. stop the deployment
 2. back up `.cognis/`
 3. remove the damaged database file
-4. run `cognis-cli init` and `cognis-cli index --full /workspace` again
+4. run `cognis init` and `cognis index --full /workspace` again

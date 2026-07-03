@@ -7,11 +7,11 @@ const SERVER_PREFIX = "cognis";
  * chars). Disambiguates two repos that share a folder name (e.g. ``work/api``
  * and ``personal/api``) so their global MCP entries never collide.
  *
- * IMPORTANT: this must stay byte-for-byte identical to ``_short_path_hash`` in
- * ``packages/core/cognis/cli/main.py`` so the extension and the CLI derive the
- * same server key for a given repo. We hash UTF-8 bytes of a normalized path
- * (forward slashes, lowercased) so Windows/POSIX and casing differences don't
- * change the result.
+ * The extension owns this derivation and passes the resulting server name to
+ * the engine via ``cognis-cli mcp-config --server-name``, so the key stays
+ * stable for a given repo. We hash UTF-8 bytes of a normalized path (forward
+ * slashes, lowercased) so Windows/POSIX and casing differences don't change the
+ * result.
  */
 export function shortPathHash(resolvedPath: string): string {
   const norm = resolvedPath.replace(/\\/g, "/").toLowerCase();

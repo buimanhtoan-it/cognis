@@ -1,0 +1,28 @@
+[package]
+name = "cognis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "cognis single multi-call binary (busybox-style: cli / mcpd / indexd)."
+
+[[bin]]
+name = "cognis"
+path = "src/main.rs"
+
+[dependencies]
+cognis-cli.workspace = true
+cognis-mcpd.workspace = true
+cognis-indexd.workspace = true
+
+[features]
+# The single shipped artifact's ONNX toggle: forwards to the mcpd (semantic
+# search) and indexd (index-time embeddings) surfaces so one `--features` flag
+# on the release build turns on semantic across the whole binary. Off by
+# default so the ordinary workspace build/test needs no ONNX Runtime.
+#   cargo build --release -p cognis --features onnx-download
+onnx = ["cognis-mcpd/onnx", "cognis-indexd/onnx", "cognis-cli/onnx"]
+onnx-download = [
+    "cognis-mcpd/onnx-download",
+    "cognis-indexd/onnx-download",
+    "cognis-cli/onnx-download",
+]

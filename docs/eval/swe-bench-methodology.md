@@ -78,12 +78,12 @@ framing.
 
 ## Step 5: score the result
 
-Apply the generated patch and run the relevant tests:
+Apply the generated patch and run the subject repository's own test suite:
 
 ```bash
 cd /tmp/swe-bench-repos/<repo>
 git apply /tmp/patch-<issue_id>.diff
-python -m pytest tests/<relevant_test_file> -x
+# run the repo's own test command for the relevant test(s)
 ```
 
 Count a patch as correct only when the failing tests for the issue pass after

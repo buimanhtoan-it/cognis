@@ -1,64 +1,66 @@
 # Contributing to cognis
 
-Thank you for contributing to `cognis`.
+Thank you for contributing to `cognis`. The engine is a pure-Rust Cargo
+workspace — there is no Python, `pip`, or virtualenv anywhere in the build.
 
 ## Development setup
 
-Clone the repository and create a virtual environment:
+You need the [Rust toolchain](https://rustup.rs) (stable) and Git. Node.js 18+
+is only required if you work on the VS Code / Cursor extension.
 
 ```bash
 git clone https://github.com/buimanhtoan-it/cognis
 cd cognis
-python -m venv .venv
+cargo build --workspace
 ```
 
-Activate the virtual environment:
-
-- Windows PowerShell: `.\.venv\Scripts\Activate.ps1`
-- macOS / Linux: `source .venv/bin/activate`
-
-Install the development environment:
-
-```bash
-make install-dev
-```
-
-On Windows, you can also use the one-step helper:
+On Windows, the one-step helper builds the workspace and packages the extension:
 
 ```powershell
 .\scripts\setup-dev.ps1
 ```
 
-The development install includes:
+The workspace layout:
 
-- the editable Python package
-- development dependencies
-- pre-commit hooks
-- a compiled VS Code / Cursor extension build
+- `crates/*` — engine libraries (`cognis-core`, `cognis-store`, `cognis-embed`,
+  `cognis-indexer`, `cognis-retrieval`, `cognis-csar`, `cognis-mcp`,
+  `cognis-eval`)
+- `bins/*` — the runtime surfaces (`cognis-cli`, `cognis-indexd`, `cognis-mcpd`)
+  plus the single multi-call `cognis` binary
+- `xtask` — build / distribution automation (`cargo xtask dist`)
+- `native/csar-rs` — the CSAR kernel `cdylib`
+- `apps/cognis-vscode` — the TypeScript VS Code / Cursor extension
 
 ## Day-to-day workflow
 
-Typical local workflow:
+Standard Rust tooling drives every check:
 
 ```bash
-make test
-make lint
-make typecheck
+cargo test --workspace      # unit + property (CSAR theorems T1–T5) + parity tests
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all
 ```
 
-If you prefer Invoke on Windows, use the matching tasks in `tasks.py`.
+For the extension, work from its own directory:
+
+```bash
+cd apps/cognis-vscode
+npm install
+npm test
+```
 
 ## Before opening a pull request
 
-Run the full local checks:
+Run the full local checks from the repo root:
 
 ```bash
-make lint
-make typecheck
-make test
-python -m pytest -m integration --maxfail=5
-python -m cognis.cli.main mcp-conformance
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 ```
+
+If you touched the extension, also run `npm test` (and, if relevant,
+`npm run test:host`) under `apps/cognis-vscode`.
 
 ## Pull request expectations
 
@@ -70,7 +72,8 @@ python -m cognis.cli.main mcp-conformance
 ## Release process
 
 Maintainers should follow [docs/release.md](docs/release.md). Releases are
-tag-driven through `.github/workflows/release.yml`.
+tag-driven through `.github/workflows/release.yml`, which builds the
+per-platform single-binary matrix.
 
 ## Code of conduct
 

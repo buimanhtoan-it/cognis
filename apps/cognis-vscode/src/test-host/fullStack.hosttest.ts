@@ -1,9 +1,9 @@
 /**
- * Full-stack e2e: the real extension, in a real VS Code host, against a real
- * Python backend. Runs the actual ``cognis.setupWorkspace`` command (no stubs)
- * and asserts the observable outcomes a user would get — plus that the flow is
- * captured in the diagnostics trace, so the monitoring story is verified
- * end to end.
+ * Full-stack e2e: the real extension, in a real VS Code host, against the real
+ * pure-Rust `cognis` engine binary. Runs the actual ``cognis.setupWorkspace``
+ * command (no stubs) and asserts the observable outcomes a user would get —
+ * plus that the flow is captured in the diagnostics trace, so the monitoring
+ * story is verified end to end.
  */
 import * as assert from "node:assert";
 import * as fs from "node:fs";
@@ -45,20 +45,21 @@ async function waitFor(
   return predicate();
 }
 
-suite("Full-stack: real VS Code host + real backend", () => {
+suite("Full-stack: real VS Code host + real Rust engine binary", () => {
   test("Set Up Workspace creates .cognis + mcp.json and is traced", async function () {
     this.timeout(180_000);
 
     const workspace = process.env.COGNIS_HOST_WORKSPACE;
     assert.ok(workspace, "COGNIS_HOST_WORKSPACE not set by the runner");
-    const py = (process.env.COGNIS_TEST_PYTHON ?? "").trim();
-    if (!py) {
-      this.skip(); // No backend python provided — nothing real to drive.
+    const binary = (process.env.COGNIS_BINARY_PATH ?? "").trim();
+    if (!binary) {
+      this.skip(); // No engine binary built — nothing real to drive.
     }
 
-    // Point the extension at the real backend and a deterministic MCP target.
+    // Drive a deterministic MCP target; the engine binary is picked up from
+    // COGNIS_BINARY_PATH (binary.ts override) so the extension resolves the
+    // Rust binary for cli/mcpd/indexd.
     const cfg = vscode.workspace.getConfiguration("cognis");
-    await cfg.update("pythonPath", py, vscode.ConfigurationTarget.Workspace);
     await cfg.update("mcpHost", "cursor", vscode.ConfigurationTarget.Workspace);
     await cfg.update("mcpConfigScope", "workspace", vscode.ConfigurationTarget.Workspace);
 

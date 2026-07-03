@@ -1,0 +1,21 @@
+# xtask — build / distribution automation for the rust-engine-migration
+# workspace (design "Build / Distribution / Packaging", Task 10.1). Run via
+# `cargo run -p xtask -- <cmd>` (or the `cargo xtask` alias, see .cargo/config).
+#
+# Today it ships the `dist` command: build the single multi-call `cognis`
+# binary in --release, stage it under dist/ with a platform-tagged name, and
+# emit a SHA-256 sidecar + manifest. This is the local half of the per-platform
+# release matrix; CI (.github/workflows/release.yml) drives the same build per
+# target (native runners + `cross` for the Linux cross targets).
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "cognis build/dist/sign automation (cargo xtask)."
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+sha2.workspace = true

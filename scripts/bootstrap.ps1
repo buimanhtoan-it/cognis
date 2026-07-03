@@ -7,8 +7,7 @@ Set-Location $Root
 $Target = if ($args.Count -gt 0) { $args[0] } else { "." }
 
 if ($env:SKIP_EMBEDDINGS -eq "1") {
-    python -m cognis.cli.main bootstrap $Target --skip-embeddings
+    cargo run --release -p cognis -- bootstrap $Target --skip-embeddings
 } else {
-    python -m cognis.cli.main bootstrap $Target
+    cargo run --release -p cognis -- bootstrap $Target
 }
-

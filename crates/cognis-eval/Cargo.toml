@@ -1,0 +1,29 @@
+[package]
+name = "cognis-eval"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "cognis eval: golden-set runner, fair-harness benchmark, parity oracle."
+
+[dependencies]
+cognis-core.workspace = true
+cognis-store.workspace = true
+cognis-retrieval.workspace = true
+cognis-csar.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile = "3"
+criterion.workspace = true
+
+# Latency bench (Task 9.3 — Requirement 11.2): the CSAR forward-push kernel and
+# the end-to-end `diffuse_context` p50, against the Pillar-2 reference in
+# `docs/native-core-rust.md` §12. `harness = false` lets Criterion own `main`.
+# It never fabricates timings: Criterion measures the real Rust code paths over
+# a deterministic synthetic graph (or a real UCKG via `COGNIS_DIFFUSE_DB`), and
+# the Python/Pillar-2 baseline is printed from the recorded reference so the
+# comparison is explicit and evidence-tier labelled.
+[[bench]]
+name = "diffuse_latency"
+harness = false

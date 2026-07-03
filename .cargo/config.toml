@@ -1,0 +1,5 @@
+# Workspace cargo config. The `xtask` alias makes `cargo xtask <cmd>` run the
+# build/distribution automation crate (Task 10.1) — `cargo xtask dist` builds
+# and stages the single `cognis` binary per platform.
+[alias]
+xtask = "run -p xtask --"

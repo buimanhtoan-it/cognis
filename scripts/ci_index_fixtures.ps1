@@ -8,7 +8,7 @@ if (-not $env:COGNIS_DB_PATH) {
     $env:COGNIS_DB_PATH = Join-Path $Root ".cognis\uckg.db"
 }
 
-python -m cognis.cli.main init
+cargo run --release -p cognis -- init
 
 # Skip embeddings when offline or Hugging Face auth fails (lexical/structural index only).
 # Example: $env:SKIP_EMBEDDINGS = "1"
@@ -16,12 +16,17 @@ if ($env:SKIP_EMBEDDINGS -eq "1") {
     Write-Host "SKIP_EMBEDDINGS=1 (lexical/structural index only)"
 }
 foreach ($repo in @("mini-ts-app", "mini-py-svc", "mini-go-svc")) {
-    Write-Host "Indexing tests/fixtures/repos/$repo ..."
+    $repoPath = "tests/fixtures/repos/$repo"
+    if (-not (Test-Path $repoPath)) {
+        Write-Host "Skipping $repoPath (not present)"
+        continue
+    }
+    Write-Host "Indexing $repoPath ..."
     if ($env:SKIP_EMBEDDINGS -eq "1") {
-        python -m cognis.cli.main index --full --skip-embeddings "tests/fixtures/repos/$repo"
+        cargo run --release -p cognis -- index --full --skip-embeddings $repoPath
     } else {
-        python -m cognis.cli.main index --full "tests/fixtures/repos/$repo"
+        cargo run --release -p cognis -- index --full $repoPath
     }
 }
 
-python -m cognis.cli.main health --json
+cargo run --release -p cognis -- health --json

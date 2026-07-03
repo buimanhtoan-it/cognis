@@ -1,0 +1,9 @@
+# Pins the Rust toolchain for the rust-engine-migration workspace.
+# On Windows the gnu host is used (no MSVC required). Building crates that emit
+# import libraries (windows-sys) or C (rusqlite bundled) also needs a full
+# MinGW-w64 on PATH (dlltool + as + gcc) — install WinLibs:
+#   winget install --id BrechtSanders.WinLibs.POSIX.MSVCRT -e --scope user
+# then add its mingw64\bin to PATH. CI runners already ship MinGW.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy", "rust-mingw"]

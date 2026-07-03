@@ -10,7 +10,7 @@ const MCPD_MARKER = "cognis_mcpd";
 const CACHE_MS = 4000;
 
 export interface CognisMcpdRuntime {
-  /** PIDs of live ``python -m cognis_mcpd.main`` processes (editor-spawned stdio servers). */
+  /** PIDs of live ``cognis mcpd`` processes (editor-spawned stdio servers). */
   pids: number[];
   count: number;
   /**

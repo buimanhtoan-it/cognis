@@ -8,23 +8,25 @@ repository has already been initialized and indexed.
 Confirm these checks first:
 
 - the repository contains `.cognis/uckg.db`
-- `cognis-cli health` reports `overall: ok`
+- `cognis health` reports `overall: ok`
 - you know the absolute path to `.cognis/uckg.db`
-- you know whether your client should launch `cognis-mcpd` directly or through `python -m cognis_mcpd.main`
+- you know the absolute path to your `cognis` binary (the MCP server is the
+  binary's `mcpd` surface — invoked as `cognis mcpd`, or by the binary path with
+  an `mcpd` argument)
 
 ## Recommended path: VS Code or Cursor extension
 
 If you use VS Code or Cursor, the extension can write the MCP configuration for
 you:
 
-1. install `cognis`
-2. install the `cognis-vscode` extension
-3. select the same Python interpreter used for the `cognis` install
-4. open the target repository
-5. run **Cognis: Set Up Workspace** (or **Troubleshoot & Repair** if the workspace was already configured)
+1. install the `cognis-vscode` extension
+2. click **Install backend** in the Cognis panel (downloads the `cognis` binary)
+3. open the target repository
+4. run **Cognis: Set Up Workspace** (or **Troubleshoot & Repair** if the workspace was already configured)
 
 The extension resolves absolute `COGNIS_DB_PATH`, `COGNIS_AUDIT_LOG`, and
-`COGNIS_REPO_ROOT` values and writes the configuration for the selected host.
+`COGNIS_REPO_ROOT` values and writes the configuration for the selected host,
+pointing the server command at the managed `cognis` binary's `mcpd` surface.
 On Windows it also writes a safer default semantic timeout budget unless you
 override those env vars explicitly.
 
@@ -35,7 +37,7 @@ override those env vars explicitly.
 You can ask `cognis` to generate the MCP configuration:
 
 ```bash
-python -m cognis.cli.main mcp-config --host cursor --repo-root /path/to/repo
+cognis cli mcp-config --host cursor --repo-root /path/to/repo
 ```
 
 Use `--host vscode`, `--host cursor`, or `--host claude` as needed.
@@ -48,14 +50,14 @@ Use `--host vscode`, `--host cursor`, or `--host claude` as needed.
 | VS Code (generic) | `~/.vscode/mcp.json` |
 | Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` on Windows |
 
-### Example: module form (Windows-friendly)
+### Example: binary path + `mcpd` surface (portable)
 
 ```json
 {
   "mcpServers": {
     "cognis": {
-      "command": "python",
-      "args": ["-m", "cognis_mcpd.main"],
+      "command": "C:\\tools\\cognis.exe",
+      "args": ["mcpd"],
       "env": {
         "COGNIS_DB_PATH": "C:\\path\\to\\repo\\.cognis\\uckg.db",
         "COGNIS_AUDIT_LOG": "C:\\path\\to\\repo\\.cognis\\audit.log",
@@ -69,6 +71,10 @@ Use `--host vscode`, `--host cursor`, or `--host claude` as needed.
 }
 ```
 
+If `cognis` is on your `PATH`, you can use `"command": "cognis"` with
+`"args": ["mcpd"]`. A binary installed under the legacy name `cognis-mcpd` can be
+launched directly with no `args`.
+
 ## Claude Code and Claude Desktop
 
 Claude Code and Claude Desktop both use the same JSON structure.
@@ -79,7 +85,8 @@ Claude Code and Claude Desktop both use the same JSON structure.
 {
   "mcpServers": {
     "cognis": {
-      "command": "cognis-mcpd",
+      "command": "cognis",
+      "args": ["mcpd"],
       "env": {
         "COGNIS_DB_PATH": "/absolute/path/to/your/repo/.cognis/uckg.db",
         "COGNIS_AUDIT_LOG": "/absolute/path/to/your/repo/.cognis/audit.log",
@@ -96,8 +103,8 @@ Claude Code and Claude Desktop both use the same JSON structure.
 {
   "mcpServers": {
     "cognis": {
-      "command": "python",
-      "args": ["-m", "cognis_mcpd.main"],
+      "command": "C:\\tools\\cognis.exe",
+      "args": ["mcpd"],
       "env": {
         "COGNIS_DB_PATH": "C:\\path\\to\\your\\repo\\.cognis\\uckg.db",
         "COGNIS_AUDIT_LOG": "C:\\path\\to\\your\\repo\\.cognis\\audit.log",
@@ -111,8 +118,8 @@ Claude Code and Claude Desktop both use the same JSON structure.
 }
 ```
 
-If `cognis` is installed inside a virtual environment, you can also point
-`command` directly at that environment's `cognis-mcpd` executable.
+Use the absolute path to the `cognis` binary if it is not on the client's
+`PATH`.
 
 ## Cursor and generic VS Code MCP support
 
@@ -125,7 +132,7 @@ command instead of editing the file manually.
 Create a new MCP server entry with:
 
 - **Name**: `cognis`
-- **Command**: `cognis-mcpd` or `python -m cognis_mcpd.main`
+- **Command**: `cognis` (with argument `mcpd`), or the absolute binary path
 - **Environment variables**:
   - `COGNIS_DB_PATH`
   - `COGNIS_AUDIT_LOG` (recommended)
@@ -140,13 +147,15 @@ repository and give each entry a distinct name:
 {
   "mcpServers": {
     "cognis-frontend": {
-      "command": "cognis-mcpd",
+      "command": "cognis",
+      "args": ["mcpd"],
       "env": {
         "COGNIS_DB_PATH": "/repos/frontend/.cognis/uckg.db"
       }
     },
     "cognis-backend": {
-      "command": "cognis-mcpd",
+      "command": "cognis",
+      "args": ["mcpd"],
       "env": {
         "COGNIS_DB_PATH": "/repos/backend/.cognis/uckg.db"
       }
@@ -212,7 +221,7 @@ After saving the MCP configuration:
 3. if available, run:
 
 ```bash
-cognis-cli mcp-conformance
+cognis cli mcp-conformance
 ```
 
 ## Security notes
@@ -227,8 +236,8 @@ For the full security model, see [security.md](security.md).
 
 | Problem | What to check |
 | --- | --- |
-| `cognis-mcpd` cannot be found | Use the full executable path or `python -m cognis_mcpd.main` |
-| `INDEX_NOT_READY` or missing symbols | Re-run `cognis-cli index --full .` in the target repository |
+| `cognis` cannot be found | Use the full path to the binary, or put it on `PATH` |
+| `INDEX_NOT_READY` or missing symbols | Re-run `cognis index --full .` in the target repository |
 | Wrong repository answers | Confirm `COGNIS_DB_PATH` and `COGNIS_REPO_ROOT` point at the intended repository |
-| Semantic search unavailable | Confirm the install included the embedding dependencies |
+| Semantic search unavailable | Confirm the index was built with embeddings (not `--skip-embeddings`) |
 | Slow first query | The local embedder may still be loading into memory; on Windows prefer generated config or set the three `COGNIS_MCP_*TIMEOUT*` env vars shown above |

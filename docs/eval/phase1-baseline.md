@@ -27,11 +27,7 @@ an aspirational minimum.
 
 - total queries: 126 (synthetic, hand-authored concept labels)
 - task modes covered: `bugfix`, `feature`, `refactor`, `explain`, `review`, `migrate`
-- fixture repositories:
-  - `mini-ts-app`
-  - `mini-py-svc`
-  - `mini-go-svc`
-- golden query file: `tests/fixtures/eval/golden.jsonl`
+- golden query file: `.cognis/eval/golden.jsonl`
 
 ## Metrics
 
@@ -47,39 +43,23 @@ gate fails only on a regression beyond `regression_tolerance`.
 
 ## Running the eval locally
 
-### 1. Index the fixture repositories
-
-Linux / macOS:
-
-```bash
-bash scripts/ci_index_fixtures.sh
-```
-
-Windows PowerShell:
-
-```powershell
-.\scripts\ci_index_fixtures.ps1
-```
-
-### 2. Run the eval harness
+The eval and parity harnesses live in the `cognis-eval` crate (Rust). Run them
+with `cargo test`:
 
 ```bash
-python scripts/run_eval.py --golden tests/fixtures/eval/golden.jsonl --k 10
+# Differential parity (Property 2) + fair-harness quality gate (Property 5)
+cargo test -p cognis-eval
+
+# Kernel / diffuse_context latency
+cargo bench -p cognis-eval --bench diffuse_latency
 ```
 
-### 3. Review the generated report
-
-Local reports are written under:
-
-```text
-eval-reports/<timestamp>/
-```
-
-### 4. Compare against the baseline
-
-```bash
-python scripts/compare_eval_baseline.py eval-reports/<timestamp>/report.json
-```
+The fair-harness benchmark (`tests/fair_harness.rs`) computes Recall@k / MRR /
+Contamination@k and asserts the non-regression gate against the captured
+baseline; the differential harness (`tests/differential_parity.rs`) asserts the
+retrieval surfaces are byte-identical on the same UCKG. Both **skip gracefully**
+when the optional corpus/oracle fixtures are absent, so `cargo test` stays green
+offline.
 
 ## Interpreting the results
 

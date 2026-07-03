@@ -42,13 +42,11 @@ If it's missing or below 3.11, install it from
 
 ### Step 2 — Install the backend (one click)
 
-Open the **Cognis sidebar panel** and click **Install backend**. Cognis creates
-a private environment it manages for you and installs everything — no terminal,
-no `pip`, no choosing a Python environment. When it finishes the panel advances
+Open the **Cognis sidebar panel** and click **Install backend**. Cognis
+downloads the prebuilt, self-contained `cognis` engine binary for your platform
+from the GitHub Release, checksum-verifies it, and stores it privately — no
+terminal, no `pip`, no Python, no compiler. When it finishes the panel advances
 on its own.
-
-> Want to use your own Python environment instead? Set `cognis.pythonPath` in
-> Settings and Cognis installs into that environment rather than a managed one.
 
 ### Step 3 — Set up the workspace
 
@@ -153,21 +151,20 @@ repos), and the Python backend it installed for you. The panel's **Danger zone**
   entry, and deletes this repo's `.cognis/`. Other indexed repos keep working.
   Command: **Cognis: Remove from Workspace**.
 - **Remove everything (prepare to uninstall)** — does the above, strips **every**
-  `cognis-*` server from your MCP config, *and* uninstalls the backend Cognis
-  installed. After this you can uninstall the extension with nothing left behind.
+  `cognis-*` server from your MCP config, *and* uninstalls the engine binary and
+  semantic model Cognis installed. After this you can uninstall the extension
+  with nothing left behind.
   Command: **Cognis: Remove Everything (Prepare for Uninstall)**.
 
-Both leave your **source code** untouched. If you pointed Cognis at your own
-Python (`cognis.pythonPath`), "Remove everything" only removes the `cognis`
-package from it — your environment is kept.
+Both leave your **source code** untouched.
 
 ---
 
 ## Troubleshooting
 
 If anything looks off, run **Cognis: Troubleshoot & Repair** (or the
-**Troubleshoot** button in the panel). It re-checks Python, config, MCP wiring,
-and indexing, then tells you the next step.
+**Troubleshoot** button in the panel). It re-checks the engine, config, MCP
+wiring, and indexing, then tells you the next step.
 
 | Symptom | Fix |
 | --- | --- |
@@ -187,8 +184,6 @@ Diagnostics Log**, and the health report.
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `cognis.pythonPath` | `""` | Optional. Use your own Python environment for the backend. Empty lets Cognis install and manage its own. |
-| `cognis.backendPackageSpec` | `cognis-engine[...]` | pip requirement Cognis installs for its backend. Change only for a specific version. |
 | `cognis.autoManageOnActivate` | `true` | Inspect and repair the workspace on activation. |
 | `cognis.autoStartLiveIndexing` | `true` | Start live indexing during auto-manage. |
 | `cognis.autoIndexOnFileChange` | `true` | Re-index automatically when you save files. |

@@ -1,0 +1,27 @@
+[package]
+name = "cognis-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "cognis store: UCKG access (rusqlite + FTS5 + sqlite-vec), CSR builder."
+
+[features]
+# sqlite-vec KNN acceleration is OFF by default so the engine builds and tests
+# run fully offline with no extension present — the BLOB linear-scan fallback
+# (Requirement 2.4) is what default `cargo test` exercises. Enabling this turns
+# on rusqlite's `load_extension` so `vec_search` can load a sqlite-vec
+# (`vec0`) loadable extension at runtime (path via `COGNIS_SQLITE_VEC_PATH`);
+# Task 10.1 will static-link/embed the extension for the shipped binary.
+default = []
+sqlite-vec = ["rusqlite/load_extension"]
+
+[dependencies]
+cognis-core.workspace = true
+thiserror.workspace = true
+serde_json.workspace = true
+# Bundled SQLite (Requirement 8.2: no system SQLite). FTS5 is compiled in so the
+# Python-built `symbol_fts` virtual table opens unchanged.
+rusqlite = { workspace = true, features = ["bundled"] }
+
+[dev-dependencies]
+tempfile = "3"

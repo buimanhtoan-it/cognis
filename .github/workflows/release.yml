@@ -1,7 +1,10 @@
 name: release
 
-# Tag-driven release: build wheel/sdist, publish GHCR image, create GitHub Release.
-# PyPI publish is optional — set PYPI_API_TOKEN repository secret to enable.
+# Tag-driven release. Since the Python engine was removed at K8
+# (rust-engine-migration Task 11.2) this builds ONLY the pure-Rust single static
+# `cognis` binary per platform (Task 10.1 / G2) — SQLite bundled, no system
+# SQLite or Python required (Requirements 8.1, 8.2). The legacy Python
+# wheel/sdist, the GHCR Python image, and the PyPI publish jobs are gone.
 
 on:
   push:
@@ -10,112 +13,82 @@ on:
 
 permissions:
   contents: write
-  packages: write
-
-env:
-  PYTHONUNBUFFERED: "1"
-  REGISTRY: ghcr.io
-  # The GitHub repo is named "cognis", but the published artifact is
-  # "cognis-engine" (the PyPI distribution name), so pin the image name
-  # explicitly instead of deriving it from github.repository.
-  IMAGE_NAME: ${{ github.repository_owner }}/cognis-engine
 
 jobs:
-  build-python:
-    name: build wheel + sdist
-    runs-on: ubuntu-latest
+  # Per-platform single-binary distribution (Task 10.1). Each entry builds the
+  # multi-call `cognis` binary in --release with SQLite bundled and the ONNX
+  # embedder backend compiled in (`--features onnx-download`, so ONNX Runtime is
+  # statically linked and the binary needs no system ORT), then stages it via
+  # `cargo xtask dist` (binary + SHA-256 sidecar). Native runners cover the
+  # host-architecture targets; the Linux aarch64 target cross-compiles with
+  # `cross` (Docker-backed, no local toolchain).
+  #
+  # NOTE: the binary carries the embedder *code*; the bge-small model assets
+  # (model.onnx / tokenizer.json / pooling.json) are provisioned separately into
+  # COGNIS_ONNX_MODEL_DIR (or `assets/models/<leaf>` next to the binary). Without
+  # the assets present the semantic leg degrades to empty (lexical + structural
+  # still serve) — see docs/distribution.md.
+  dist-binaries:
+    name: dist · ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, cross: false }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu, cross: true }
+          - { os: macos-latest, target: aarch64-apple-darwin, cross: false }
+          - { os: macos-latest, target: x86_64-apple-darwin, cross: false }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, cross: false }
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v6
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          python-version: "3.11"
+          targets: ${{ matrix.target }}
 
-      - name: Install build tools
-        run: python -m pip install --upgrade pip build twine
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
 
-      - name: Build artifacts
-        run: python -m build
+      - name: Install cross
+        if: ${{ matrix.cross }}
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build + stage (cross)
+        if: ${{ matrix.cross }}
+        run: cargo xtask dist --use-cross --target ${{ matrix.target }} --features onnx-download
+
+      - name: Build + stage (native)
+        if: ${{ !matrix.cross }}
+        run: cargo xtask dist --target ${{ matrix.target }} --features onnx-download
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dist
-          path: dist/
-
-  docker:
-    name: build and push image
-    runs-on: ubuntu-latest
-    needs: build-python
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: docker/metadata-action@v5
-        id: meta
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          name: cognis-${{ matrix.target }}
+          path: |
+            dist/cognis-${{ matrix.target }}*
 
   github-release:
     name: GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-python, docker]
+    needs: [dist-binaries]
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v4
+      - name: Download platform binaries
+        uses: actions/download-artifact@v4
         with:
-          name: dist
-          path: dist/
+          pattern: cognis-*
+          path: binaries/
+          merge-multiple: true
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: |
+            binaries/*
           generate_release_notes: true
-
-  pypi:
-    name: PyPI publish (optional)
-    runs-on: ubuntu-latest
-    needs: build-python
-    # NOTE: the `secrets` context is NOT available in a job-level `if`, so we
-    # cannot gate the whole job on the token. Instead we expose it as an env var
-    # (allowed at job level) and gate the publish step on that — the job runs
-    # but the upload is skipped cleanly when the secret is unset.
-    env:
-      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-    steps:
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-
-      - name: Publish to PyPI
-        if: ${{ env.PYPI_API_TOKEN != '' }}
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ env.PYPI_API_TOKEN }}
-        run: python -m pip install twine && twine upload dist/*
-
-      - name: Skipped notice
-        if: ${{ env.PYPI_API_TOKEN == '' }}
-        run: echo "PYPI_API_TOKEN secret not set — skipping PyPI publish."

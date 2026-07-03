@@ -1,0 +1,477 @@
+{
+  "_comment": "Python RRF-fusion top-k oracle for cognis-retrieval rrf_fuse (spec rust-engine-migration task 5.2, Requirement 4.1 / Property 2 P-PAR-FUSE). score_hex is float.hex() for bit-exact parity. Frozen oracle output captured from the Python engine; checked in, not regenerated.",
+  "k": 10,
+  "rrf_k": 60,
+  "cases": [
+    {
+      "name": "scale_invariance",
+      "hits": [
+        {
+          "symbol_id": "sym:a",
+          "score": 1000.0,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:b",
+          "score": 5.0,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:b",
+          "score": 0.9,
+          "layer": "semantic"
+        },
+        {
+          "symbol_id": "sym:c",
+          "score": 0.8,
+          "layer": "semantic"
+        }
+      ],
+      "expected": [
+        {
+          "symbol_id": "sym:b",
+          "score_hex": "0x1.0a6c92bff7560p-5",
+          "score": 0.03252247488101534
+        },
+        {
+          "symbol_id": "sym:a",
+          "score_hex": "0x1.0c9714fbcda3bp-6",
+          "score": 0.01639344262295082
+        },
+        {
+          "symbol_id": "sym:c",
+          "score_hex": "0x1.0842108421084p-6",
+          "score": 0.016129032258064516
+        }
+      ],
+      "expected_ids": [
+        "sym:b",
+        "sym:a",
+        "sym:c"
+      ]
+    },
+    {
+      "name": "cross_layer_reinforce",
+      "hits": [
+        {
+          "symbol_id": "sym:x",
+          "score": 0.9,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:y",
+          "score": 1.0,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:x",
+          "score": 0.9,
+          "layer": "semantic"
+        }
+      ],
+      "expected": [
+        {
+          "symbol_id": "sym:x",
+          "score_hex": "0x1.0a6c92bff7560p-5",
+          "score": 0.03252247488101534
+        },
+        {
+          "symbol_id": "sym:y",
+          "score_hex": "0x1.0c9714fbcda3bp-6",
+          "score": 0.01639344262295082
+        }
+      ],
+      "expected_ids": [
+        "sym:x",
+        "sym:y"
+      ]
+    },
+    {
+      "name": "within_layer_score_ties",
+      "hits": [
+        {
+          "symbol_id": "sym:b",
+          "score": 0.5,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:a",
+          "score": 0.5,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:d",
+          "score": 0.5,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:c",
+          "score": 0.5,
+          "layer": "lexical"
+        }
+      ],
+      "expected": [
+        {
+          "symbol_id": "sym:a",
+          "score_hex": "0x1.0c9714fbcda3bp-6",
+          "score": 0.01639344262295082
+        },
+        {
+          "symbol_id": "sym:b",
+          "score_hex": "0x1.0842108421084p-6",
+          "score": 0.016129032258064516
+        },
+        {
+          "symbol_id": "sym:c",
+          "score_hex": "0x1.0410410410410p-6",
+          "score": 0.015873015873015872
+        },
+        {
+          "symbol_id": "sym:d",
+          "score_hex": "0x1.0000000000000p-6",
+          "score": 0.015625
+        }
+      ],
+      "expected_ids": [
+        "sym:a",
+        "sym:b",
+        "sym:c",
+        "sym:d"
+      ]
+    },
+    {
+      "name": "duplicate_symbol_in_layer",
+      "hits": [
+        {
+          "symbol_id": "sym:a",
+          "score": 0.9,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:a",
+          "score": 0.1,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:b",
+          "score": 0.5,
+          "layer": "lexical"
+        }
+      ],
+      "expected": [
+        {
+          "symbol_id": "sym:a",
+          "score_hex": "0x1.0c9714fbcda3bp-6",
+          "score": 0.01639344262295082
+        },
+        {
+          "symbol_id": "sym:b",
+          "score_hex": "0x1.0842108421084p-6",
+          "score": 0.016129032258064516
+        }
+      ],
+      "expected_ids": [
+        "sym:a",
+        "sym:b"
+      ]
+    },
+    {
+      "name": "three_layer_fusion",
+      "hits": [
+        {
+          "symbol_id": "sym:a",
+          "score": 0.7,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:b",
+          "score": 0.6,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:c",
+          "score": 0.5,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:a",
+          "score": 0.95,
+          "layer": "semantic"
+        },
+        {
+          "symbol_id": "sym:c",
+          "score": 0.8,
+          "layer": "semantic"
+        },
+        {
+          "symbol_id": "sym:b",
+          "score": 0.4,
+          "layer": "semantic"
+        },
+        {
+          "symbol_id": "sym:a",
+          "score": 0.3,
+          "layer": "structural"
+        },
+        {
+          "symbol_id": "sym:b",
+          "score": 0.2,
+          "layer": "structural"
+        },
+        {
+          "symbol_id": "sym:d",
+          "score": 0.1,
+          "layer": "structural"
+        }
+      ],
+      "expected": [
+        {
+          "symbol_id": "sym:a",
+          "score_hex": "0x1.92e29f79b4758p-5",
+          "score": 0.04918032786885246
+        },
+        {
+          "symbol_id": "sym:b",
+          "score_hex": "0x1.8a4a31062928cp-5",
+          "score": 0.048131080389144903
+        },
+        {
+          "symbol_id": "sym:c",
+          "score_hex": "0x1.062928c418a4ap-5",
+          "score": 0.03200204813108039
+        },
+        {
+          "symbol_id": "sym:d",
+          "score_hex": "0x1.0410410410410p-6",
+          "score": 0.015873015873015872
+        }
+      ],
+      "expected_ids": [
+        "sym:a",
+        "sym:b",
+        "sym:c",
+        "sym:d"
+      ]
+    },
+    {
+      "name": "many_symbols_truncation",
+      "hits": [
+        {
+          "symbol_id": "sym:00",
+          "score": 1.0,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:01",
+          "score": 0.99,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:02",
+          "score": 0.98,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:03",
+          "score": 0.97,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:04",
+          "score": 0.96,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:05",
+          "score": 0.95,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:06",
+          "score": 0.94,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:07",
+          "score": 0.9299999999999999,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:08",
+          "score": 0.92,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:09",
+          "score": 0.91,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:10",
+          "score": 0.9,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:11",
+          "score": 0.89,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:12",
+          "score": 0.88,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:13",
+          "score": 0.87,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:14",
+          "score": 0.86,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:15",
+          "score": 0.85,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:16",
+          "score": 0.84,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:17",
+          "score": 0.83,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:18",
+          "score": 0.8200000000000001,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:19",
+          "score": 0.81,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:20",
+          "score": 0.8,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:21",
+          "score": 0.79,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:22",
+          "score": 0.78,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:23",
+          "score": 0.77,
+          "layer": "lexical"
+        },
+        {
+          "symbol_id": "sym:24",
+          "score": 0.76,
+          "layer": "lexical"
+        }
+      ],
+      "expected": [
+        {
+          "symbol_id": "sym:00",
+          "score_hex": "0x1.0c9714fbcda3bp-6",
+          "score": 0.01639344262295082
+        },
+        {
+          "symbol_id": "sym:01",
+          "score_hex": "0x1.0842108421084p-6",
+          "score": 0.016129032258064516
+        },
+        {
+          "symbol_id": "sym:02",
+          "score_hex": "0x1.0410410410410p-6",
+          "score": 0.015873015873015872
+        },
+        {
+          "symbol_id": "sym:03",
+          "score_hex": "0x1.0000000000000p-6",
+          "score": 0.015625
+        },
+        {
+          "symbol_id": "sym:04",
+          "score_hex": "0x1.f81f81f81f820p-7",
+          "score": 0.015384615384615385
+        },
+        {
+          "symbol_id": "sym:05",
+          "score_hex": "0x1.f07c1f07c1f08p-7",
+          "score": 0.015151515151515152
+        },
+        {
+          "symbol_id": "sym:06",
+          "score_hex": "0x1.e9131abf0b767p-7",
+          "score": 0.014925373134328358
+        },
+        {
+          "symbol_id": "sym:07",
+          "score_hex": "0x1.e1e1e1e1e1e1ep-7",
+          "score": 0.014705882352941176
+        },
+        {
+          "symbol_id": "sym:08",
+          "score_hex": "0x1.dae6076b981dbp-7",
+          "score": 0.014492753623188406
+        },
+        {
+          "symbol_id": "sym:09",
+          "score_hex": "0x1.d41d41d41d41dp-7",
+          "score": 0.014285714285714285
+        }
+      ],
+      "expected_ids": [
+        "sym:00",
+        "sym:01",
+        "sym:02",
+        "sym:03",
+        "sym:04",
+        "sym:05",
+        "sym:06",
+        "sym:07",
+        "sym:08",
+        "sym:09"
+      ]
+    },
+    {
+      "name": "single_symbol",
+      "hits": [
+        {
+          "symbol_id": "sym:only",
+          "score": 1.0,
+          "layer": "lexical"
+        }
+      ],
+      "expected": [
+        {
+          "symbol_id": "sym:only",
+          "score_hex": "0x1.0c9714fbcda3bp-6",
+          "score": 0.01639344262295082
+        }
+      ],
+      "expected_ids": [
+        "sym:only"
+      ]
+    },
+    {
+      "name": "empty",
+      "hits": [],
+      "expected": [],
+      "expected_ids": []
+    }
+  ]
+}

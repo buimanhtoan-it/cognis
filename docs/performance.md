@@ -23,43 +23,38 @@ continued measurement on larger repositories.
 
 ## Benchmarking
 
-Run the benchmark suite locally with:
+Run the benchmark suite locally with `criterion`:
 
 ```bash
-pytest -m benchmark --benchmark-only
+cargo bench
 ```
 
 Useful variants:
 
 ```bash
-pytest -m benchmark --benchmark-compare --benchmark-autosave
-pytest tests/benchmark/test_latency.py -k planner
-pytest tests/benchmark/test_latency.py -k "semantic or capsule"
+cargo bench -p cognis-embed --bench embed_latency      # embedding latency
+cargo bench -p cognis-eval --bench diffuse_latency      # CSAR / diffuse_context p50
 ```
 
-The nightly benchmark workflow stores benchmark output under
-`benchmark-reports/`.
+Criterion stores its reports under `target/criterion/`.
 
 ### MCP and agent workflow benchmarks
 
-Several benchmarks in `tests/benchmark/test_latency.py` focus on MCP tool
-efficiency for coding agents:
+The `cognis-eval` criterion bench (`benches/diffuse_latency.rs`) focuses on the
+agent-facing latency that matters most:
 
-| Test | What it checks |
+| Bench group | What it checks |
 | --- | --- |
-| `test_semantic_query_embed_cache_reuse` | SemanticLayer query LRU — repeated identical queries avoid re-embedding |
-| `test_mcp_capsule_repeated_task_warm_latency` | Steady-state `retrieve_context_capsule` latency on a warm lexical path |
-| `test_mcp_capsule_vs_multi_tool_round_trips` | One capsule call vs three serial tool calls on the same fixture |
-| `test_mcp_semantic_search_repeated_queries_optional` | Real embedder warmup (opt-in via `COGNIS_BENCH_REAL_EMBEDDER=1`) |
+| `csar_kernel/forward_push` | the forward-push PPR solver in isolation |
+| `diffuse_context_resident` | seed-build + push + ranking over a resident graph |
+| `diffuse_context_end_to_end` | native graph build + diffuse — the Requirement 11.2 p50 path |
 
-These use a deterministic stub embedder in CI so they do not download Hugging
-Face models. Run the optional semantic benchmark locally against your indexed
-DB:
+These run on a deterministic synthetic graph in CI so they need no model
+download. Point the bench at a real indexed DB for an apples-to-apples p50:
 
 ```bash
-set COGNIS_BENCH_REAL_EMBEDDER=1
-set COGNIS_DB_PATH=.cognis\uckg.db
-pytest tests/benchmark/test_latency.py -k semantic_search_repeated -m benchmark
+set COGNIS_DIFFUSE_DB=.cognis\uckg.db
+cargo bench -p cognis-eval --bench diffuse_latency
 ```
 
 ## MCP tools and agent workflows
@@ -91,10 +86,10 @@ caches matter:
 2. **Indexer embedder LRU (LocalEmbedder)** — keyed on symbol `content_hash`
    during indexing; separate from query-time embedding.
 
-Loading `sentence-transformers` into memory can still take seconds on the
-**first** call. `cognis-mcpd` now reuses a process-wide embedder and semantic
-layer, so warm queries avoid repeated model construction, but operators should
-still keep the MCP server as a long-lived process and avoid frequent restarts.
+Loading the ONNX model into memory can still take time on the **first** call.
+`cognis mcpd` reuses a process-wide embedder and semantic layer, so warm queries
+avoid repeated model construction, but operators should still keep the MCP server
+as a long-lived process and avoid frequent restarts.
 
 The remaining cold-start risk is **initial model load**, especially on Windows.
 Generated MCP config now includes safer default values for
@@ -149,24 +144,20 @@ still useful, but agents lose concept-level recall.
 
 ## Profiling
 
-To profile the built-in performance command:
+The criterion benches above are the first stop for latency regressions
+(`cargo bench`, reports under `target/criterion/`).
+
+For a flamegraph of a hot path, use a Rust sampling profiler such as
+[`cargo flamegraph`](https://github.com/flamegraph-rs/flamegraph) or
+[`samply`](https://github.com/mstange/samply):
 
 ```bash
-cognis-cli profile --target capsule --iterations 50
+cargo install flamegraph
+cargo flamegraph -p cognis --bin cognis -- index --full .
 ```
 
-For Python-level profiling:
-
-```bash
-python -m cProfile -s cumtime -m cognis.cli.main profile --target capsule
-```
-
-For sampling-based profiling:
-
-```bash
-pip install py-spy
-py-spy record -o profile.svg -- cognis-mcpd
-```
+Build with the `release` profile (the default for benches) so the numbers
+reflect the shipped binary.
 
 ## Practical tuning ideas
 
@@ -186,10 +177,10 @@ codebases should continue to be recorded and compared over time.
 
 Additional gaps:
 
-- Semantic benchmarks in CI use a stub embedder; real-model timings require the
-  opt-in `COGNIS_BENCH_REAL_EMBEDDER=1` benchmark locally.
+- Semantic benchmarks use a synthetic graph by default; real-model/real-DB
+  timings require pointing the bench at an indexed DB via `COGNIS_DIFFUSE_DB`.
 - Cold-start latency still depends heavily on local hardware, disk cache, and
-  Windows Python/torch startup characteristics.
+  Windows model-load characteristics.
 
 ## Future work
 

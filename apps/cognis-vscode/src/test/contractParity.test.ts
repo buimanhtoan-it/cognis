@@ -1,21 +1,21 @@
 /**
  * Cross-language contract parity tests.
  *
- * The Python apps (cognis-cli, cognis-indexd) emit JSON that this extension
- * parses into the interfaces in `types.ts` and normalizes in `indexd.ts` /
- * `mcpConfig.ts`. Those JSON shapes are a contract across two languages; if the
- * Python side drops or renames a field, the extension breaks silently.
+ * The Rust engine (`cognis-cli`, the `indexd` surface) emits JSON that this
+ * extension parses into the interfaces in `types.ts` and normalizes in
+ * `indexd.ts` / `mcpConfig.ts`. Those JSON shapes are a contract across two
+ * languages; if the Rust side drops or renames a field, the extension breaks
+ * silently.
  *
- * The Python E2E suite captures the *real* CLI/daemon output into golden
- * skeleton files under `tests/e2e/contracts/` (key names + value types, with
+ * The E2E suite captures the *real* CLI/daemon output into golden skeleton
+ * files under `tests/e2e/contracts/` (key names + value types, with
  * environment-specific values stripped). These tests load those same goldens
  * and assert every field the extension actually reads is present in the
- * contract — so a drift on the Python side fails here, and a drift on the
+ * contract — so a drift on the Rust side fails here, and a drift on the
  * TypeScript side (reading a field the contract doesn't promise) fails too.
  *
- * If a contract change is intentional: regenerate the goldens with
- * `COGNIS_UPDATE_CONTRACTS=1 pytest -m e2e -k contract_snapshots`, then update
- * the matching interface in `types.ts` and the expected key list below.
+ * If a contract change is intentional: regenerate the goldens, then update the
+ * matching interface in `types.ts` and the expected key list below.
  */
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
@@ -85,23 +85,9 @@ test("WorkspacePaths interface matches the real `cognis-cli paths` contract", (t
       "capsule_cache_dir",
       "golden_set_path",
       "runtime_version",
-      "commands",
+      "engine_binary",
     ],
     "WorkspacePaths"
-  );
-  const commands = contract.commands as Record<string, unknown>;
-  assertKeys(
-    commands,
-    [
-      "python",
-      "cognis_cli",
-      "cognis_mcpd",
-      "cognis_indexd",
-      "cognis_cli_module",
-      "cognis_mcpd_module",
-      "cognis_indexd_module",
-    ],
-    "WorkspacePaths.commands"
   );
 });
 

@@ -4,9 +4,11 @@ This guide takes you from a fresh machine to a working `cognis` setup. It is
 written for first-time users who want a copy/paste-friendly path and a clear
 definition of "done".
 
+`cognis` is a single static binary — no Python, no `pip`, no virtual environment.
+
 The recommended path is:
 
-1. install the `cognis` backend from source
+1. get the `cognis` binary (download a prebuilt release or build from source)
 2. install the VS Code / Cursor extension
 3. open the repository you want to index
 4. run **Cognis: Set Up Workspace**
@@ -16,78 +18,43 @@ The recommended path is:
 
 You need:
 
-- Python 3.11 or newer
-- Git
-- VS Code or Cursor
-- Node.js 18 or newer, only because the extension is packaged locally as a
-  `.vsix`
-- about 1 GB of free disk space for dependencies and the local embedding model
-
-`cognis` is not published to PyPI yet. Install it from the source repository.
+- The `cognis` binary for your platform (prebuilt download) **or** the
+  [Rust toolchain](https://rustup.rs) + Git to build it from source
+- VS Code or Cursor (for the editor path)
+- Node.js 18 or newer only if you build the extension `.vsix` locally
+- about 200 MB of free disk space for the binary and the local embedding model
 
 ## Two Folders Matter
 
 Keep these two folders separate:
 
-- The `cognis` source folder is where you clone and install this project.
-- The target repository is the codebase you want `cognis` to index.
+- The folder where the `cognis` binary lives (anywhere on your `PATH`).
+- The target repository — the codebase you want `cognis` to index.
 
 For example:
 
 ```text
-D:\PROGRAMING\cognis          # the cognis source folder
+C:\tools\cognis.exe           # the cognis binary (on PATH)
 D:\work\my-app                # your target repository
 ```
 
-Run install and extension packaging commands in the `cognis` source folder.
 Run setup, health checks, and indexing against the target repository.
 
 ## Path A: Cursor or VS Code
 
 Use this path if you want the editor to handle MCP configuration and live
-indexing for you.
+indexing for you. The extension can download and manage the backend binary, so
+this is the simplest route.
 
-### 1. Install the Backend
+### 1. Install the Extension
 
-On Windows PowerShell:
-
-```powershell
-git clone https://github.com/buimanhtoan-it/cognis;
-cd cognis;
-python -m venv .venv;
-.\.venv\Scripts\Activate.ps1;
-python -m pip install -e ".[indexer,embed-local,vector,tokenizers,mcp]";
-python -m cognis.cli.main --version;
-```
-
-On macOS or Linux:
+Build the `.vsix` from `apps/cognis-vscode` (or use the prebuilt Pro build):
 
 ```bash
-git clone https://github.com/buimanhtoan-it/cognis
-cd cognis
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e ".[indexer,embed-local,vector,tokenizers,mcp]"
-python -m cognis.cli.main --version
+cd apps/cognis-vscode
+npm install
+npm run package
 ```
-
-If the version command prints a version, the backend is installed.
-
-### 2. Package the Extension
-
-From the `cognis` source folder:
-
-```powershell
-python scripts/setup_extension.py --package;
-```
-
-This creates a file like:
-
-```text
-apps/cognis-vscode/cognis-vscode-<version>.vsix
-```
-
-### 3. Install the Extension
 
 In Cursor or VS Code:
 
@@ -97,25 +64,18 @@ In Cursor or VS Code:
 4. Select `apps/cognis-vscode/cognis-vscode-<version>.vsix`.
 5. Reload the editor if prompted.
 
-### 4. Select the Python Interpreter
+### 2. Install the Backend
 
-Select the same Python interpreter used for the backend install.
+Open the Cognis panel and click **Install backend**. The extension detects your
+platform, downloads the matching `cognis` binary, verifies its checksum, and
+stages it under the extension's storage. No terminal, no Python.
 
-On Windows, this is usually:
+If you prefer to manage the binary yourself, put a `cognis` binary on your
+`PATH` (see Path B) — the extension will use it.
 
-```text
-D:\PROGRAMING\cognis\.venv\Scripts\python.exe
-```
+### 3. Open the Target Repository
 
-If the editor does not pick it up automatically, set `cognis.pythonPath` to that
-absolute path.
-
-### 5. Open the Target Repository
-
-Open the repository you want to index, not necessarily the `cognis` source
-folder.
-
-Then run:
+Open the repository you want to index, then run:
 
 ```text
 Cognis: Set Up Workspace
@@ -123,9 +83,10 @@ Cognis: Set Up Workspace
 
 You can run it from the Command Palette or from the Cognis sidebar. This command
 creates `.cognis/` in the target repository, writes MCP configuration for the
-editor, starts managed indexing, and runs a health check.
+editor (pointing at the `cognis` binary's `mcpd` surface), starts managed
+indexing, and runs a health check.
 
-### 6. Verify the Setup
+### 4. Verify the Setup
 
 The setup is ready when all of these are true:
 
@@ -141,86 +102,79 @@ Setup**.
 
 Use this path if you do not want the extension to manage setup.
 
-First, complete the backend install from Path A. Then move into the target
-repository.
+### 1. Get the Binary
 
-On Windows PowerShell:
+Either download a prebuilt release and put it on your `PATH`, or build from
+source:
 
-```powershell
-cd D:\work\my-app;
-python -m cognis.cli.main bootstrap .;
-python -m cognis.cli.main health;
-python -m cognis.cli.main mcp-config --host cursor --repo-root .;
+```bash
+git clone https://github.com/buimanhtoan-it/cognis
+cd cognis
+cargo build --release
+# the binary is at target/release/cognis (cognis.exe on Windows)
 ```
 
-On macOS or Linux:
+Verify it runs:
+
+```bash
+cognis --version
+```
+
+### 2. Bootstrap the Target Repository
+
+Move into the target repository and run:
 
 ```bash
 cd /path/to/my-app
-python -m cognis.cli.main bootstrap .
-python -m cognis.cli.main health
-python -m cognis.cli.main mcp-config --host cursor --repo-root .
+cognis bootstrap .
+cognis health
+cognis cli mcp-config --host cursor --repo-root .
 ```
 
 The `bootstrap` command initializes `.cognis/`, runs a full index, and checks
 health. Copy the generated MCP configuration into your client configuration if
-you are wiring the client manually.
+you are wiring the client manually (see
+[mcp-client-config.md](mcp-client-config.md)).
 
-Start the MCP server with:
+### 3. Start the Server / Daemon
 
-```powershell
-python -m cognis_mcpd.main;
+Start the MCP server (stdio):
+
+```bash
+cognis mcpd
 ```
 
-For long editing sessions outside the extension, start live indexing with:
+For long editing sessions outside the extension, start live indexing:
 
-```powershell
-python -m cognis_indexd.main --repo-root D:\work\my-app;
+```bash
+cognis indexd --repo-root /path/to/my-app
 ```
 
 ## Faster First Run
 
-The first run can take longer because local embedding dependencies and models
-may be downloaded. If you want a faster setup with lexical and structural
-search only, skip embeddings on the first index:
+The first run can take longer because the local embedding model may be fetched
+on first use. If you want a faster setup with lexical and structural search
+only, skip embeddings on the first index:
 
-```powershell
-python -m cognis.cli.main bootstrap . --skip-embeddings;
+```bash
+cognis bootstrap . --skip-embeddings
 ```
 
 Later, re-run indexing without `--skip-embeddings` to enable semantic search.
 
 ## Common Problems
 
-### `cognis-cli` Is Not Recognized
+### `cognis` Is Not Recognized
 
-Use the module form instead:
-
-```powershell
-python -m cognis.cli.main health;
-```
-
-The extension also uses module form internally, so it does not require
-`cognis-cli` to be on `PATH`.
-
-### The Extension Cannot Find Python
-
-Set `cognis.pythonPath` to the exact Python executable in the environment where
-you installed `cognis`.
-
-On Windows, that usually looks like:
-
-```text
-D:\PROGRAMING\cognis\.venv\Scripts\python.exe
-```
-
-Then run **Cognis: Troubleshoot & Repair**.
+Confirm the binary is on your `PATH`, or invoke it by its full path
+(e.g. `./target/release/cognis health`).
 
 ### MCP Tools Are Missing
 
 Run **Cognis: Troubleshoot & Repair**, then reload the editor or MCP host. If you
 configured MCP manually, check that `COGNIS_DB_PATH`, `COGNIS_AUDIT_LOG`, and
-`COGNIS_REPO_ROOT` point to the target repository.
+`COGNIS_REPO_ROOT` point to the target repository, and that the server command
+points at your `cognis` binary's `mcpd` surface.
 
 ### Health Is Degraded
 
@@ -231,8 +185,8 @@ see warnings before the target repository has been initialized and indexed.
 
 A plug-and-play setup is complete when:
 
-- the backend version command works
-- the extension is installed
+- `cognis --version` works
+- the extension is installed (editor path)
 - the target repository has `.cognis/config.yaml` and `.cognis/uckg.db`
 - health reports `overall: ok`
 - MCP tools are visible in the editor
@@ -240,11 +194,11 @@ A plug-and-play setup is complete when:
   target repository
 
 After that, use the editor flow for day-to-day work. Run **Cognis: Repair
-Setup** any time Python, MCP configuration, or indexing state drifts.
+Setup** any time MCP configuration or indexing state drifts.
 
 ## Next Steps
 
-- [install.md](install.md) for installation details and optional dependencies
+- [install.md](install.md) for installation details and the binary distribution
 - [quickstart.md](quickstart.md) for the CLI indexing flow
 - [mcp-client-config.md](mcp-client-config.md) for manual MCP configuration
 - [../apps/cognis-vscode/README.md](../apps/cognis-vscode/README.md) for

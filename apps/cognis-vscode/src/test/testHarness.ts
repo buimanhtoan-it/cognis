@@ -8,9 +8,9 @@
  *
  * This harness stubs *only* those two boundaries so integration tests can drive
  * the real orchestration logic — config init, MCP wiring, live-indexing start —
- * against a throwaway temp repo, without needing a Python install or a running
- * VS Code instance. Everything in between (file writes, state transitions,
- * daemon bookkeeping) runs for real.
+ * against a throwaway temp repo, without needing the real engine binary or a
+ * running VS Code instance. Everything in between (file writes, state
+ * transitions, daemon bookkeeping) runs for real.
  */
 import { EventEmitter } from "node:events";
 import * as fs from "node:fs";
@@ -262,7 +262,7 @@ interface SpawnBehavior {
   health: HealthDescriptor;
   /** Exit code for `cognis init --quiet`; non-zero simulates a CLI failure. */
   initExitCode: number;
-  /** Exit code for `cognis paths` (the Python preflight check). */
+  /** Exit code for `cognis paths`; non-zero simulates the engine failing to run. */
   pathsExitCode: number;
   /** When false, `cognis doctor` reports a required prerequisite as missing. */
   prerequisitesReady: boolean;
@@ -277,29 +277,28 @@ const spawnBehavior: SpawnBehavior = {
 
 function generateDoctor(): Record<string, unknown> {
   const ready = spawnBehavior.prerequisitesReady;
-  const indexerStatus = ready ? "ok" : "missing";
+  const semanticStatus = ready ? "ok" : "missing";
   return {
-    python: "python",
     ready,
-    combined_install_target: ready ? "" : ".[indexer]",
+    combined_install_target: "",
     items: [
       {
-        id: "indexer",
-        label: "Code parsers (tree-sitter)",
-        description: "Parses TypeScript, Python, and Go.",
-        status: indexerStatus,
-        required: true,
-        install_target: ".[indexer]",
-        detail: ready ? "Installed." : "Not installed: missing tree_sitter",
-      },
-      {
-        id: "mcp",
-        label: "MCP server (fastmcp)",
-        description: "Serves Cognis tools over MCP.",
+        id: "engine",
+        label: "Cognis engine",
+        description: "The single self-contained cognis binary.",
         status: "ok",
         required: true,
-        install_target: ".[mcp]",
-        detail: "Installed.",
+        install_target: "",
+        detail: "cognis (rust)",
+      },
+      {
+        id: "semantic_index",
+        label: "Semantic index",
+        description: "Symbol embeddings for semantic search.",
+        status: semanticStatus,
+        required: false,
+        install_target: "",
+        detail: ready ? "vectors present" : "no vectors yet — index the repo",
       },
     ],
   };
@@ -352,15 +351,7 @@ function generatePaths(repoRoot: string): Record<string, unknown> {
     capsule_cache_dir: path.join(cognisDir, "capsule_cache"),
     golden_set_path: path.join(cognisDir, "eval", "golden.jsonl"),
     runtime_version: spawnBehavior.health.runtime_version,
-    commands: {
-      python: "python",
-      cognis_cli: null,
-      cognis_mcpd: null,
-      cognis_indexd: null,
-      cognis_cli_module: "cognis.cli.main",
-      cognis_mcpd_module: "cognis_mcpd.main",
-      cognis_indexd_module: "cognis_indexd.main",
-    },
+    engine_binary: "cognis",
   };
 }
 
@@ -377,8 +368,8 @@ function generateMcpConfig(repoRoot: string, args: string[]): Record<string, unk
     config: {
       mcpServers: {
         [serverName]: {
-          command: "python",
-          args: ["-m", "cognis_mcpd.main"],
+          command: "cognis",
+          args: ["mcpd"],
           env,
         },
       },
@@ -401,7 +392,9 @@ function finishCli(proc: FakeChildProcess, stdout: string, exitCode: number): vo
 function fakeSpawn(command: string, args: string[]): FakeChildProcess {
   const proc = new FakeChildProcess(nextPid++);
   const repoRoot = readArgValue(args, "--repo-root") ?? process.cwd();
-  const isDaemon = args.includes("cognis_indexd.main");
+  // The daemon is the `indexd` multi-call surface (`<binary> indexd …`); the
+  // one-shot CLI uses the `cli` surface, so the leading subcommand disambiguates.
+  const isDaemon = args[0] === "indexd";
   spawnRecords.push({ command, args: [...args], isDaemon });
 
   if (isDaemon) {
@@ -503,16 +496,11 @@ export function resetHarness(repoRoot: string, options: ConfigureOptions = {}): 
   harnessState.outputChannels = [];
   harnessState.config = {
     cognis: {
-      pythonPath: "",
       // Keep all MCP writes inside the temp repo so tests never touch $HOME.
       mcpHost: "cursor",
       mcpConfigScope: "workspace",
       mcpWarmSemanticOnStartup: true,
       ...(options.config?.cognis ?? {}),
-    },
-    python: {
-      defaultInterpreterPath: "",
-      ...(options.config?.python ?? {}),
     },
   };
 

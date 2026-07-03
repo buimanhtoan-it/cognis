@@ -1,0 +1,68 @@
+# cognis — Rust engine workspace (rust-engine-migration spec).
+# This is now the engine: the Python packages/apps were removed at K8 (Task
+# 11.2), so the shipped product is pure-Rust. native/csar-rs is excluded from
+# the workspace (it sets its own release profile + is the C-ABI parity bridge);
+# its kernel was promoted into crates/cognis-csar at Task 4.
+[workspace]
+resolver = "2"
+members = ["crates/*", "bins/*", "xtask"]
+exclude = ["native/csar-rs"]
+
+[workspace.package]
+version = "0.8.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+# Shared third-party deps (declared here; each crate opts in as its task needs).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "1"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+sha2 = "0.10"
+proptest = "1"
+criterion = "0.5"
+# Daemon file-watch (cognis-indexd notify loop, Task 7.3 / wired in Task 8) +
+# cross-platform Ctrl-C/SIGTERM handling for clean daemon shutdown.
+notify = "6"
+ctrlc = "3"
+# Indexer parser stage (Task 8.1): tree-sitter core + per-language grammars
+# (TS/JS, Python, Go, C#, Java) and regex for the AST-text normalizer.
+tree-sitter = "0.26"
+tree-sitter-python = "0.25"
+tree-sitter-typescript = "0.23"
+tree-sitter-go = "0.25"
+tree-sitter-java = "0.23"
+tree-sitter-c-sharp = "0.23"
+regex = "1"
+
+# Internal crates.
+cognis-core = { path = "crates/cognis-core" }
+cognis-store = { path = "crates/cognis-store" }
+cognis-embed = { path = "crates/cognis-embed" }
+cognis-indexer = { path = "crates/cognis-indexer" }
+cognis-retrieval = { path = "crates/cognis-retrieval" }
+cognis-csar = { path = "crates/cognis-csar" }
+cognis-mcp = { path = "crates/cognis-mcp" }
+cognis-eval = { path = "crates/cognis-eval" }
+
+# Bin crates exposed as libs too, so the single multi-call `cognis` binary
+# (busybox-style dispatch, design "Single-binary distribution") can call each
+# entry point's `run_from(..)`. The three standalone bins remain (fallback B).
+cognis-cli = { path = "bins/cognis-cli" }
+cognis-indexd = { path = "bins/cognis-indexd" }
+cognis-mcpd = { path = "bins/cognis-mcpd" }
+
+# Release profile for the shipped single-binary distribution (Task 10.1 / G2).
+# `lto` + single codegen unit optimise the static binary; `strip` drops symbols
+# so the per-platform artifact stays small. `panic` is left as the default
+# (unwind) at the workspace level so proptest/`should_panic` tests still work —
+# the CSAR `cdylib` keeps its own `panic = "abort"` in native/csar-rs.
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = "symbols"

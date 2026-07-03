@@ -7,7 +7,6 @@ import {
   isHttpMcpConfiguredForRepo,
 } from "./mcpConfig";
 import { isMcpServerRunning } from "./mcpServer";
-import { verifyPythonEnvironment } from "./python";
 import { isSyncPaused, setAutoManaged, setMcpEnabled } from "./state";
 import {
   diagnoseRepairPlan,
@@ -114,13 +113,6 @@ export async function reconcileWorkspaceOnActivate(
     channel.appendLine(
       "[reconcile] Workspace not set up yet; leaving it untouched until the user runs Set Up Workspace."
     );
-    return;
-  }
-
-  progress.report({ message: "Checking Python environment…" });
-  const pythonCheck = await verifyPythonEnvironment(repoRoot);
-  if (!pythonCheck.ok) {
-    channel.appendLine(`[reconcile] ${pythonCheck.guidance.message}`);
     return;
   }
 

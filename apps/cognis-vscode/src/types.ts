@@ -16,15 +16,8 @@ export interface WorkspacePaths {
   capsule_cache_dir: string;
   golden_set_path: string;
   runtime_version: string;
-  commands: {
-    python: string;
-    cognis_cli: string | null;
-    cognis_mcpd: string | null;
-    cognis_indexd: string | null;
-    cognis_cli_module: string;
-    cognis_mcpd_module: string;
-    cognis_indexd_module: string;
-  };
+  /** Path of the single self-contained cognis engine binary (running exe). */
+  engine_binary: string;
 }
 
 /** JSON from `cognis-cli mcp-config --json`. */
@@ -98,18 +91,17 @@ export interface PrerequisiteItem {
   description: string;
   status: "ok" | "missing";
   required: boolean;
-  /** pip target that installs this item, e.g. ".[embed-local]". */
+  /** Generic install target for this item, or "" for the self-contained binary. */
   install_target: string;
   detail: string;
 }
 
 /** JSON from `cognis-cli doctor --json`. */
 export interface PrerequisiteReport {
-  python: string;
   /** True when every required item is installed. */
   ready: boolean;
   items: PrerequisiteItem[];
-  /** Single pip target installing all missing items, or "" when none. */
+  /** Generic install target for all missing items, or "" when none. */
   combined_install_target: string;
 }
 

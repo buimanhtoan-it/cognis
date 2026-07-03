@@ -1,0 +1,39 @@
+﻿downloaded: True size=14417054
+rustup-init.exe : warn: It looks like you have 
+an existing rustup settings file at:
+At line:1 char:1
++ & $ri --default-host x86_64-pc-windows-gnu 
+--default-toolchain stable ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (wa 
+   rn: It looks ...ttings file at::String) [],  
+   RemoteException
+    + FullyQualifiedErrorId : NativeCommandErro 
+   r
+ 
+warn: C:\Users\bjemtj\.rustup\settings.toml
+warn: Rustup will install the default toolchain 
+as specified in the settings file,
+warn: instead of the one inferred from the 
+default host triple.
+info: profile set to minimal
+info: setting default host triple to 
+x86_64-pc-windows-gnu
+info: syncing channel updates for 
+stable-x86_64-pc-windows-gnu
+info: latest update on 2026-05-28 for version 
+1.96.0 (ac68faa20 2026-05-25)
+info: downloading 4 components
+info: default toolchain set to 
+stable-x86_64-pc-windows-gnu
+
+  stable-x86_64-pc-windows-gnu installed - rustc 1.96.0 (ac68faa20 2026-05-25)
+
+
+Rust is installed now. Great!
+
+To get started you may need to restart your current shell.
+This would reload its PATH environment variable to include
+Cargo's bin directory (%USERPROFILE%\.cargo\bin).
+exit=0

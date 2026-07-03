@@ -1,0 +1,43 @@
+name: rust
+
+# Cargo CI matrix for the rust-engine-migration workspace. This is now the
+# engine's primary CI: the Python CI was retired at K8 (Task 11.2), so cargo
+# build/test/clippy/fmt is the only engine build/test path that remains.
+on:
+  push:
+    paths:
+      - "Cargo.toml"
+      - "crates/**"
+      - "bins/**"
+      - "native/**"
+      - ".github/workflows/rust.yml"
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "crates/**"
+      - "bins/**"
+      - "native/**"
+
+jobs:
+  build-test:
+    name: build · test · clippy · fmt
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Format check
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Build
+        run: cargo build --workspace
+      - name: Test
+        run: cargo test --workspace

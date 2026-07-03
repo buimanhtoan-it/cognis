@@ -1,0 +1,12 @@
+[package]
+name = "cognis-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "cognis core: models, config, contract constants, error types."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true

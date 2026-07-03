@@ -50,7 +50,10 @@ test("fetchPrerequisites returns the doctor report shape", async () => {
     assert.equal(report!.ready, true);
     assert.ok(Array.isArray(report!.items) && report!.items.length > 0);
     for (const item of report!.items) {
-      assert.ok(item.id && item.label && item.install_target);
+      assert.ok(item.id && item.label);
+      // The single self-contained binary has no per-item package to install,
+      // so install_target is a (possibly empty) string, not a pip target.
+      assert.equal(typeof item.install_target, "string");
       assert.ok(item.status === "ok" || item.status === "missing");
     }
   } finally {
@@ -58,18 +61,17 @@ test("fetchPrerequisites returns the doctor report shape", async () => {
   }
 });
 
-test("fetchPrerequisites surfaces a missing required item", async () => {
+test("fetchPrerequisites surfaces a not-ready report with a missing item", async () => {
   const repoRoot = makeFreshRepo();
   resetHarness(repoRoot, { prerequisitesReady: false });
   try {
     const report = await fetchPrerequisites(repoRoot);
     assert.ok(report);
     assert.equal(report!.ready, false);
-    const missing = report!.items.filter(
-      (i) => i.required && i.status === "missing"
-    );
-    assert.ok(missing.length > 0, "expected at least one missing required item");
-    assert.equal(report!.combined_install_target, ".[indexer]");
+    const missing = report!.items.filter((i) => i.status === "missing");
+    assert.ok(missing.length > 0, "expected at least one missing item");
+    // No package-manager target: the engine is a single self-contained binary.
+    assert.equal(report!.combined_install_target, "");
   } finally {
     cleanup(repoRoot);
   }

@@ -18,7 +18,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import test from "node:test";
 
-import { CognisGuidanceError, setupResultGuidance } from "../guidance";
+import { setupResultGuidance } from "../guidance";
 import { getState } from "../state";
 import { isWorkspaceConfigured, setupWorkspace } from "../workspace";
 
@@ -96,10 +96,10 @@ test("fresh setup starts cognis-indexd with a full rebuild", async () => {
     assert.equal(daemonSpawns.length, 1, "exactly one indexer daemon should start");
 
     const args = daemonSpawns[0].args;
-    assert.ok(args.includes("-m"), "daemon launched as a python module");
-    assert.ok(
-      args.includes("cognis_indexd.main"),
-      "daemon runs the cognis_indexd entrypoint"
+    assert.equal(
+      args[0],
+      "indexd",
+      "daemon runs the binary's indexd surface (<binary> indexd …)"
     );
     assert.ok(
       args.includes("--full-rebuild"),
@@ -188,32 +188,4 @@ test("setup on an already-healthy configured workspace does not force a rebuild"
   }
 });
 
-test("setup aborts with guidance when Python is unavailable for a fresh user", async () => {
-  // If the new user's Python environment can't run the CLI, setup must fail
-  // loudly with guidance and must NOT spawn the indexer or touch the workspace.
-  const repoRoot = makeFreshRepo();
-  resetHarness(repoRoot, { pathsExitCode: 1 });
 
-  try {
-    await assert.rejects(
-      () => setupWorkspace(silentProgress(), noCancelToken()),
-      (err: unknown) => {
-        assert.ok(err instanceof CognisGuidanceError, "should throw guidance error");
-        return true;
-      }
-    );
-
-    assert.equal(
-      getDaemonSpawns().length,
-      0,
-      "no indexer should start when Python preflight fails"
-    );
-    assert.equal(
-      isWorkspaceConfigured(repoRoot),
-      false,
-      "workspace config should not be created on preflight failure"
-    );
-  } finally {
-    cleanup(repoRoot);
-  }
-});

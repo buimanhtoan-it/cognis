@@ -4,15 +4,17 @@ This guide gets one repository indexed and ready for use from an MCP client.
 
 ## Before you start
 
-Complete the backend installation described in [install.md](install.md). At the
-end of that process, `cognis-cli` and `cognis-mcpd` should be available.
+Get the `cognis` binary as described in [install.md](install.md) — download a
+prebuilt release or run `cargo build --release`. Make sure `cognis` is on your
+`PATH` (or invoke it by full path). It is a single static binary with no Python
+runtime; the same binary serves the CLI, the MCP server, and the daemon.
 
 ## Fastest path
 
 From the repository you want to index:
 
 ```bash
-cognis-cli bootstrap .
+cognis bootstrap .
 ```
 
 This command runs:
@@ -21,16 +23,10 @@ This command runs:
 2. a full index
 3. a health check
 
-If `cognis-cli` is not on `PATH`, use the module form:
-
-```powershell
-python -m cognis.cli.main bootstrap .
-```
-
 If you want a faster first run without semantic embeddings:
 
 ```bash
-cognis-cli bootstrap . --skip-embeddings
+cognis bootstrap . --skip-embeddings
 ```
 
 ## Step 1: prepare the target repository
@@ -44,9 +40,9 @@ cd /path/to/your/repo
 If you prefer the explicit steps instead of `bootstrap`, run:
 
 ```bash
-cognis-cli init
-cognis-cli index --full .
-cognis-cli health
+cognis init
+cognis index --full .
+cognis health
 ```
 
 This creates a `.cognis/` directory containing the local configuration, index
@@ -57,7 +53,7 @@ database, cache, and audit log.
 Run:
 
 ```bash
-cognis-cli health
+cognis health
 ```
 
 You want to see:
@@ -72,14 +68,14 @@ configuration.
 
 ## Step 3: start the MCP server
 
-Start the server in the same environment where you installed `cognis`:
+Start the server in the repository you indexed:
 
 ```bash
-cognis-mcpd
+cognis mcpd
 ```
 
-This starts the MCP server on stdio. Your client configuration should launch
-this process.
+This starts the MCP server on stdio. Your client configuration should launch the
+`cognis` binary's `mcpd` surface.
 
 ## Step 4: connect a client
 
@@ -128,16 +124,16 @@ cognis: retrieve_context_capsule(
 
 ## Optional: use the VS Code / Cursor extension
 
-If you want editor integration, package the extension from the `cognis`
-repository root:
+If you want editor integration, install the extension and let it manage the
+backend binary:
 
-1. package the extension:
+1. build the extension package from `apps/cognis-vscode`:
    ```bash
-   python scripts/setup_extension.py --package
+   cd apps/cognis-vscode && npm install && npm run package
    ```
 2. install the generated `.vsix`
 3. open the target repository in the editor
-4. select the same Python interpreter used for the `cognis` install
+4. open the Cognis panel and click **Install backend**
 5. run **Cognis: Set Up Workspace**
 
 See [../apps/cognis-vscode/README.md](../apps/cognis-vscode/README.md) for the
@@ -148,7 +144,7 @@ extension workflow.
 For long editing sessions outside the extension, run the watcher:
 
 ```bash
-cognis-indexd --repo-root /path/to/your/repo
+cognis indexd --repo-root /path/to/your/repo
 ```
 
 This keeps the index up to date as files change.
@@ -157,18 +153,18 @@ This keeps the index up to date as files change.
 
 | Command | Purpose |
 | --- | --- |
-| `cognis-cli bootstrap .` | Initialize, index, and check health in one command |
-| `cognis-cli init` | Create `.cognis/` in the current repository |
-| `cognis-cli index --full .` | Run a full index |
-| `cognis-cli health` | Report configuration and runtime status |
-| `cognis-mcpd` | Start the MCP server |
-| `cognis-indexd --repo-root .` | Start live indexing |
+| `cognis bootstrap .` | Initialize, index, and check health in one command |
+| `cognis init` | Create `.cognis/` in the current repository |
+| `cognis index --full .` | Run a full index |
+| `cognis health` | Report configuration and runtime status |
+| `cognis mcpd` | Start the MCP server |
+| `cognis indexd --repo-root .` | Start live indexing |
 
 ## Troubleshooting shortcuts
 
-- On Windows, use `python -m cognis.cli.main ...` if console scripts are not on `PATH`.
+- If `cognis` is not found, confirm it is on `PATH` or use its full path.
 - If embeddings were skipped, semantic search will remain unavailable until you re-index without `--skip-embeddings`.
-- If the client cannot connect, re-check `COGNIS_DB_PATH`, the MCP command, and the selected Python interpreter.
+- If the client cannot connect, re-check `COGNIS_DB_PATH` and the MCP server command.
 
 ## Next steps
 

@@ -208,7 +208,7 @@
       </div>
       <p class="meta">
         <strong>Local-first</strong> — your code never leaves the machine · works offline ·
-        languages: <strong>TypeScript/JavaScript, Python, Go, C#, Java</strong> · runs in Cursor, Copilot, Claude and any MCP client.
+        <strong>10 languages</strong>: TypeScript/JavaScript, Python, Go, C#, Java, Rust, C, C++, Ruby, PHP · runs in Cursor, Copilot, Claude and any MCP client.
       </p>
     </div>
   </header>
@@ -283,8 +283,10 @@
       <h2>A finished pipeline, not a RAG toolkit to assemble.</h2>
       <p class="section-lede">
         Four stages run entirely on your machine: an incremental indexer, a local SQLite
-        knowledge graph (UCKG), the CSAR retriever, and a read-only MCP server. Embedders
-        and rerankers are swappable behind a registry without touching the engine.
+        knowledge graph (UCKG), the CSAR retriever, and a read-only MCP server. It ships as
+        a <strong>single self-contained binary</strong> — pure Rust, SQLite bundled, no
+        Python and no pip. Embedders and rerankers are swappable behind a registry without
+        touching the engine.
       </p>
       <figure>
         <img src="assets/architecture.svg" alt="Cognis architecture: index, store in local SQLite UCKG, retrieve with CSAR, serve over MCP to the agent." loading="lazy" />
@@ -353,7 +355,7 @@
           <tr><td>Retrieval quality</td><td class="score">8 / 10</td><td>recovers on-path flow; reuses cheap seed signals</td></tr>
           <tr><td>Mathematical rigor</td><td class="score">9 / 10</td><td>5 PPR theorems, verified in code &amp; property tests</td></tr>
           <tr><td>Security posture</td><td class="score">8 / 10</td><td>secret scrubbing, read-only tools, hard caps, hashed audit log</td></tr>
-          <tr><td>Scope / maturity</td><td class="score">7 / 10</td><td>5 languages (TS/JS, Python, Go, C#, Java); local-first</td></tr>
+          <tr><td>Scope / maturity</td><td class="score">8 / 10</td><td>10 languages (TS/JS, Python, Go, C#, Java, Rust, C, C++, Ruby, PHP); pure-Rust single binary; local-first</td></tr>
         </tbody>
       </table>
     </div>
@@ -413,7 +415,7 @@
         buyUrl: "https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW",
         price: "$9.90",
         supportEmail: "buimanhtoan.it@gmail.com",
-        fallbackVersion: "0.7.2"
+        fallbackVersion: "0.8.0"
       };
 
       function setText(selector, value) {

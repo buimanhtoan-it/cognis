@@ -37,8 +37,6 @@ export interface PanelContext {
   mcpEnabled?: boolean;
   indexStatus?: IndexStatusReport;
   indexingMessage?: string;
-  /** When health cannot be fetched but workspace was previously set up. */
-  setupHint?: "python";
   /** Installable-prerequisite checklist (from `cognis-cli doctor`). */
   prerequisites?: PrerequisiteReport;
   /** True once the workspace has a `.cognis/config.yaml` (setup has run). */
@@ -60,7 +58,7 @@ export interface PanelContext {
   /** Last error message from the panel-managed MCP server, if any. */
   mcpServerError?: string;
   /**
-   * Whether the Python backend (cognis CLI) could actually run. Undefined until
+   * Whether the engine binary (cognis CLI) could actually run. Undefined until
    * probed. False means the backend isn't installed/reachable yet — on a fresh
    * machine this is the first thing to fix, before any setup can succeed.
    */
@@ -292,15 +290,6 @@ export function derivePanelView(ctx: PanelContext): PanelView {
   }
 
   if (!health || status === "notInstalled") {
-    if (ctx.setupHint === "python") {
-      return {
-        headline: "Reconnect the Cognis backend",
-        detail:
-          "Cognis is installed but couldn't start. This usually fixes itself — reinstall the backend in one click, or run Troubleshoot.",
-        statusClass: "status-warn",
-        primary: { id: "installBackend", label: "Reinstall backend" },
-      };
-    }
     // A workspace that has already been set up must not regress to the
     // first-run "Set Up for AI"/"Install backend" actions just because health
     // is momentarily unavailable (e.g. the poll landed while indexd was still
@@ -315,15 +304,15 @@ export function derivePanelView(ctx: PanelContext): PanelView {
         primary: { id: "output", label: "View Output" },
       };
     }
-    // Fresh machine: the Python backend isn't installed yet, so `doctor` can't
-    // even produce a checklist. Offer a one-click install instead of asking the
-    // user to run pip and pick a Python environment by hand.
+    // Fresh machine: the engine binary isn't installed yet, so `doctor` can't
+    // even produce a checklist. Offer a one-click install instead of any manual
+    // setup.
     if (ctx.backendAvailable === false && !ctx.prerequisites) {
       return {
         headline: "Install the Cognis backend",
         detail:
-          "This extension is the control panel; the search engine is a small Python package. " +
-          "Click Install backend and Cognis sets it up for you — no terminal, no setup.",
+          "This extension is the control panel; the search engine is a small, self-contained binary. " +
+          "Click Install backend and Cognis downloads it for you — no terminal, no setup.",
         statusClass: "status-warn",
         primary: { id: "installBackend", label: "Install backend" },
       };
@@ -458,12 +447,11 @@ export interface SetupStep {
 export function deriveSetupSteps(ctx: PanelContext): SetupStep[] {
   const { health, prerequisites, mcpEnabled, liveIndexing, status } = ctx;
   const configured = ctx.configured ?? false;
-  const pythonBroken = ctx.setupHint === "python";
   const healthOk = health?.overall === "ok";
 
-  // ① Backend (Python) usable.
+  // ① Engine binary usable.
   let backend: SetupStepState;
-  if (pythonBroken || ctx.backendAvailable === false) {
+  if (ctx.backendAvailable === false) {
     backend = "error";
   } else if (prerequisites || health || configured) {
     backend = "done";

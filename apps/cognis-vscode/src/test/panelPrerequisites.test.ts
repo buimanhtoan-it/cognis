@@ -10,27 +10,26 @@ import type { PrerequisiteReport } from "../types";
 
 function makeReport(overrides: Partial<PrerequisiteReport> = {}): PrerequisiteReport {
   return {
-    python: "python",
     ready: true,
     combined_install_target: "",
     items: [
       {
-        id: "indexer",
-        label: "Code parsers (tree-sitter)",
-        description: "Parses code.",
+        id: "engine",
+        label: "Cognis engine",
+        description: "The single self-contained cognis binary.",
         status: "ok",
         required: true,
-        install_target: ".[indexer]",
-        detail: "Installed.",
+        install_target: "",
+        detail: "cognis (rust)",
       },
       {
-        id: "mcp",
-        label: "MCP server (fastmcp)",
-        description: "Serves tools.",
+        id: "semantic_index",
+        label: "Semantic index",
+        description: "Symbol embeddings for semantic search.",
         status: "ok",
-        required: true,
-        install_target: ".[mcp]",
-        detail: "Installed.",
+        required: false,
+        install_target: "",
+        detail: "vectors present",
       },
     ],
     ...overrides,

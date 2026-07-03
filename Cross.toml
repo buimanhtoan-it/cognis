@@ -1,0 +1,13 @@
+# `cross` configuration for the Linux cross-compile targets in the release
+# matrix (Task 10.1). The default `cross` images already ship a C toolchain, so
+# `rusqlite`'s `bundled` feature (which compiles SQLite + FTS5 from C source into
+# the binary — no system SQLite, Requirement 8.2) builds inside the container
+# with no extra setup. Pin the image so cross builds are reproducible.
+[target.aarch64-unknown-linux-gnu]
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:0.2.5"
+
+[build.env]
+# Keep the build offline-friendly: no ONNX Runtime is downloaded at build time
+# (the default binary uses the BLOB/linear-scan vec fallback and fetches the
+# ONNX model asset on first run). Pass features explicitly to opt into more.
+passthrough = ["CARGO_NET_OFFLINE"]

@@ -34,26 +34,25 @@ const healthDegraded: HealthReport = {
 };
 
 const prereqsMissing: PrerequisiteReport = {
-  python: "python",
   ready: false,
-  combined_install_target: ".[indexer,mcp]",
+  combined_install_target: "",
   items: [
     {
-      id: "indexer",
-      label: "Code parsers (tree-sitter)",
-      description: "Parses your code so the workspace can be indexed.",
+      id: "engine",
+      label: "Cognis engine",
+      description: "The single self-contained cognis binary.",
       status: "missing",
       required: true,
-      install_target: ".[indexer]",
+      install_target: "",
       detail: "Not installed.",
     },
     {
-      id: "embed-local",
-      label: "Local embeddings",
-      description: "Optional on-device embedding model.",
+      id: "semantic_index",
+      label: "Semantic index",
+      description: "Symbol embeddings for semantic search.",
       status: "missing",
       required: false,
-      install_target: ".[embed-local]",
+      install_target: "",
       detail: "Not installed.",
     },
   ],

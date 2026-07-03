@@ -4,7 +4,7 @@
  * `@vscode/test-electron` launches a real VS Code, loads this module as the
  * extension test runner, and awaits `run()`. Unlike the node:test suites under
  * `src/test/` (which stub the `vscode` API and `child_process.spawn`), these
- * tests use the *real* VS Code API against a real Python backend — the only
+ * tests use the *real* VS Code API against a real Rust engine binary — the only
  * layer that exercises `extension.ts` end to end through the editor host.
  */
 import * as fs from "node:fs";

@@ -1,0 +1,32 @@
+[package]
+name = "cognis-indexd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "cognis indexing daemon: file-watch + incremental indexing."
+
+[lib]
+name = "cognis_indexd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cognis-indexd"
+path = "src/main.rs"
+
+[dependencies]
+cognis-core.workspace = true
+cognis-indexer.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+notify.workspace = true
+ctrlc.workspace = true
+
+[dev-dependencies]
+cognis-store.workspace = true
+
+[features]
+# Forward the ONNX embedder backend so the release daemon indexes with real
+# embeddings. Off by default (offline workspace build/test).
+onnx = ["cognis-indexer/onnx"]
+onnx-download = ["cognis-indexer/onnx-download"]

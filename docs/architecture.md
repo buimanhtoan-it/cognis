@@ -11,18 +11,41 @@ source files to MCP tool responses.
 2. retrieve relevant code context from that store
 3. expose the retrieval layer through MCP tools
 
-The current implementation is local-first. It uses a single SQLite database and
-does not require external services for the default workflow.
+The current implementation is local-first and **pure Rust**: the engine is a
+Cargo workspace that ships as a single static binary with SQLite bundled in. It
+uses a single SQLite database and does not require external services — or a
+Python/PyTorch runtime — for the default workflow.
+
+## Workspace layout (crates → responsibilities)
+
+The engine is a Cargo workspace. Each crate owns one concern:
+
+| Crate | Responsibility |
+| --- | --- |
+| `cognis-core` | models (`Symbol`, `Edge`), config, contract constants, error types |
+| `cognis-store` | `rusqlite` (bundled SQLite), migrations, FTS5, `sqlite-vec`, CSR graph builder |
+| `cognis-embed` | `Embedder` / `Reranker` traits + factory + native ONNX backend |
+| `cognis-indexer` | tree-sitter parse → resolve → enrich/scrub → embed → write |
+| `cognis-retrieval` | `Hit`, retrieval layers, RRF fusion, capsule composer |
+| `cognis-csar` | CSAR kernel (PPR solvers) + resident CSR graph |
+| `cognis-mcp` | the 8 MCP tools, JSON-RPC framing, contract enforcement |
+| `cognis-eval` | golden-set + benchmark + CSAR theorem property tests |
+
+The three runtime surfaces live under `bins/` (`cognis-cli`, `cognis-indexd`,
+`cognis-mcpd`) and are also reachable through the single multi-call `cognis`
+binary (`bins/cognis`). `xtask` automates the per-platform distribution build.
 
 ## Runtime components
 
-Three processes share one SQLite database at `.cognis/uckg.db`:
+The three surfaces share one SQLite database at `.cognis/uckg.db`. They are the
+same static binary dispatched busybox-style (`cognis cli …` / `cognis mcpd` /
+`cognis indexd`, or installed as the `cognis-*` names):
 
-| Component | Responsibility |
+| Surface | Responsibility |
 | --- | --- |
-| `cognis-cli` | One-off commands such as `init`, `index`, `bootstrap`, `health`, and `eval` |
-| `cognis-indexd` | Long-running watcher and incremental indexing daemon |
-| `cognis-mcpd` | MCP server that serves retrieval and capsule-building requests |
+| `cognis cli` | One-off commands such as `init`, `index`, `bootstrap`, `health`, and `eval` |
+| `cognis indexd` | Long-running watcher and incremental indexing daemon |
+| `cognis mcpd` | MCP server that serves retrieval and capsule-building requests |
 
 The database runs in WAL mode so readers and writers can coexist during normal
 operation.
@@ -74,27 +97,31 @@ The indexer pipeline is responsible for turning raw files into structured data:
 
 The local database acts as the Unified Code Knowledge Graph (UCKG). It combines:
 
-- SQLite tables for core entities and edges
+- SQLite tables for core entities and edges (SQLite is compiled into the binary
+  via `rusqlite`'s bundled build — no system SQLite required)
 - FTS5 for lexical search
-- `sqlite-vec` for vector similarity search when available
+- `sqlite-vec` for vector similarity search when available, with an in-Rust
+  BLOB + linear-scan fallback when the extension cannot load
 
 The storage layer is designed so the rest of the system can keep the same data
-model even if the backend changes later.
+model even if the backend changes later. The UCKG schema is unchanged from the
+prior engine, so an existing `.cognis/uckg.db` keeps working without a breaking
+re-index.
 
 ## Retrieval model
 
 cognis ranks retrieval results with **Reciprocal Rank Fusion (RRF)** of the
-lexical and semantic layers (`packages/retrieval/cognis_retrieval/fusion.py`).
+lexical and semantic layers (`crates/cognis-retrieval/src/fusion.rs`).
 Each layer scores on its own scale (BM25 magnitudes vs. cosine similarities), so
 fusing on *ranks* rather than raw scores is scale-invariant and avoids letting
 whichever layer emits larger numbers dominate. RRF is the primary ranker in both
-production retrieval paths — the eval/live strategy (`cognis_eval/strategy.py`)
-and the MCP capsule composer (`cognis/capsule/composer.py`). It is the strongest
+production retrieval paths — the eval/live strategy and the MCP capsule composer
+(`crates/cognis-retrieval/src/capsule.rs`). It is the strongest
 ranker on the reproducible **objective** (PR-derived, bug-fix) benchmark across
 Python and Java; see [.benchmarks/public/RESULTS.md](../.benchmarks/public/RESULTS.md).
 
 On top of RRF, **CSAR — Code Spreading-Activation Retrieval**
-(`packages/retrieval/cognis_retrieval/csar.py`) supplies a structural
+(`crates/cognis-csar/src/`) supplies a structural
 **on-path context** signal: it diffuses a seed relevance distribution across the
 code knowledge graph using Personalized PageRank (random walk with restart) to
 recover symbols that sit on the call/flow path *between* matches but match no
@@ -184,46 +211,47 @@ swapped without changing the overall workflow:
 
 - vector backend
 - graph traversal backend
-- indexer implementation language
+- embedding / reranking model (behind a Rust trait)
 - MCP transport
 - planner strategy
 
-### Pluggable models (embedder / reranker registry)
+### Pluggable models (embedder / reranker traits)
 
-Embedding and reranking models sit behind narrow protocols and a registry, so
+Embedding and reranking models sit behind narrow Rust traits and one factory, so
 swapping one is a local change — the retrieval and capsule flow never sees it.
 
-- **Embedder protocol** — `embed_batch`, `embed_text`, and an `embedding_dim`
-  attribute (`packages/indexer/.../embedder.py`). The semantic layer only needs
-  the narrower `QueryEmbedder` surface (`embed_text` + `embedding_dim`) declared
-  in `packages/retrieval/.../base.py`, which keeps retrieval free of any
-  dependency on the indexer.
-- **Registry / factory** — `cognis_indexer.registry.build_embedder(config)` is
-  the single selection point used by the daemon, MCP server, CLI, and eval. Add
-  a backend with one factory:
+- **Embedder trait** — `embed_text`, `embed_batch`, and `embedding_dim`
+  (`crates/cognis-embed/src/`). The semantic retrieval layer depends only on this
+  trait, never on a concrete model.
+- **Factory** — `build_embedder(config)` is the single selection point used by
+  the daemon, MCP server, CLI, and eval. Add a backend by implementing
+  `Embedder` and adding a match arm in the factory:
 
-  ```python
-  @register_embedder("my_backend")
-  def _build(config: EmbedderConfig) -> Embedder:
-      from cognis_indexer.embedder import MyEmbedder
-      return MyEmbedder(model=config.model)
+  ```rust
+  pub fn build_embedder(cfg: &Config) -> Result<Box<dyn Embedder>> {
+      match cfg.embedder.backend.as_str() {
+          "onnx-local" => Ok(Box::new(OnnxEmbedder::load(cfg)?)),
+          "stub" => Ok(Box::new(StubEmbedder::new(cfg.embedder.dim))),
+          other => Err(CognisError::config(format!("unknown embedder: {other}"))),
+      }
+  }
   ```
 
-  Built-in backends: `local` (production), `voyage` and `openai` (selectable
-  stubs returning zero vectors until their API call is implemented).
+  Built-in backends: `onnx-local` (production, `bge-small-en-v1.5` via the `ort`
+  ONNX Runtime crate — no Python) and `stub` (zero vectors, fully offline).
 - **Model-driven dimension** — an embedder reports its own `embedding_dim`;
-  `Database.reconcile_embedding_dim` persists it and recreates the `symbol_vec`
-  table when a different-sized model is plugged in. No pinned constant.
-- **Reranker seam** — `cognis_retrieval.reranker.build_reranker(config)` returns
-  a pass-through `NoOpReranker` when `reranker.enabled` is false (flow
-  unchanged), or a registered backend otherwise. Register one with
-  `@register_reranker(...)`. The bundled `local` cross-encoder backend is a stub
-  today.
+  `SymbolWriter::reconcile_embedding_dim` persists it and recreates the
+  `symbol_vec` table when a different-sized model is plugged in. No pinned
+  constant.
+- **Reranker seam** — the factory returns a pass-through `NoOpReranker` when
+  `reranker.enabled` is false (flow byte-for-byte unchanged), or a registered
+  backend otherwise. The bundled cross-encoder backend is a stub today.
 
 ## Related documents
 
 - [csar.md](csar.md) for the CSAR retrieval method, mathematics, and proofs
 - [install.md](install.md) for installation and environment setup
+- [distribution.md](distribution.md) for the single-binary build and packaging
 - [quickstart.md](quickstart.md) for the first local run
 - [mcp-client-config.md](mcp-client-config.md) for client configuration
 - [security.md](security.md) for the security model

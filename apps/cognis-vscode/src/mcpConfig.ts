@@ -11,7 +11,9 @@ import {
   type McpConfigScope,
 } from "./mcpConfigPaths";
 import { deriveMcpServerName, isCognisMcpServerName } from "./mcpServerName";
-import { buildHttpMcpServerBlock, isHttpServerBlock } from "./mcpServer";
+import { buildHttpMcpServerBlock, isHttpServerBlock, rewriteServerBlockToBinary } from "./mcpServer";
+import { isManagedBinaryActive, managedBinaryPath } from "./binary";
+import { modelEnv } from "./model";
 import type { McpConfigPayload, McpServerBlock } from "./types";
 
 export type { McpConfigScope } from "./mcpConfigPaths";
@@ -140,6 +142,9 @@ function applyWorkspaceEnvOverrides(
   const mergedEnv = {
     ...server.env,
     ...resolveMcpEnvOverrides(),
+    // Point the editor-spawned server at the managed semantic model (if
+    // installed) so `diffuse_context` / `discover_symbols` get real embeddings.
+    ...modelEnv(),
   };
   return {
     ...payload,
@@ -152,6 +157,41 @@ function applyWorkspaceEnvOverrides(
           ...server,
           env: mergedEnv,
         },
+      },
+    },
+  };
+}
+
+/**
+ * Point a generated mcp.json payload at the managed single ``cognis`` binary
+ * when it is the active backend: rewrite the stdio server block's
+ * ``command``/``args`` to ``<binary> mcpd`` (Requirement 1.1 — the editor
+ * launches the binary directly, no Python entry point), preserving the env and
+ * server name. A no-op when the binary backend is not active, or for an HTTP
+ * (url) block. The CLI round-trip still computes the env (COGNIS_DB_PATH,
+ * timeouts) — only the launch command is normalized to the binary.
+ */
+export function applyBinaryBackend(payload: McpConfigPayload): McpConfigPayload {
+  if (!isManagedBinaryActive()) {
+    return payload;
+  }
+  const binaryPath = managedBinaryPath();
+  if (!binaryPath) {
+    return payload;
+  }
+  const serverName = payload.server_name;
+  const block = payload.config.mcpServers[serverName];
+  if (!block || isHttpServerBlock(block)) {
+    return payload;
+  }
+  const rewritten = rewriteServerBlockToBinary(block, binaryPath);
+  return {
+    ...payload,
+    config: {
+      ...payload.config,
+      mcpServers: {
+        ...payload.config.mcpServers,
+        [serverName]: rewritten,
       },
     },
   };
@@ -225,14 +265,6 @@ export async function fetchMcpConfig(
 ): Promise<McpConfigPayload> {
   const resolvedHost = host ?? resolveMcpHost();
   const serverName = deriveMcpServerName(repoRoot);
-  const pythonFlag: string[] = [];
-  const pythonPath = vscode.workspace
-    .getConfiguration("cognis")
-    .get<string>("pythonPath", "")
-    .trim();
-  if (pythonPath) {
-    pythonFlag.push("--python", pythonPath);
-  }
   const payload = await runCliJson<McpConfigPayload>(repoRoot, [
     "mcp-config",
     "--host",
@@ -240,9 +272,8 @@ export async function fetchMcpConfig(
     "--server-name",
     serverName,
     "--minimal-env",
-    ...pythonFlag,
   ]);
-  return applyWorkspaceEnvOverrides(repoRoot, payload);
+  return applyBinaryBackend(applyWorkspaceEnvOverrides(repoRoot, payload));
 }
 
 export function isCognisMcpConfiguredForRepo(repoRoot: string): boolean {

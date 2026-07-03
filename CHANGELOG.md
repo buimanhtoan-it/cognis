@@ -6,6 +6,232 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- **All Python-backend/runtime remnants — the engine is now pure Rust, end to
+  end.** The extension no longer has any Python runtime path: deleted
+  `apps/cognis-vscode/src/backend.ts` (pip/venv managed-install) and
+  `python.ts` (interpreter resolution + preflight), and removed the
+  `cognis.pythonPath` and `cognis.backendPackageSpec` settings. `Install
+  backend` always downloads the prebuilt `cognis` binary from the GitHub
+  Release (checksum-verified) — no `pip install`, no PyPI, no interpreter
+  discovery. The `cli`/`mcpd`/`indexd` surfaces are always dispatched from the
+  managed binary (`resolveCliInvocation`/`resolveMcpdInvocation`/
+  `resolveIndexdInvocation`), keeping the `COGNIS_BINARY_PATH` /
+  `cognis.binaryPath` override. The cross-language contract dropped the Python
+  module ids: `cognis-cli paths` now emits a single `engine_binary` string
+  (was the `commands.{python,cognis_*,*_module}` object) and `doctor` no longer
+  carries a `python` field; `types.ts`, the `tests/e2e/contracts/*` fixtures,
+  and the parity tests were updated in lockstep. Setup/reconcile dropped the
+  "Checking Python environment" preflight (health/doctor cover it), and the
+  docs/business runbooks now describe "download the Rust binary + model from
+  GitHub Releases" instead of publishing to PyPI. **Python as an *indexed
+  language* is untouched** — tree-sitter-python parsing, `.py` fixtures, and the
+  benchmark repos all remain.
+
+### Changed
+
+- **Edge resolver: defused a catastrophic edge explosion.** The heuristic
+  `calls` resolver scanned **every identifier** in each symbol body and linked
+  it to **every** same-named symbol repo-wide, plus a fuzzy-prefix phase
+  (`get` → every `get*`), and treated class bodies as callers. On real code this
+  exploded: indexing jsoup produced **739,940 edges for 4,469 symbols** (~165/
+  symbol) and made `diffuse_context` take ~16.6s. Rewrote it to resolve only at
+  real **call sites** (`name(`), only from **callable** sources (not class
+  bodies), dropped the fuzzy phase, dropped cross-language matches, and **capped
+  cross-module fan-out** for common names (`get`/`toString` no longer fan out
+  across the repo). Result on jsoup: **45,910 edges (~10/symbol, a 16× drop)**,
+  index time 174s → 50s, and `diffuse_context` back to interactive latency.
+  Same-file resolution is unchanged. (`crates/cognis-indexer/src/resolver.rs`,
+  +4 tests: call-site precision, class-body exclusion, fan-out cap, cross-module.)
+
+### Added
+
+- **Semantic model auto-provisioning (Option B): the extension downloads the
+  bge-small model on first use.** Semantic search needs the model weights
+  (`model.onnx`/`tokenizer.json`/`pooling.json`, ~100 MB), which aren't bundled
+  in the binary. New `apps/cognis-vscode/src/model.ts` fetches them from the
+  GitHub Release after the engine binary installs, **checksum-verifies each file**
+  against its `.sha256` sidecar, stages them under global storage, and points the
+  engine at them via `COGNIS_ONNX_MODEL_DIR` — wired into the `mcp.json` server
+  env (editor-spawned `mcpd`), the `indexd` daemon, the HTTP MCP server, and
+  `cli` spawns. Until the model is present, semantic degrades to empty (lexical +
+  structural + diffusion still work). New `cognis.modelDownloadBaseUrl` setting;
+  the model is removed by "Remove everything". +6 unit tests (manifest, env
+  gating, download+verify, checksum rejection, uninstall). **Release note:** the
+  release must publish the 6 model assets (`bge-small-en-v1.5-<file>` + `.sha256`)
+  or semantic stays off — see `business/release-cheatsheet.md`.
+- **Language support expanded to Rust, C, C++, Ruby, and PHP** (on top of
+  TypeScript/JavaScript, Python, Go, C#, Java) via a new **table-driven generic
+  tree-sitter extractor** (`crates/cognis-indexer/src/parser/generic.rs`): a
+  language is described by a small `node_kind -> SymbolKind` spec plus a
+  comment prefix, and the walker extracts functions/methods/classes/etc. with
+  qualified-name nesting (`Class.method`, C/C++ names resolved through the
+  declarator chain). Wired `language_for_path`, the walker's extension table,
+  and the default `languages.enabled` config. Verified by per-language
+  extraction tests and by indexing real Rust (`cognis-core`) end to end —
+  `symbol_search` returns real Rust symbols over MCP. Grammars:
+  tree-sitter-rust 0.24, -c 0.24, -cpp 0.23, -ruby 0.23, -php 0.24 (ABI-
+  compatible with tree-sitter 0.26).
+
+### Fixed
+
+- `cognis-cli` `index`/`bootstrap`/`health` tests are now isolated from an
+  ambient `COGNIS_DB_PATH` (they exercise default-path resolution), so a set
+  env var no longer causes false failures.
+- **The extension ↔ CLI JSON contract is now complete and honest — the setup
+  flow works against the Rust binary (Requirement 3).** The handshake advertised
+  `paths`, `doctor`, and `mcp-config` but the Rust CLI never implemented them,
+  and `health` / `bootstrap` emitted the wrong JSON shape, so the extension's
+  prerequisite check, `verifyPythonEnvironment`, and "Set Up Workspace" flow
+  broke against the pure-Rust backend. Aligned the whole surface:
+  - Added `cognis-cli paths` (`WorkspacePaths`), `doctor` (`PrerequisiteReport`),
+    and `mcp-config` (`McpConfigPayload`, server block launching `<binary> mcpd`
+    with `COGNIS_DB_PATH`) — matching `tests/e2e/contracts/*.json` and `types.ts`.
+  - `health --json` now serializes `checks` as a JSON **object** keyed by check
+    name (was an array of pairs), matching the contract.
+  - `bootstrap --json` now emits the full `BootstrapPayload`
+    (command/runtime_version/repo_root/index_path/db_path/skip_embeddings/paths/
+    phases/health/overall/exit_code) instead of an ad-hoc `{init,index,health}`.
+  - `cognis-cli index` / `bootstrap` now run the **real** `cognis-indexer`
+    pipeline (was a "pending — Task 8" stub), so bootstrap produces a queryable
+    UCKG and health reports actual symbol counts. `--skip-embeddings` indexes
+    with no embedder (no model, and no vectors written).
+- **Full-stack host e2e now drives the real Rust binary.** The harness
+  (`runHostTests.ts`) builds `cognis` and points the extension at it via the new
+  `COGNIS_BINARY_PATH` / `cognis.binaryPath` override (`binary.ts`); the
+  full-stack test (`fullStack.hosttest.ts`) drops the deleted-`COGNIS_TEST_PYTHON`
+  gate and exercises `setupWorkspace` → `.cognis` + `mcp.json` end to end against
+  the engine binary. This closes the last "unverified editor↔backend path" gap.
+
+- **Semantic search over MCP now actually returns hits — the end-to-end
+  embedding pipeline was never wired (Requirements 4.2, 7.1, 7.2).** Tasks 5/6/8
+  had landed the pieces in isolation (an ONNX bge-small embedder with a parity
+  test, `SymbolStore::vec_search` with a parity test) but nothing connected
+  index-time embedding → vector persistence → query-time semantic search, so the
+  shipping engine served **lexical-only**: `StoreEngine::semantic_search` was a
+  hardcoded `Ok(vec![])`, `semantic_available()` was hardcoded `false`,
+  `cognis-mcp` had no `cognis-embed` dependency, the indexer's embedder field was
+  `#[allow(dead_code)]` (no vectors were ever written), the store had no public
+  embedding-write method, and `build_embedder` rejected the default config
+  backend `"local"`. Wired the whole seam:
+  - `cognis-embed`: `"local"` is now an alias for the native ONNX backend, so a
+    default `.cognis/config.yaml` selects a real embedder (graceful degrade with
+    a rebuild hint when the `onnx` feature is off).
+  - `cognis-store`: added `SymbolWriter::upsert_embeddings` (LE-BLOB / `vec0`
+    upsert, orphan-safe) + `Database::vec_row_count`.
+  - `cognis-indexer`: the pipeline now embeds each symbol (qualified name +
+    signature + docstring + body) and persists vectors per file; best-effort so
+    an embedder failure degrades to lexical/structural without failing indexing.
+  - `cognis-mcp`: `StoreEngine` builds the configured embedder from the DB's
+    `.cognis/config.yaml`, embeds the query, and runs `vec_search`;
+    `semantic_available` is true only when an embedder is present **and**
+    `symbol_vec` is populated. New tests prove non-empty semantic hits end to end
+    (the contract tests only asserted output *shape*, which is why this slipped).
+  - Release build: `cognis`/`cognis-mcpd`/`cognis-mcp`/`cognis-indexd`/
+    `cognis-indexer` gained `onnx` / `onnx-download` feature forwarding; the
+    release matrix builds `--features onnx-download` so the shipped binary has
+    the embedder compiled in. Model assets (bge-small) are resolved from
+    `COGNIS_ONNX_MODEL_DIR` or `assets/models/<leaf>` next to the executable.
+    *Wiring: verified offline (unit/integration, injected deterministic
+    embedder). ONNX parity: proven previously (`onnx_parity`). Release-matrix
+    ONNX build + model provisioning: needs a tagged CI run to confirm.*
+- **`cognis-mcpd --transport http` now binds and serves — the HTTP transport was
+  a no-op (Requirement 3).** `run()` ignored argv and always ran stdio, so the
+  panel-managed "Start MCP server" flow timed out waiting for a bind. Added
+  argv parsing (`--transport`/`--host`/`--port`) and a dependency-free HTTP/1.1
+  JSON-RPC endpoint (`cognis_mcp::http`) that reuses the stdio dispatch, so the
+  wire contract is identical by construction. A live over-the-socket e2e
+  (`bins/cognis-mcpd/tests/http_e2e.rs`) drives initialize / tools/list /
+  tools/call and asserts a declined `GET` doesn't crash the loop. The audit log
+  now honours `COGNIS_AUDIT_LOG`.
+
+### Removed
+
+- **Python is gone — the engine is now pure Rust (rust-engine-migration Task 11
+  / K8, Requirements 1.1, 1.2).** Deleted the five Python packages
+  (`packages/core`, `packages/retrieval`, `packages/indexer`, `packages/adapters`,
+  `packages/eval`), the three Python console apps (`cognis-cli`, `cognis-mcpd`,
+  `cognis-indexd`), `pyproject.toml`, and the `pytest`/`mypy`/`ruff` tool config;
+  CI Python jobs were retired so only the Cargo matrix remains. The shipped
+  product builds with no Python runtime, no `pip`, and no virtualenv. The only
+  non-Rust component is the VS Code / Cursor extension (`apps/cognis-vscode`,
+  TypeScript), which is out of scope and unchanged. This was the **final** step
+  of the strangler-fig migration: it landed only after every parity gate was
+  green (Property 1–5 — CSAR theorems T1–T5, kernel/RRF/FTS/vec parity, MCP
+  contract invariance, quality non-regression). *Migration parity:
+  empirically-supported (differential harness on identical UCKG DBs); CSAR
+  theorems: proven (machine-verified algebra, reproduced in `proptest`).*
+- **Full Python purge — every remaining Python artifact and reference removed.**
+  Following K8, deleted the checked-in Python virtualenv (`.venv-bootstrap/`),
+  all developer/oracle Python scripts under `scripts/` (`build_*_golden.py`,
+  `build_rust_store_fixture.py`, `export_bge_onnx.py`, `bump_version.py`,
+  `run_eval.py`, `build_installer.py`, …), the entire top-level Python `tests/`
+  suite (unit/pbt/integration/e2e/benchmark/coverage Python), and the Python
+  benchmark harnesses under `.benchmarks/`. Preserved the data the Rust tests
+  consume: `tests/e2e/baselines/` (Rust `index_parity`), `tests/e2e/contracts/`
+  (extension `contractParity`), the per-crate `crates/*/tests/fixtures/` parity
+  goldens + `python_uckg.db`, and the `.benchmarks` data (`*.db`/`*.json`/
+  `*.npy`). Scrubbed Python from active docs and dev guides (`CONTRIBUTING.md`,
+  `business/release-cheatsheet.md`, `docs/eval/phase1-baseline.md`,
+  `docs/troubleshooting-huggingface.md`, `docs/native-core-rust.md`,
+  `docs/distribution.md`) and from source/test comments (parity-test provenance
+  no longer points at deleted `scripts/*.py`; the extension's prerequisite
+  install no longer shells out to `pip`). The repo now contains no `*.py` outside
+  third-party `node_modules`/`.vscode-test`. *Verified: `cargo build/test/clippy/
+  fmt` green.* Historical per-version release notes and the migration spec are
+  left intact as a factual record of the Python era.
+
+### Changed
+
+- **User-facing docs are now pure-Rust (rust-engine-migration Task 11.3,
+  Requirements 1.1, 1.2).** `README.md`, `docs/architecture.md`,
+  `docs/install.md`, `docs/getting-started.md`, `docs/quickstart.md`, and
+  `docs/mcp-client-config.md` describe the single static `cognis` binary instead
+  of `pip install`: download a prebuilt per-platform artifact (or
+  `cargo build --release`), then run the multi-call binary (`cognis cli …`,
+  `cognis mcpd`, `cognis indexd`). `docs/architecture.md` now documents the
+  all-Rust Cargo-workspace crate map (`cognis-core/store/embed/indexer/retrieval/
+  csar/mcp/eval` + `bins/*` + `xtask`), the bundled-SQLite store, the `Embedder`/
+  `Reranker` traits with the `build_embedder` factory (replacing the Python
+  registry), and cross-references `docs/distribution.md` for the build/fetch
+  flow. The embedder backend in user docs is now `onnx-local` (native ONNX via
+  `ort`) / `stub`, not the Python `local`/`voyage`/`openai` registry.
+
+### Added
+
+- **Single-binary distribution scaffolding (rust-engine-migration Task 10.1 /
+  G2, Requirements 8.1–8.2).** A per-platform release matrix builds the static
+  multi-call `cognis` binary with SQLite bundled (`rusqlite` `bundled`, no system
+  SQLite or Python at runtime). New `xtask` crate (`cargo xtask dist`) builds
+  `--release -p cognis`, stages `dist/cognis-<triple>[.exe]`, and emits a
+  `.sha256` sidecar. `.github/workflows/release.yml` gains a `dist-binaries`
+  matrix (Linux amd64/arm64, macOS arm64/amd64, Windows amd64) — native runners
+  plus `cross` for Linux aarch64 (`Cross.toml`) — and attaches the binaries to
+  the GitHub Release. `[profile.release]` now strips symbols. The default binary
+  uses the in-Rust BLOB vec fallback and fetches the ONNX model asset on first
+  run, staying self-contained and offline; `--features onnx-download` links ONNX
+  Runtime statically. Static-linking approach and verified-vs-configured target
+  status: `docs/distribution.md`. *Host target built + staged
+  (empirically-supported, n=1); the other four targets are CI-configured,
+  cross-target success conjectured until the matrix runs.*
+
+### Decided
+
+- **Embedding runtime: `ort` (ONNX Runtime) over `candle`** for the native
+  `cognis-embed` backend (rust-engine-migration Open Question 1 / Task 6.3). The
+  decision turns on **parity fidelity** — `ort` runs the exact exported ONNX
+  graph, so reproducing the `sentence-transformers` vectors (cosine ≈ 1.0) is a
+  property of the export, not of a second re-implementation — over `candle`'s
+  cleaner pure-Rust static link, which `ort` matches via the `onnx-download`
+  feature (bundled runtime, self-contained binary). `candle` stays the documented
+  fallback with explicit re-evaluation triggers. The speed axis is **conjectured**
+  (the model assets cannot be downloaded offline, so no real numbers were
+  produced — none are fabricated); the runnable harness to settle it ships as
+  `crates/cognis-embed/benches/embed_latency.rs` (gated behind `--features onnx`,
+  graceful-skips without assets). Full rationale and evidence tiers:
+  `docs/decisions/ADR-0001-embedding-runtime.md`.
+
 ## [0.7.3] — 2026-06-15
 
 Two new languages: C# and Java are now first-class. The retrieval core is

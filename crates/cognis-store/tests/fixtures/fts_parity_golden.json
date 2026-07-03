@@ -1,0 +1,90 @@
+{
+  "_comment": "Python FTS5 hit-set oracle for cognis-store SymbolStore::fts_search (spec rust-engine-migration task 3.2, Requirement 4.2 / P-PAR-FTS). Frozen oracle output captured from the Python engine; checked in, not regenerated.",
+  "db": "python_uckg.db",
+  "k": 10,
+  "cases": [
+    {
+      "query": "tokens",
+      "expected_ids": [
+        "python:src/mod.py:mod.alpha_beta@hash0001",
+        "python:src/mod.py:mod.delta_request@hash0003",
+        "python:src/mod.py:mod.epsilon_token@hash0004",
+        "python:src/mod.py:mod.gamma_handler@hash0002"
+      ]
+    },
+    {
+      "query": "requests",
+      "expected_ids": [
+        "python:src/mod.py:mod.alpha_beta@hash0001",
+        "python:src/mod.py:mod.delta_request@hash0003",
+        "python:src/mod.py:mod.epsilon_token@hash0004",
+        "python:src/mod.py:mod.gamma_handler@hash0002"
+      ]
+    },
+    {
+      "query": "request",
+      "expected_ids": [
+        "python:src/mod.py:mod.delta_request@hash0003"
+      ]
+    },
+    {
+      "query": "handler",
+      "expected_ids": [
+        "python:src/mod.py:mod.gamma_handler@hash0002"
+      ]
+    },
+    {
+      "query": "alpha",
+      "expected_ids": [
+        "python:src/mod.py:mod.alpha_beta@hash0001",
+        "python:src/mod.py:mod.delta_request@hash0003",
+        "python:src/mod.py:mod.epsilon_token@hash0004",
+        "python:src/mod.py:mod.gamma_handler@hash0002"
+      ]
+    },
+    {
+      "query": "beta",
+      "expected_ids": [
+        "python:src/mod.py:mod.alpha_beta@hash0001",
+        "python:src/mod.py:mod.delta_request@hash0003",
+        "python:src/mod.py:mod.epsilon_token@hash0004",
+        "python:src/mod.py:mod.gamma_handler@hash0002"
+      ]
+    },
+    {
+      "query": "gamma OR delta",
+      "expected_ids": [
+        "python:src/mod.py:mod.delta_request@hash0003",
+        "python:src/mod.py:mod.gamma_handler@hash0002"
+      ]
+    },
+    {
+      "query": "alpha OR token",
+      "expected_ids": [
+        "python:src/mod.py:mod.alpha_beta@hash0001",
+        "python:src/mod.py:mod.delta_request@hash0003",
+        "python:src/mod.py:mod.epsilon_token@hash0004",
+        "python:src/mod.py:mod.gamma_handler@hash0002"
+      ]
+    },
+    {
+      "query": "epsilon",
+      "expected_ids": [
+        "python:src/mod.py:mod.epsilon_token@hash0004"
+      ]
+    },
+    {
+      "query": "Docstring",
+      "expected_ids": [
+        "python:src/mod.py:mod.alpha_beta@hash0001",
+        "python:src/mod.py:mod.delta_request@hash0003",
+        "python:src/mod.py:mod.epsilon_token@hash0004",
+        "python:src/mod.py:mod.gamma_handler@hash0002"
+      ]
+    },
+    {
+      "query": "nonexistentxyzzy",
+      "expected_ids": []
+    }
+  ]
+}

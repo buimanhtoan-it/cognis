@@ -1,9 +1,9 @@
 import { spawn } from "child_process";
 import * as vscode from "vscode";
-import { resolvePythonExecutable } from "./python";
+import { resolveCliInvocation } from "./binary";
+import { modelEnv } from "./model";
 import { trace } from "./diagnostics";
 
-const CLI_MODULE = "cognis.cli.main";
 let outputChannel: vscode.OutputChannel | undefined;
 
 export interface CliRunResult {
@@ -19,30 +19,23 @@ export function getOutputChannel(): vscode.OutputChannel {
   return outputChannel;
 }
 
-/** Run `python -m cognis.cli.main` with repo-root and optional env. */
+/** Run the `cognis` CLI surface with repo-root and optional env. */
 export async function runCli(
   repoRoot: string,
   args: string[],
   options?: { env?: NodeJS.ProcessEnv; label?: string }
 ): Promise<CliRunResult> {
-  const python = resolvePythonExecutable();
+  const { command, args: fullArgs } = resolveCliInvocation(repoRoot, args);
   const channel = getOutputChannel();
-  const fullArgs = [
-    "-m",
-    CLI_MODULE,
-    "--repo-root",
-    repoRoot,
-    ...args,
-  ];
   const label = options?.label ?? args.join(" ");
-  channel.appendLine(`$ ${python} ${fullArgs.join(" ")}`);
+  channel.appendLine(`$ ${command} ${fullArgs.join(" ")}`);
   const startedAt = Date.now();
-  trace.debug("cli", "spawn", { label, command: CLI_MODULE });
+  trace.debug("cli", "spawn", { label, command });
 
   return new Promise((resolve) => {
-    const proc = spawn(python, fullArgs, {
+    const proc = spawn(command, fullArgs, {
       cwd: repoRoot,
-      env: { ...process.env, ...options?.env },
+      env: { ...process.env, ...modelEnv(), ...options?.env },
     });
     let stdout = "";
     let stderr = "";

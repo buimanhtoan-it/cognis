@@ -1,0 +1,26 @@
+[package]
+name = "cognis-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "cognis MCP: 8-tool surface, JSON-RPC stdio framing, contract enforcement."
+
+[dependencies]
+cognis-core.workspace = true
+cognis-retrieval.workspace = true
+cognis-csar.workspace = true
+cognis-store.workspace = true
+cognis-embed.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[features]
+# Forward the ONNX embedder backend down to cognis-embed so a release build of
+# the MCP server ships real semantic search. Off by default so the workspace
+# build/test stays offline (no ONNX Runtime native lib required).
+onnx = ["cognis-embed/onnx"]
+onnx-download = ["cognis-embed/onnx-download"]

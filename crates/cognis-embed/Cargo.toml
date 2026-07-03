@@ -1,0 +1,48 @@
+[package]
+name = "cognis-embed"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "cognis embeddings: swappable Embedder/Reranker registry + ONNX backend."
+
+[dependencies]
+cognis-core.workspace = true
+
+# `onnx-local` backend (Task 6.2) — gated behind the `onnx` feature so the
+# default workspace build/test stays green with no ONNX Runtime native lib.
+# `ort` is pinned exactly (the 2.0 line is still in rc, the API moves between
+# rc's). `load-dynamic` keeps the *build* offline-friendly (no binary download
+# at build time; the ONNX Runtime shared lib is dlopen'd at runtime); the
+# `onnx-download` feature opts into the bundled static download instead.
+ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = [
+    "std",
+    "ndarray",
+    "api-24",
+] }
+tokenizers = { version = "0.23", optional = true, default-features = false, features = [
+    "fancy-regex",
+] }
+serde_json = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest.workspace = true
+serde_json.workspace = true
+criterion.workspace = true
+
+# Embedding-latency bench (Task 6.3 — the `ort` vs `candle` decision harness).
+# `required-features = ["onnx"]` means a plain `cargo bench`/`cargo build` never
+# compiles it; it only builds when the `onnx` backend is compiled in. The bench
+# itself graceful-skips when the model assets are absent (offline), so it never
+# fabricates numbers — see ADR-0001 and the bench's module docs.
+[[bench]]
+name = "embed_latency"
+harness = false
+required-features = ["onnx"]
+
+[features]
+# Compile the `onnx-local` backend. Uses ONNX Runtime via `ort`'s load-dynamic
+# strategy (resolves the shared lib at runtime — no build-time download).
+onnx = ["dep:ort", "dep:tokenizers", "dep:serde_json", "ort/load-dynamic"]
+# Same backend but linking the prebuilt ONNX Runtime downloaded at build time
+# (heavier build, fully self-contained binary). Implies `onnx`.
+onnx-download = ["onnx", "ort/download-binaries"]

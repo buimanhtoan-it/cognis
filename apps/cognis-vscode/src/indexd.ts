@@ -4,10 +4,9 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { getOutputChannel } from "./cli";
 import { trace } from "./diagnostics";
-import { resolvePythonExecutable } from "./python";
+import { resolveIndexdInvocation } from "./binary";
+import { modelEnv } from "./model";
 import type { IndexStatusReport } from "./types";
-
-const INDEXD_MODULE = "cognis_indexd.main";
 
 /**
  * Phases the panel knows how to render (see panel.ts deriveIndexingHeadline +
@@ -319,25 +318,24 @@ export async function startLiveIndexing(
       return;
     }
   }
-  const python = resolvePythonExecutable();
-  const channel = getOutputChannel();
-  const args = [
-    "-m",
-    INDEXD_MODULE,
+  const flags = [
     "--repo-root",
     repoRoot,
     "--db-path",
     dbPath,
   ];
   if (forceFullRebuild) {
-    args.push("--full-rebuild");
+    flags.push("--full-rebuild");
   }
-  channel.appendLine(`$ ${python} ${args.join(" ")}`);
+  const { command, args } = resolveIndexdInvocation(flags);
+  const channel = getOutputChannel();
+  channel.appendLine(`$ ${command} ${args.join(" ")}`);
 
-  const proc = spawn(python, args, {
+  const proc = spawn(command, args, {
     cwd: repoRoot,
     env: {
       ...process.env,
+      ...modelEnv(),
       COGNIS_DB_PATH: dbPath,
       COGNIS_INDEXD_STATUS_PATH: statusPath,
     },

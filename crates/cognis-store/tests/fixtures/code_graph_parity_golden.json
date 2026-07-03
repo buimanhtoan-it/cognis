@@ -1,0 +1,116 @@
+{
+  "_comment": "Python CSR code-graph oracle for cognis-store SymbolStore::build_code_graph (spec rust-engine-migration task 3.5, Requirement 4.3 / Property 2). Frozen oracle output captured from the Python engine; checked in, not regenerated.",
+  "db": "python_uckg.db",
+  "cases": [
+    {
+      "edge_kinds": null,
+      "node_ids": [
+        "python:src/mod.py:mod.alpha_beta@hash0001",
+        "python:src/mod.py:mod.delta_request@hash0003",
+        "python:src/mod.py:mod.epsilon_token@hash0004",
+        "python:src/mod.py:mod.gamma_handler@hash0002"
+      ],
+      "indptr": [
+        0,
+        1,
+        2,
+        3,
+        5
+      ],
+      "indices": [
+        3,
+        3,
+        2,
+        0,
+        1
+      ],
+      "weights": [
+        0.9,
+        0.8,
+        1.0,
+        0.9,
+        0.8
+      ],
+      "degree": [
+        0.9,
+        0.8,
+        1.0,
+        1.7000000000000002
+      ]
+    },
+    {
+      "edge_kinds": [
+        "calls"
+      ],
+      "node_ids": [
+        "python:src/mod.py:mod.alpha_beta@hash0001",
+        "python:src/mod.py:mod.delta_request@hash0003",
+        "python:src/mod.py:mod.epsilon_token@hash0004",
+        "python:src/mod.py:mod.gamma_handler@hash0002"
+      ],
+      "indptr": [
+        0,
+        1,
+        2,
+        3,
+        5
+      ],
+      "indices": [
+        3,
+        3,
+        2,
+        0,
+        1
+      ],
+      "weights": [
+        0.9,
+        0.8,
+        1.0,
+        0.9,
+        0.8
+      ],
+      "degree": [
+        0.9,
+        0.8,
+        1.0,
+        1.7000000000000002
+      ]
+    },
+    {
+      "edge_kinds": [
+        "imports"
+      ],
+      "node_ids": [
+        "python:src/mod.py:mod.alpha_beta@hash0001",
+        "python:src/mod.py:mod.delta_request@hash0003",
+        "python:src/mod.py:mod.epsilon_token@hash0004",
+        "python:src/mod.py:mod.gamma_handler@hash0002"
+      ],
+      "indptr": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "indices": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "weights": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "degree": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    }
+  ]
+}

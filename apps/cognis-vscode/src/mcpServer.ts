@@ -21,13 +21,13 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 
 import { getOutputChannel } from "./cli";
-import { resolvePythonExecutable } from "./python";
+import { resolveMcpdInvocation } from "./binary";
+import { modelEnv } from "./model";
 
 // ---------------------------------------------------------------------------
 // Pure helpers (no VS Code, no spawn) — unit-testable in plain Node.
 // ---------------------------------------------------------------------------
 
-const MCPD_MODULE = "cognis_mcpd.main";
 const LOOPBACK_HOST = "127.0.0.1";
 
 /** Reserved-by-OS bands and the ephemeral range we steer clear of. */
@@ -76,21 +76,43 @@ export function isHttpServerBlock(block: unknown): boolean {
 }
 
 /**
- * The argv the extension passes to the Python interpreter to launch
- * ``cognis-mcpd`` over HTTP. Pure so spawn-shape regressions are caught in a
- * unit test rather than at runtime in CI.
+ * The flags (without the ``<binary> mcpd`` prefix) that put the mcpd surface
+ * into HTTP transport on *host*:*port*. Kept in one place so the wire shape is
+ * unit-testable and shared with ``resolveMcpdInvocation``.
  */
-export function buildMcpdArgs(host: string, port: number): string[] {
-  return [
-    "-m",
-    MCPD_MODULE,
-    "--transport",
-    "http",
-    "--host",
-    host,
-    "--port",
-    String(port),
-  ];
+export function buildMcpdHttpFlags(host: string, port: number): string[] {
+  return ["--transport", "http", "--host", host, "--port", String(port)];
+}
+
+/**
+ * The stdio mcp.json server block that points an editor at the single
+ * ``cognis`` **binary**, dispatched to its ``mcpd`` surface. This is what
+ * ``mcp.json`` carries once the binary backend is installed — no Python entry
+ * point. ``env`` (COGNIS_DB_PATH etc.) is preserved verbatim. Pure so the
+ * written shape is unit-tested.
+ */
+export function buildBinaryStdioServerBlock(
+  binaryPath: string,
+  env: Record<string, string>,
+  extraArgs: string[] = []
+): { command: string; args: string[]; env: Record<string, string> } {
+  return { command: binaryPath, args: ["mcpd", ...extraArgs], env };
+}
+
+/**
+ * Normalize any stdio server block into the binary multi-call form
+ * (``command: <binary>``, ``args: ["mcpd", ...]``), preserving any trailing
+ * flags and the ``env``. Tolerates a legacy ``-m <module>`` interpreter prefix
+ * from an older on-disk config. Pure so the normalization is unit-tested.
+ */
+export function rewriteServerBlockToBinary(
+  block: { command?: string; args?: string[]; env?: Record<string, string> },
+  binaryPath: string
+): { command: string; args: string[]; env: Record<string, string> } {
+  const original = block.args ?? [];
+  // Drop a leading ``-m <module>`` interpreter prefix; keep any extra flags.
+  const rest = original[0] === "-m" ? original.slice(2) : original;
+  return buildBinaryStdioServerBlock(binaryPath, block.env ?? {}, rest);
 }
 
 export type McpServerPhase = "stopped" | "starting" | "running" | "error";
@@ -207,13 +229,14 @@ function launchOnPort(
   channel: vscode.OutputChannel
 ): Promise<{ running: boolean; error?: string }> {
   return new Promise((resolve) => {
-    const args = buildMcpdArgs(LOOPBACK_HOST, port);
-    const python = resolvePythonExecutable();
-    channel.appendLine(`[mcp-http] starting ${python} ${args.join(" ")} (cwd=${repoRoot})`);
+    const { command, args } = resolveMcpdInvocation(
+      buildMcpdHttpFlags(LOOPBACK_HOST, port)
+    );
+    channel.appendLine(`[mcp-http] starting ${command} ${args.join(" ")} (cwd=${repoRoot})`);
 
-    const proc = spawn(python, args, {
+    const proc = spawn(command, args, {
       cwd: repoRoot,
-      env: { ...process.env, PYTHONUNBUFFERED: "1", PYTHONUTF8: "1" },
+      env: { ...process.env, ...modelEnv(), PYTHONUNBUFFERED: "1", PYTHONUTF8: "1" },
     });
     const handle: ServerHandle = {
       proc,

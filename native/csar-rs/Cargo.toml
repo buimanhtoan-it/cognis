@@ -1,0 +1,20 @@
+[package]
+name = "csar_native"
+version = "0.1.0"
+edition = "2021"
+description = "Native CSAR forward-push Personalized PageRank kernel (C ABI)."
+license = "Apache-2.0"
+
+[lib]
+name = "csar_native"
+# cdylib → a plain shared library with a C ABI, loaded from Python via ctypes.
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+# Abort on panic: never unwind across the C FFI boundary. All inputs come from
+# the in-repo loader which builds valid CSR, and the kernel is written to avoid
+# panics on well-formed input.
+panic = "abort"

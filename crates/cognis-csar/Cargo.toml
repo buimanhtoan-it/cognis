@@ -1,0 +1,13 @@
+[package]
+name = "cognis-csar"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "cognis CSAR: code graph + Personalized PageRank solvers (forward-push)."
+
+[dependencies]
+cognis-core.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

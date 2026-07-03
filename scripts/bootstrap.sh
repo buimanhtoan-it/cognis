@@ -11,4 +11,4 @@ if [ "${SKIP_EMBEDDINGS:-}" = "1" ]; then
   SKIP_ARGS=(--skip-embeddings)
 fi
 
-python -m cognis.cli.main bootstrap "${TARGET}" "${SKIP_ARGS[@]}"
+cargo run --release -p cognis -- bootstrap "${TARGET}" "${SKIP_ARGS[@]}"

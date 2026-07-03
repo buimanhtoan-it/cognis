@@ -27,9 +27,7 @@ services:
       test:
         [
           "CMD",
-          "python",
-          "-m",
-          "cognis.cli.main",
+          "cognis-cli",
           "health",
           "--json",
         ]

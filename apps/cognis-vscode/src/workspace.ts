@@ -30,7 +30,6 @@ import {
 } from "./mcpConfig";
 import { getCognisMcpdRuntime } from "./mcpRuntime";
 import { getMcpServerState } from "./mcpServer";
-import { verifyPythonEnvironment } from "./python";
 import { fetchPrerequisites } from "./prerequisites";
 import type { PanelContext } from "./panel";
 import {
@@ -204,22 +203,11 @@ export async function bootstrapWorkspace(
   return result;
 }
 
-async function ensurePythonReady(
-  repoRoot: string,
-  progress: vscode.Progress<{ message?: string }>
-): Promise<void> {
-  progress.report({ message: "Checking Python environment…" });
-  const pythonCheck = await verifyPythonEnvironment(repoRoot);
-  if (!pythonCheck.ok) {
-    throw new CognisGuidanceError(pythonCheck.guidance);
-  }
-}
-
 /**
- * Block setup when a required prerequisite (parsers, local embeddings, MCP
- * server) is missing. This runs *before* any ``.cognis/`` files are created so
- * a fresh user is never left with a half-provisioned workspace that can't index
- * or serve. Optional items (vector, tokenizers) never block.
+ * Block setup when a required prerequisite (parsers, semantic index) is
+ * missing. This runs *before* any ``.cognis/`` files are created so a fresh
+ * user is never left with a half-provisioned workspace that can't index or
+ * serve. Optional items never block.
  */
 async function ensurePrerequisitesReady(
   repoRoot: string,
@@ -228,9 +216,9 @@ async function ensurePrerequisitesReady(
   progress.report({ message: "Checking prerequisites…" });
   const report = await fetchPrerequisites(repoRoot);
   if (!report) {
-    // doctor couldn't run — the Python check above already passed, so this is
-    // an unexpected CLI failure. Let setup proceed; downstream steps surface a
-    // concrete error if something is truly broken.
+    // doctor couldn't run (engine binary not installed / not runnable). Let
+    // setup proceed; downstream steps surface a concrete error if something is
+    // truly broken.
     return;
   }
   if (report.ready) {
@@ -334,7 +322,6 @@ export async function setupWorkspace(
   const folder = requireWorkspaceFolder();
   const repoRoot = folder.uri.fsPath;
 
-  await ensurePythonReady(repoRoot, progress);
   await ensurePrerequisitesReady(repoRoot, progress);
   const wasConfigured = isWorkspaceConfigured(repoRoot);
 
@@ -413,7 +400,6 @@ export async function repairSetup(
   const folder = requireWorkspaceFolder();
   const repoRoot = folder.uri.fsPath;
 
-  await ensurePythonReady(repoRoot, progress);
   progress.report({ message: "Repair: refreshing workspace config…" });
   await ensureWorkspaceConfigFresh(repoRoot);
 
@@ -520,8 +506,6 @@ export async function clearIndexAndReindex(
   const folder = requireWorkspaceFolder();
   const repoRoot = folder.uri.fsPath;
   const output = getOutputChannel();
-
-  await ensurePythonReady(repoRoot, progress);
 
   progress.report({ message: "Clear & Re-index: stopping live indexing…" });
   const paths = await fetchPaths(repoRoot);
@@ -742,8 +726,6 @@ export async function enableMcp(options?: { silent?: boolean }): Promise<string>
 export async function connectMcp(): Promise<void> {
   const folder = requireWorkspaceFolder();
   const repoRoot = folder.uri.fsPath;
-
-  await ensurePythonReady(repoRoot, { report: () => {} });
 
   trace.info("connectMcp", "Writing workspace mcp.json", { repoRoot });
   const { configPath, serverName } = await enableMcpForWorkspace(repoRoot);
@@ -1019,7 +1001,6 @@ export async function refreshPanelContext(repoRoot: string): Promise<PanelContex
     const mcpServer = getMcpServerState(repoRoot);
     return {
       status: configured ? deriveStatus(repoRoot, undefined, false) : "notInstalled",
-      setupHint: configured ? "python" : undefined,
       liveIndexing: current.liveIndexing,
       mcpEnabled: current.mcpEnabled,
       mcpRuntimeCount: mcpRuntime.count,
@@ -1070,7 +1051,7 @@ export async function showDegradedGuidance(repoRoot: string): Promise<void> {
     throw new CognisGuidanceError({
       title: "Health unavailable",
       message:
-        "Cognis health could not be read. Run Repair Setup after confirming Python and bootstrap are configured.",
+        "Cognis health could not be read. Run Repair Setup after confirming the engine is installed and the workspace is bootstrapped.",
       severity: "error",
       actions: [
         { label: "Repair Setup", command: "cognis.repairSetup" },

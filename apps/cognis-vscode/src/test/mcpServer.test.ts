@@ -10,7 +10,7 @@ import {
   STOPPED_STATE,
   buildHttpMcpServerBlock,
   buildMcpUrl,
-  buildMcpdArgs,
+  buildMcpdHttpFlags,
   derivePort,
   getMcpServerState,
   isHttpServerBlock,
@@ -73,19 +73,10 @@ test("buildMcpUrl produces the http://host:port/mcp shape clients expect", () =>
   assert.equal(buildMcpUrl("127.0.0.1", 50001), "http://127.0.0.1:50001/mcp");
 });
 
-test("buildMcpdArgs binds host/port via cognis_mcpd.main http transport", () => {
+test("buildMcpdHttpFlags binds host/port for the mcpd http transport", () => {
   assert.deepEqual(
-    buildMcpdArgs("127.0.0.1", 50001),
-    [
-      "-m",
-      "cognis_mcpd.main",
-      "--transport",
-      "http",
-      "--host",
-      "127.0.0.1",
-      "--port",
-      "50001",
-    ]
+    buildMcpdHttpFlags("127.0.0.1", 50001),
+    ["--transport", "http", "--host", "127.0.0.1", "--port", "50001"]
   );
 });
 
@@ -116,7 +107,7 @@ test("buildHttpMcpServerBlock writes the type:http url form editors expect", () 
 test("isHttpServerBlock distinguishes url (http) from command (stdio) blocks", () => {
   assert.equal(isHttpServerBlock({ type: "http", url: "http://127.0.0.1:50001/mcp" }), true);
   assert.equal(isHttpServerBlock({ url: "http://127.0.0.1:50001/mcp" }), true);
-  assert.equal(isHttpServerBlock({ command: "python", args: ["-m", "cognis_mcpd.main"] }), false);
+  assert.equal(isHttpServerBlock({ command: "cognis", args: ["mcpd"] }), false);
   assert.equal(isHttpServerBlock(undefined), false);
   assert.equal(isHttpServerBlock(null), false);
   assert.equal(isHttpServerBlock("nope"), false);

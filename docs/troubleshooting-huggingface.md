@@ -1,84 +1,50 @@
-# Hugging Face and Embedder Troubleshooting
+# Embedder Troubleshooting
 
-Use this guide when local embedding downloads fail or semantic indexing is not
-working as expected.
+Use this guide when semantic indexing or search is not working as expected.
 
-## Common symptom: `401 Unauthorized`
+## The default backend does no network download
 
-You may see an error similar to:
+The production embedder is `onnx-local`: it loads `bge-small-en-v1.5` from the
+checked-in `assets/models/` directory (or `COGNIS_ONNX_MODEL_DIR`) via the `ort`
+ONNX Runtime crate. There is **no Hugging Face download at runtime** and no
+Python — so the classic 401 / "Repository Not Found" download failures no longer
+apply.
 
-```text
-Repository Not Found for url: .../sentence-transformers/bge-small-en-v1.5/...
-Invalid username or password.
-```
-
-## Check the model id
-
-The local embedder configuration should use:
-
-```text
-BAAI/bge-small-en-v1.5
-```
-
-If your local `.cognis/config.yaml` contains only `bge-small-en-v1.5`, update it:
+Relevant `.cognis/config.yaml`:
 
 ```yaml
 embedder:
-  backend: local
+  backend: onnx-local
   model: BAAI/bge-small-en-v1.5
 ```
 
-If needed, regenerate the default config:
+The directory is resolved from the segment after the last `/`
+(`BAAI/bge-small-en-v1.5` → `assets/models/bge-small-en-v1.5/`). See
+[../assets/models/README.md](../assets/models/README.md) for the expected
+layout (`model.onnx`, `tokenizer.json`, `pooling.json`).
 
-```powershell
-python -m cognis.cli.main init --force
-```
+## Symptom: semantic search returns nothing
 
-## Check for stale Hugging Face credentials
-
-If `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` is set and invalid, public model
-downloads can still fail.
-
-Inspect the current session:
-
-```powershell
-echo $env:HF_TOKEN
-echo $env:HUGGING_FACE_HUB_TOKEN
-```
-
-Clear the variables for the current session:
-
-```powershell
-Remove-Item Env:HF_TOKEN -ErrorAction SilentlyContinue
-Remove-Item Env:HUGGING_FACE_HUB_TOKEN -ErrorAction SilentlyContinue
-```
-
-If your environment requires an authenticated session, generate a new token with
-read access and log in again:
-
-```powershell
-pip install -U huggingface_hub
-hf auth login
-```
-
-`BAAI/bge-small-en-v1.5` is a public model. In most cases you do not need a paid
-account; you only need to remove or replace a broken token.
+1. **Model assets missing.** If `assets/models/bge-small-en-v1.5/` (or
+   `COGNIS_ONNX_MODEL_DIR`) does not contain `model.onnx` + `tokenizer.json`, the
+   `onnx-local` backend cannot load. Drop the prebuilt ONNX export into that
+   directory, then re-index.
+2. **Index built without embeddings.** If you indexed with `--skip-embeddings`,
+   the vector table is empty. Re-index without the flag:
+   ```bash
+   cognis index --full .
+   ```
+3. **Offline / stub backend.** The `stub` backend returns zero vectors (fully
+   offline); lexical and structural retrieval still work, but semantic search is
+   degraded until you switch to `onnx-local` with assets present.
 
 ## Temporary workaround: skip embeddings
 
-If you need indexing to succeed immediately, you can skip embeddings and come
-back to semantic retrieval later:
+To get indexing working immediately without the model, defer embeddings:
 
-```powershell
-$env:SKIP_EMBEDDINGS = "1"
-.\scripts\ci_index_fixtures.ps1
+```bash
+cognis bootstrap . --skip-embeddings
 ```
 
-Or for a normal repository:
-
-```powershell
-python -m cognis.cli.main bootstrap . --skip-embeddings
-```
-
-Lexical and structural retrieval will still work. Semantic search will remain
-unavailable until you re-index without `--skip-embeddings`.
+Lexical and structural retrieval will still work. Re-index without
+`--skip-embeddings` once the ONNX assets are in place to enable semantic search.

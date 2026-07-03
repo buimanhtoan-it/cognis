@@ -2,7 +2,6 @@ import * as vscode from "vscode";
 import { getOutputChannel } from "./cli";
 import { trace } from "./diagnostics";
 import type { HealthReport, SetupResult } from "./types";
-import { resolvePythonExecutable } from "./python";
 
 export type GuidanceSeverity = "error" | "warning" | "info";
 
@@ -59,39 +58,33 @@ const RELOAD_ACTION: GuidanceAction = {
   command: "workbench.action.reloadWindow",
 };
 
-export function pythonMissingGuidance(pythonPath: string): UserGuidance {
+/**
+ * The engine binary isn't installed or couldn't start. One-click install
+ * fetches the prebuilt `cognis` binary — no terminal needed.
+ */
+export function backendNotReadyGuidance(detail?: string): UserGuidance {
   return {
-    title: "Cognis backend not ready",
+    title: "Cognis engine not ready",
     message:
-      "Cognis couldn't start its backend. Click Install backend and Cognis will set it up for you automatically.",
+      "Cognis couldn't start its engine. Click Install backend and Cognis will download and set it up for you automatically.",
     severity: "error",
     actions: [INSTALL_BACKEND_ACTION, OUTPUT_ACTION],
-    technicalDetail: `Python executable: ${pythonPath}`,
+    technicalDetail: detail?.trim() || undefined,
   };
 }
 
-export function cognisNotInstalledGuidance(pythonPath: string): UserGuidance {
+/**
+ * The engine ran but reported a problem that a reinstall/repair fixes. Kept
+ * distinct from a fresh "not installed" so the user gets the Troubleshoot path.
+ */
+export function backendMisconfiguredGuidance(detail: string): UserGuidance {
   return {
-    title: "Cognis backend not installed",
+    title: "Cognis engine not ready",
     message:
-      "The Cognis backend isn't installed yet. Click Install backend and Cognis will set it up for you — no terminal needed.",
-    severity: "error",
-    actions: [INSTALL_BACKEND_ACTION, OUTPUT_ACTION],
-    technicalDetail: `Backend Python: ${pythonPath}`,
-  };
-}
-
-export function pythonMisconfiguredGuidance(
-  pythonPath: string,
-  detail: string
-): UserGuidance {
-  return {
-    title: "Cognis backend not ready",
-    message:
-      "Cognis couldn't use its backend. Reinstall it in one click, or run Troubleshoot if the problem continues.",
+      "Cognis couldn't use its engine. Reinstall it in one click, or run Troubleshoot if the problem continues.",
     severity: "error",
     actions: [INSTALL_BACKEND_ACTION, REPAIR_ACTION, OUTPUT_ACTION],
-    technicalDetail: `Python: ${pythonPath}\n${detail.trim()}`,
+    technicalDetail: detail.trim() || undefined,
   };
 }
 
@@ -215,7 +208,6 @@ export function classifyError(err: unknown, context?: string): UserGuidance {
   const detail = context
     ? `${context}\n${normalizeErrorText(err)}`
     : normalizeErrorText(err);
-  const python = resolvePythonExecutable();
 
   if (text.includes("open a workspace folder")) {
     return noWorkspaceGuidance();
@@ -229,19 +221,8 @@ export function classifyError(err: unknown, context?: string): UserGuidance {
     text.includes("cannot find") ||
     text.includes("spawn ")
   ) {
-    if (text.includes("python") || text.includes("modulenotfounderror")) {
-      if (text.includes("cognis") || text.includes("no module named")) {
-        return cognisNotInstalledGuidance(python);
-      }
-    }
-    return pythonMissingGuidance(python);
-  }
-  if (
-    text.includes("modulenotfounderror") ||
-    text.includes("no module named 'cognis") ||
-    text.includes("no module named \"cognis")
-  ) {
-    return cognisNotInstalledGuidance(python);
+    // The engine binary couldn't be spawned — it isn't installed yet.
+    return backendNotReadyGuidance(detail);
   }
   if (text.includes("mcp") && (text.includes("eacces") || text.includes("eperm"))) {
     return mcpWriteFailedGuidance(detail);

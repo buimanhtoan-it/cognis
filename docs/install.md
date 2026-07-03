@@ -1,87 +1,108 @@
 # Installation Guide
 
-This guide covers the local installation flow for `cognis`, optional editor
-integration, and the checks you should run before using it on a real codebase.
+This guide covers installing the `cognis` engine, optional editor integration,
+and the checks you should run before using it on a real codebase.
+
+`cognis` ships as a **single static Rust binary** per platform. There is no
+Python runtime, no `pip`, and no virtual environment to manage — the binary is
+self-contained (SQLite is compiled in).
 
 ## Requirements
 
-- Python 3.11 or newer
-- Linux, macOS, or Windows
-- Node.js 18 or newer only if you plan to build the VS Code / Cursor extension
-- roughly 1 GB of free disk space for the backend and local embedding model
+- Linux, macOS, or Windows on a supported architecture (see
+  [distribution.md](distribution.md) for the target matrix)
+- roughly 200 MB of free disk space for the binary and the local embedding model
+- Node.js 18 or newer **only** if you plan to build the VS Code / Cursor
+  extension from source
+- the [Rust toolchain](https://rustup.rs) (stable) **only** if you build the
+  engine from source instead of downloading a prebuilt binary
 
-`cognis` is not published to PyPI yet. Install it from source.
+## Option A — prebuilt binary (recommended)
 
-## Recommended local installation
+Download the `cognis` binary for your platform from the
+[latest release](https://github.com/buimanhtoan-it/cognis/releases). Each
+artifact ships with a `.sha256` sidecar so you can verify it.
 
-Clone the repository and create a virtual environment:
+```bash
+# Verify the download (sha256sum -c format)
+sha256sum -c cognis-<triple>.sha256
+
+# Put it on PATH and mark it executable (POSIX)
+chmod +x cognis-<triple>
+mv cognis-<triple> /usr/local/bin/cognis
+```
+
+On Windows, verify with `Get-FileHash cognis-<triple>.exe -Algorithm SHA256` and
+place `cognis.exe` somewhere on your `PATH`.
+
+The single binary is multi-call (busybox-style): it behaves as the CLI, the MCP
+server, or the indexing daemon depending on how it is invoked:
+
+- `cognis cli …` (or any bare subcommand such as `cognis bootstrap .`)
+- `cognis mcpd` — start the MCP server on stdio
+- `cognis indexd …` — start the live-indexing daemon
+
+It also works when installed or symlinked under the legacy names `cognis-cli`,
+`cognis-mcpd`, and `cognis-indexd`, so existing `mcp.json` wiring keeps working.
+
+## Option B — build from source
+
+Building requires only the Rust toolchain and Git — no Python.
 
 ```bash
 git clone https://github.com/buimanhtoan-it/cognis
 cd cognis
-python -m venv .venv
+cargo build --release
 ```
 
-Activate the virtual environment:
-
-- macOS / Linux: `source .venv/bin/activate`
-- Windows PowerShell: `.\.venv\Scripts\Activate.ps1`
-
-Install the Python backend:
+The build produces the single binary at `target/release/cognis` (or
+`cognis.exe` on Windows). Copy it onto your `PATH`, or run it in place:
 
 ```bash
-python -m pip install -e ".[indexer,embed-local,vector,tokenizers,mcp]"
+./target/release/cognis --version
+./target/release/cognis health
 ```
 
-This installs the command-line tools:
+To produce a stripped, distribution-ready artifact (and a `.sha256` sidecar),
+use the packaging task:
 
-- `cognis-cli`
-- `cognis-mcpd`
-- `cognis-indexd`
+```bash
+cargo xtask dist                    # host target → dist/
+cargo xtask dist --target <triple>  # a specific platform
+```
 
-There is no top-level `cognis` wrapper command yet. In terminals, use
-`cognis-cli` or the module form shown below.
+See [distribution.md](distribution.md) for the full build matrix, cross-compile
+notes, and the optional `onnx` / `onnx-download` features.
 
-If you are setting up a contributor environment, you can use one of the helper
-paths below instead of running the commands manually:
-
-- Windows PowerShell: `.\scripts\setup-dev.ps1`
-- macOS / Linux: `./scripts/setup-dev.sh`
-- Make: `make install-dev`
-- Invoke: `invoke install-dev`
-
-## Verify the backend installation
+## Verify the installation
 
 Run:
 
 ```bash
-cognis-cli --version
-cognis-cli health
+cognis --version
+cognis health
 ```
 
-If `cognis-cli` is not available on `PATH`, use the module form:
+If you installed under the legacy name instead, `cognis-cli --version` and
+`cognis-cli health` behave identically.
 
-```bash
-python -m cognis.cli.main --version
-python -m cognis.cli.main health
-```
-
-The same fallback works for the daemon entry points:
-
-- MCP server: `python -m cognis_mcpd.main`
-- Indexer daemon: `python -m cognis_indexd.main`
-
-It is normal for `cognis-cli health` to report warnings before you initialize a
-repository. The first successful `init` or `bootstrap` run creates `.cognis/`
-and the local database.
+It is normal for `health` to report warnings before you initialize a repository.
+The first successful `init` or `bootstrap` run creates `.cognis/` and the local
+database.
 
 ## Optional: build the VS Code / Cursor extension
 
-If you want editor integration, package the extension from the repository root
-after the Python backend is installed:
+For editor integration the recommended path is the prebuilt extension: install
+the `.vsix`, open the Cognis panel, and click **Install backend** — the
+extension downloads the prebuilt `cognis` binary for your platform (checksum
+verified), so no terminal or compiler is needed.
+
+To build the extension from source, package it from its own directory:
 
 ```bash
-python scripts/setup_extension.py --package
+cd apps/cognis-vscode
+npm install
+npm run package
 ```
 
 This creates `apps/cognis-vscode/cognis-vscode-<version>.vsix`.
@@ -92,51 +113,20 @@ Install the package in VS Code or Cursor:
 2. Open the `...` menu.
 3. Select **Install from VSIX...**
 4. Choose `cognis-vscode-<version>.vsix`.
-5. Select the same Python interpreter you used for the `cognis` install, or set `cognis.pythonPath`.
-6. Open the target repository and run **Cognis: Set Up Workspace**.
+5. Open the target repository and run **Cognis: Set Up Workspace**.
 
-For VS Code / Cursor users, this is the recommended starting flow. The
-extension uses the selected Python interpreter directly, so it does not require
-`cognis-cli` to be on `PATH`.
-
-For extension-specific details, see [../apps/cognis-vscode/README.md](../apps/cognis-vscode/README.md).
-
-## Optional dependencies
-
-The editable install above uses the full supported feature set. If you need to
-understand the extras individually, use this table:
-
-| Extra | Purpose |
-| --- | --- |
-| `indexer` | Tree-sitter parsers and the file watcher |
-| `embed-local` | Local embeddings with `sentence-transformers` |
-| `vector` | Vector search with `sqlite-vec` |
-| `tokenizers` | Token counting for capsule budgeting |
-| `mcp` | MCP server runtime |
+The extension manages the `cognis` binary backend for you (download, version
+drift detection, and `mcp.json` wiring). For extension-specific details, see
+[../apps/cognis-vscode/README.md](../apps/cognis-vscode/README.md).
 
 ## sqlite-vec
 
-`cognis` uses `sqlite-vec` for vector search. The dependency is already covered
-by the `vector` extra, but you can test it directly:
-
-```python
-import sqlite3
-import sqlite_vec
-
-conn = sqlite3.connect(":memory:")
-conn.enable_load_extension(True)
-sqlite_vec.load(conn)
-print("sqlite-vec loaded OK")
-```
-
-Platform notes:
-
-- Linux: prebuilt wheels work on supported architectures
-- macOS: prebuilt wheels work on supported architectures
-- Windows: use the official CPython build when possible
-
-If the extension does not load, lexical and structural retrieval still work, but
-vector search remains unavailable until `sqlite-vec` loads correctly.
+`cognis` uses vector search for the semantic layer. The default binary ships an
+**in-Rust BLOB + linear-scan fallback**, so vector search works out of the box
+with no extension to install. For larger indexes you can opt into the faster
+`vec0` loadable extension by pointing `COGNIS_SQLITE_VEC_PATH` at a `sqlite-vec`
+build; the store loads it at runtime and falls back automatically if it cannot
+load. Lexical and structural retrieval are unaffected either way.
 
 ## Docker deployment
 
@@ -152,52 +142,31 @@ Operational steps are documented in [operations.md](operations.md).
 
 ## Windows notes
 
-On Windows, the most common problem is that Python installs console scripts to a
-directory that is not on `PATH`. The module form avoids that problem entirely:
-
-```powershell
-python -m cognis.cli.main bootstrap .
-python -m cognis.cli.main health
-python -m cognis_mcpd.main
-```
-
-If you want the console scripts for the current terminal session, add the Python
-Scripts directory to `PATH`:
-
-```powershell
-$scripts = python -c "import sysconfig; print(sysconfig.get_path('scripts'))"
-$env:Path = "$scripts;$env:Path"
-cognis-cli --version
-```
-
-If you mainly use the VS Code / Cursor extension, selecting the correct Python
-interpreter is usually enough. The extension runs `python -m ...` internally and
-does not depend on the console scripts being visible on `PATH`.
+The binary is self-contained, so the most common Python-era `PATH` problems no
+longer apply. Place `cognis.exe` on your `PATH` (or invoke it by full path) and
+you are done. If you mainly use the VS Code / Cursor extension, the **Install
+backend** flow stages the binary under the extension's storage and wires it for
+you — no manual `PATH` setup required.
 
 ## Upgrading
 
-After updating the checkout, reinstall and re-run the health check:
+Replace the binary with the newer release (or rebuild from an updated checkout)
+and re-run the health check:
 
 ```bash
-python -m pip install -e ".[indexer,embed-local,vector,tokenizers,mcp]"
-cognis-cli health
+cognis health
 ```
 
 If `health` reports a version mismatch, run a full re-index:
 
 ```bash
-cognis-cli index --full .
+cognis index --full .
 ```
 
 ## Uninstalling
 
-```bash
-pip uninstall cognis
-```
+Delete the `cognis` binary from wherever you placed it. Optional cleanup:
 
-Optional cleanup:
-
-- remove the virtual environment
 - remove `.cognis/` from repositories you indexed
 - uninstall the `.vsix` from the editor if you no longer need it
 
@@ -205,9 +174,8 @@ Optional cleanup:
 
 | Problem | What to check |
 | --- | --- |
-| `cognis-cli` is not recognized | Activate the virtual environment or use `python -m cognis.cli.main` |
-| `fastmcp` is missing | Reinstall with the `mcp` extra |
-| `sentence_transformers` is missing | Reinstall with the `embed-local` extra |
-| `sqlite-vec` does not load | Confirm the Python build supports extension loading |
+| `cognis` is not recognized | Confirm the binary is on `PATH`, or invoke it by full path |
+| Health reports a version mismatch | Run `cognis index --full .` to rebuild the index |
+| Vector search unavailable | The BLOB fallback always works; for `vec0`, check `COGNIS_SQLITE_VEC_PATH` |
 | Permission errors under `.cognis/` | Verify the current user can create and write files in the repository |
-| `COGNIS_DB_PATH` is incorrect | Re-run `cognis-cli init` or inspect `.cognis/config.yaml` and your environment |
+| `COGNIS_DB_PATH` is incorrect | Re-run `cognis init` or inspect `.cognis/config.yaml` and your environment |

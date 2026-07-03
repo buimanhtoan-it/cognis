@@ -6,10 +6,12 @@ criterion names **where it is measured** (an existing command/artifact) and a
 **target / gate**, so progress is measurable rather than assumed.
 
 This document indexes the existing instruments; it does not duplicate them:
-- Retrieval quality benchmark → the benchmark harness under `.benchmarks/`
-  (developer-local; not shipped in the package).
-- UX / performance + retrieval correctness → `make e2e-report` (`tests/e2e/report.py`).
-- Coverage → `make coverage` (`scripts/coverage_full.py`, `tests/coverage/`).
+- Retrieval quality benchmark → the benchmark harness data under `.benchmarks/`
+  (developer-local; not shipped in the binary).
+- Reliability / correctness → the Cargo workspace test suite (`cargo test
+  --workspace`), including the `cognis-eval` differential parity + golden-set
+  harness.
+- Coverage → `cargo llvm-cov --workspace`.
 
 > Evidence discipline (applies everywhere): label every result as **proven**
 > (algebra machine-verified), **empirically supported** (beats baselines on a
@@ -20,15 +22,10 @@ This document indexes the existing instruments; it does not duplicate them:
 
 Measurements run against **named, free, public GitHub repositories** — not
 private or synthetic data (the bundled tiny sample repo is used only for the
-fast CI smoke gate, and is labeled as such). Every report and committed baseline
-records the **exact source it measured**: origin URL, HEAD commit, `git
-describe` version, and whether the tree was dirty (`repo_provenance` in the JSON
-/ a "Measured against:" line in the Markdown).
+fast CI smoke gate, and is labeled as such). Every committed baseline records
+the **exact source it measured**: origin URL, HEAD commit, `git describe`
+version, and whether the tree was dirty (`repo_provenance` in the JSON).
 
-- Reproduce any number exactly:
-  `python tests/e2e/report.py --clone <url> --ref <commit>` clones fresh and
-  records the resolved commit; `--repo <local checkout>` measures a local clone
-  and records its commit.
 - Baselines **pin a specific commit** (recorded), not a moving branch HEAD, so
   runs are comparable release-over-release. Refresh the corpus deliberately (and
   the recorded commit changes), never silently.
@@ -41,16 +38,16 @@ describe` version, and whether the tree was dirty (`repo_provenance` in the JSON
 
 Measured by the benchmark harness on **objective, PR-derived** ground truth
 (the symbols changed in a real bug-fix commit are the answer), not author-chosen
-concept labels.
+concept labels. Results live in `.benchmarks/public/RESULTS.md`.
 
 | Criterion | Where | Bar to support an "outperforms standard baselines" claim |
 | --- | --- | --- |
-| Recall@k, MRR | benchmark harness | beats BM25, dense KNN, and RRF on the macro average |
-| Contamination@k | benchmark harness | ≤ RRF (lower is better) |
+| Recall@k, MRR | benchmark data | beats BM25, dense KNN, and RRF on the macro average |
+| Contamination@k | benchmark data | ≤ RRF (lower is better) |
 | Ground-truth objectivity | PR-mining + leakage check | structure-blind; circularity measured, not assumed |
 | Sample size & breadth | benchmark log | ≥ 60 resolvable objective queries, ≥ 2 languages at scale |
 | Reproducibility | benchmark log | reproduces from a fresh clone |
-| Math soundness | verification scripts | identities machine-verified to machine epsilon |
+| Math soundness | CSAR theorem property tests | identities machine-verified to machine epsilon |
 
 Until all six hold, the accurate description is "a local, mathematically-grounded
 retrieval engine, with quality under active benchmarking" — public performance
@@ -58,82 +55,72 @@ claims should not outrun this bar.
 
 ## Pillar 2 — UX / performance (protects first-use experience)
 
-Measured by `make e2e-report` (emits `eval-reports/.../e2e-report.json`).
-Reference values (psf/requests, 736 symbols, CPU) recorded this cycle:
+Measured against the recorded reference run (psf/requests, 736 symbols, CPU):
 
 | Criterion | Reference | Target / budget |
 | --- | --- | --- |
 | Time-to-first-lexical-result | seconds (Phase A) | search usable before embeddings finish |
 | Embedding-progress moved | true (70→100 %, "X/N") | must stay true (never a static bar) |
-| Embedding throughput | ~0.2 s/symbol (embed ≈ 98 % of cold index) | alert if symbols/sec drops > 20 % vs baseline |
-| Server warm/startup (one-time) | ~17 s (model + framework import) | track; the lever if we invest in startup |
-| Steady-state semantic query (hot) | ~0.04 s | p50 < 0.3 s |
-| Cold-index per-phase split | parse/resolve/write ~1 s each | flag if a non-embed phase regresses |
+| Embedding throughput | track per cycle | alert if symbols/sec drops > 20 % vs baseline |
+| Server warm/startup (one-time) | track | the lever if we invest in startup |
+| Steady-state semantic query (hot) | sub-second | p50 < 0.3 s |
+| Cold-index per-phase split | parse/resolve/write balanced | flag if a non-embed phase regresses |
 
 ## Pillar 3 — Reliability / correctness (CI gates, must stay green)
 
 | Criterion | Command | Gate |
 | --- | --- | --- |
-| Lint + format | `make lint` | clean |
-| Types | `make typecheck` | clean; expand the mypy-strict scope each cycle (now: `packages/core` + `cognis_indexer`; next: `cognis_retrieval`) |
-| Unit + property + integration | `make test` | 100 % pass |
-| Coverage | `make coverage` | `fail_under` ratchets up only (currently 60; measured ≈ 76), never down |
-| Cross-app e2e | `make e2e` | all pass; **runs on every push** (ci.yml `e2e-sandbox` job) + cross-platform on PRs; no hidden flakes (reproduce-in-isolation and classify, never blind retry) |
-| Sold-artifact packaging | `pytest -m e2e -k wheel` | the built wheel ships all 8 packages + 3 console entry points + the logo asset |
-| Backend install/upgrade | extension unit (`buildPackageSpec`, `classifyPipFailure`) | the engine pin is deterministic (`==<ext version>`); pip failures classified (incl. "engine not on PyPI yet" vs "Python too new") |
+| Format | `cargo fmt --all --check` | clean |
+| Lint | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| Unit + property + parity | `cargo test --workspace` | 100 % pass (CSAR theorems T1–T5, FTS/vec/fusion/CSAR parity) |
+| Differential + golden eval | `cargo test -p cognis-eval` | parity holds vs the checked-in oracle goldens |
+| Coverage | `cargo llvm-cov --workspace` | `fail_under` ratchets up only, never down |
+| Cross-app contracts | `tests/e2e/contracts/` ↔ `apps/cognis-vscode` `contractParity.test.ts` | extension ↔ CLI JSON shapes pinned (regenerate only on intentional change) |
+| MCP tool output contract | mcpd contract checks | all 8 AI-facing tools keep the keys agents depend on — search/lookup/trace/resolve, hybrid `discover_symbols`, flagship `diffuse_context` (`on_path`/`ppr_score`), `retrieve_context_capsule` schema, error envelope |
+| Contract version lockstep | handshake check | engine contract version == extension `EXPECTED_CONTRACT_VERSION` (bump both together); `cognis cli handshake` advertises the negotiated payload |
 | Panel UI e2e | `npm run test:e2e` | all states pass; every button posts a valid command |
-| Full-stack host e2e | `npm run test:host` (CI: `vscode-host-e2e` job, xvfb) | the real extension in a real VS Code host, against the real Python backend, runs `cognis.setupWorkspace` and writes a real `.cognis/config.yaml` + workspace `mcp.json`; the flow appears in `diagnostics.jsonl`. Needs `COGNIS_TEST_PYTHON` (skips otherwise) |
-| Cross-language contracts | contract snapshots | extension ↔ CLI JSON shapes pinned (regenerate only on intentional change) |
-| MCP tool output contract | `pytest -m e2e -k mcp_tool_contracts` | all 8 AI-facing tools keep the keys agents depend on — search/lookup/trace/resolve, hybrid `discover_symbols`, flagship `diffuse_context` (`on_path`/`ppr_score`), `retrieve_context_capsule` schema, error envelope; tool set matches `cognis.contract.MCP_TOOLS` (asserted against the live server) |
-| Contract version lockstep | `pytest -m e2e -k contract_version` | backend `CONTRACT_VERSION` == extension `EXPECTED_CONTRACT_VERSION` (bump both together); `cognis-cli handshake` advertises the negotiated payload |
-| Handshake skew handling | extension unit (`contract.test.ts`) | every skew case (older/newer/missing-capability/unreadable) maps to a clear, actionable verdict; usable only when required capabilities are present |
-| Flow tracing (bug trace) | extension (`diagnostics.test.ts`) | every user flow is reconstructable from `diagnostics.jsonl` (Cognis: Show Diagnostics Log): each progress-wrapped flow logs start/ok/fail+duration via `trace.span`, start/stop MCP + connectMcp + handshake log explicitly, every surfaced error logs via `showErrorGuidance`, every CLI call logs exit+duration, unknown indexd `phase` recorded once |
+| Full-stack host e2e | `npm run test:host` (CI: `vscode-host-e2e`, xvfb) | the real extension in a real VS Code host, against the real `cognis` binary, runs `cognis.setupWorkspace` and writes a real `.cognis/config.yaml` + workspace `mcp.json`; the flow appears in `diagnostics.jsonl` |
+| Flow tracing (bug trace) | extension (`diagnostics.test.ts`) | every user flow is reconstructable from `diagnostics.jsonl`: each progress-wrapped flow logs start/ok/fail+duration, start/stop MCP + connectMcp + handshake log explicitly, every surfaced error logs guidance, every CLI call logs exit+duration |
 
 ## Pillar 4 — Scaling / cost (protects large-repo viability)
 
-Measured by `make e2e-report E2E_REPORT_ARGS="--repo <repo>"`:
+Measured against a real large-repo index:
 
 | Criterion | Reference | Gate |
 | --- | --- | --- |
-| DB bytes / symbol | ~27 KB (requests) | track; flag superlinear growth |
+| DB bytes / symbol | track (requests) | flag superlinear growth |
 | Cold-index wall time (large repo) | record per cycle | sub-linear vs symbol count |
-| Memory / handle footprint (mcpd) | `pytest -m e2e -k memory` | real server under sustained tool load stays resource-bounded: OS-handle growth ≤ 60 and RSS growth ≤ 80 MB over hundreds of calls (the leak fingerprint is a near-linear handle climb). Lexical guard is model-free (CI); semantic guard exercises the per-call worker-thread connection path (local embedder; nightly/local) |
+| Memory / handle footprint (mcpd) | sustained tool load | real server stays resource-bounded: OS-handle and RSS growth stay flat over hundreds of calls (the leak fingerprint is a near-linear handle climb) |
 
 ---
 
 ## The per-cycle loop
 
-1. **Baseline** at cycle start: `make e2e-baseline-update` refreshes the committed
-   smoke baseline (`tests/e2e/baselines/sample.json`, used by CI for correctness).
-   For a real-repo perf trend, diff against the committed large-repo reference:
-   ```
-   make e2e-report E2E_REPORT_ARGS="--repo <repo> --out eval-reports/<name>"
-   python scripts/compare_baseline.py --current eval-reports/<name>/e2e-report.json \
-       --baseline tests/e2e/baselines/requests.json
-   ```
+1. **Baseline** at cycle start: refresh the committed smoke baseline
+   (`tests/e2e/baselines/sample.json`, used by CI for correctness). For a
+   real-repo perf trend, diff against the committed large-repo reference
+   (`tests/e2e/baselines/requests.json`).
 2. **Develop**: every change should leave at least one of *correct / accurate /
    efficient* measurably better, or produce a sound negative result that
    prevents wasted effort.
-3. **Gate** before merge: Pillar 3 green (`make lint typecheck test`);
-   `make compare-baseline` enforces Pillar-2/4 invariants (and perf budgets under
-   `COMPARE_ARGS="--strict-perf"`); Pillar 1 governs any new public claim.
+3. **Gate** before merge: Pillar 3 green (`cargo fmt --all --check`,
+   `cargo clippy --workspace --all-targets -- -D warnings`,
+   `cargo test --workspace`); Pillar-2/4 invariants tracked against the
+   baselines; Pillar 1 governs any new public claim.
 4. **Record**: update the benchmark log (quality, labeled by evidence tier) and
    `CHANGELOG.md` (`[Unreleased]`).
 
 ## Automated regression gate
 
-`scripts/compare_baseline.py` turns the e2e report into a gate:
+The eval harness (`cognis-eval`, run via `cargo test -p cognis-eval`) turns the
+committed baselines into a gate:
 
 - **Hard invariants** (hardware-independent flow correctness — embedding bar
   moves, semantic search returns hits, index has vectors, health ok, symbol
   search resolves) **fail the build**.
 - **Soft perf budgets** (throughput, hot-query latency, warm time, DB
-  bytes/symbol) are reported relative to the baseline and only fail under
-  `--strict-perf` (default tolerance ±50 %), so CI on variable hardware gates on
-  correctness while perf is tracked for trend.
-
-Wired into `.github/workflows/nightly-eval.yml`. Commands:
-`make compare-baseline`, `make e2e-baseline-update`.
+  bytes/symbol) are reported relative to the baseline and tracked for trend, so
+  CI on variable hardware gates on correctness while perf is monitored.
 
 Two committed reference baselines under `tests/e2e/baselines/`:
 - `sample.json` — bundled sample repo; fast, hardware-independent invariants;
@@ -143,19 +130,14 @@ Two committed reference baselines under `tests/e2e/baselines/`:
 
 ### Synthetic-golden eval gate (no-regression smoke, NOT a quality claim)
 
-The nightly job also runs the hybrid eval harness over the synthetic fixture
-golden (`tests/fixtures/eval/golden.jsonl` on the tiny `mini-ts/py/go` repos) and
-gates it with `scripts/compare_eval_baseline.py` against `eval-baselines/phase1.json`.
-This is a **regression smoke gate only**: `phase1.json` records the *measured*
-Recall@k / MRR on that hand-authored golden and fails only on a regression beyond
-`regression_tolerance`. It is **not** an absolute quality bar and **not** a public
-claim — authoritative retrieval quality is Pillar 1 (the `.benchmarks/` harness on
-objective PR-derived truth). The earlier hard minimums (0.70 / 0.50) were
-aspirational "phase 1" numbers the RRF-ranked engine never met on this concept-
-label golden, so they failed the build on an ungrounded absolute rather than a
-regression; recording the measured baseline + tolerance fixes that without
-lowering a previously-earned gate. Refresh the baseline deliberately (record the
-new measured value, note why) when retrieval changes on purpose.
+The eval harness also runs the hybrid eval over the synthetic fixture golden and
+gates it against `eval-baselines/phase1.json`. This is a **regression smoke gate
+only**: `phase1.json` records the *measured* Recall@k / MRR on that hand-authored
+golden and fails only on a regression beyond `regression_tolerance`. It is
+**not** an absolute quality bar and **not** a public claim — authoritative
+retrieval quality is Pillar 1 (the `.benchmarks/` harness on objective PR-derived
+truth). Refresh the baseline deliberately (record the new measured value, note
+why) when retrieval changes on purpose.
 
 ## Practices to avoid
 
@@ -168,7 +150,7 @@ new measured value, note why) when retrieval changes on purpose.
 ## Status (this release)
 
 - Pillars 2 & 3: green and instrumented.
-- Pillar 1: the **sample-size / breadth** criterion is now met — the objective
+- Pillar 1: the **sample-size / breadth** criterion is met — the objective
   (PR-derived, structure-blind) key spans 276 queries across 5 public repos in
   two languages at scale (Python: requests; Java: jsoup). The
   **"outperforms standard baselines"** bar is intentionally *not* claimed: on
@@ -179,5 +161,5 @@ new measured value, note why) when retrieval changes on purpose.
   context. Pillar 1 governs public claims, not whether the tool ships; the
   honest framing is "a local, mathematically-grounded retrieval engine, RRF-ranked,
   with structure as proven on-path context."
-- The regression gate (`scripts/compare_baseline.py`) is built, committed, and
-  wired into nightly CI.
+- The regression gate is built into the `cognis-eval` harness and the committed
+  baselines, exercised by CI.

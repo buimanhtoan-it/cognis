@@ -1,7 +1,7 @@
 /**
  * Structured diagnostics + trace logging for the extension.
  *
- * Why this exists: the extension and the Python backend are two processes in
+ * Why this exists: the extension and the engine binary are two processes in
  * two languages wired across several JSON contracts. When something drifts in
  * production the only artifact today is an ephemeral OutputChannel the user has
  * to think to open. That is why "e2e green, prod broken" was invisible.

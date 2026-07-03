@@ -2,14 +2,19 @@ import * as vscode from "vscode";
 import { getOutputChannel } from "./cli";
 import { trace, type TraceLevel } from "./diagnostics";
 import {
-  initManagedBackend,
-  installManagedBackend,
-  isManagedBackendInstalled,
-  uninstallManagedBackend,
-  checkManagedBackendDrift,
-  BackendInstallError,
+  initManagedBinary,
+  installManagedBinary,
+  uninstallManagedBinary,
+  checkManagedBinaryDrift,
+  BinaryInstallError,
   formatElapsed,
-} from "./backend";
+} from "./binary";
+import {
+  initManagedModel,
+  installManagedModel,
+  isModelInstalled,
+  uninstallManagedModel,
+} from "./model";
 import {
   presentGuidance,
   setupResultGuidance,
@@ -112,9 +117,9 @@ async function fetchPanelContext(repoRoot: string): Promise<PanelContext> {
  * panel. Cached so every panel render can show the checklist without re-running
  * the CLI on each poll.
  *
- * A `doctor` report is also our cheapest proof that the Python backend is
+ * A `doctor` report is also our cheapest proof that the engine binary is
  * actually runnable: if it returns a report the backend is reachable; if it
- * returns undefined the backend isn't installed yet (fresh machine), which the
+ * returns undefined the binary isn't installed yet (fresh machine), which the
  * panel surfaces as "Install the Cognis backend".
  */
 async function refreshPrerequisites(): Promise<void> {
@@ -564,28 +569,21 @@ async function runRemoveFromWorkspace(scope: "workspace" | "all" = "workspace"):
     } else if (result.mcpRemoved) {
       parts.push(`disconnected MCP from ${result.configPath}`);
     }
-    // "Remove everything" also uninstalls the backend Cognis installed so the
-    // user gets a clean machine without touching a terminal.
+    // "Remove everything" also uninstalls the engine binary + model Cognis
+    // installed so the user gets a clean machine without touching a terminal.
     if (purgeAllMcp) {
-      const userPythonPath = vscode.workspace
-        .getConfiguration("cognis")
-        .get<string>("pythonPath", "")
-        .trim();
       try {
-        const backend = await uninstallManagedBackend({
-          userPythonPath: userPythonPath || undefined,
-        });
-        if (backend.mode !== "none") {
-          parts.push(
-            backend.mode === "managed-deleted"
-              ? "uninstalled the Cognis backend"
-              : "removed the cognis package from your Python"
-          );
+        const binary = await uninstallManagedBinary();
+        if (binary.removed) {
+          parts.push("uninstalled the Cognis engine binary");
         }
       } catch (err) {
         getOutputChannel().appendLine(
-          `[remove] backend uninstall warning: ${err instanceof Error ? err.message : String(err)}`
+          `[remove] binary uninstall warning: ${err instanceof Error ? err.message : String(err)}`
         );
+      }
+      if (uninstallManagedModel()) {
+        parts.push("removed the semantic model");
       }
     }
     await refreshPrerequisites();
@@ -604,32 +602,53 @@ async function runRemoveFromWorkspace(scope: "workspace" | "all" = "workspace"):
 }
 
 /**
- * One-click backend install. Creates/refreshes the managed environment (or uses
- * the user's own Python if cognis.pythonPath is set), installs the package, then
- * re-probes so the panel advances on its own — no terminal, no manual steps.
+ * One-click backend install: fetch the prebuilt single ``cognis`` binary for
+ * this platform, checksum-verified — no Python, pip, or compiler (Requirement
+ * 1.1). We re-probe afterwards so the panel advances on its own.
  */
 async function runInstallBackend(): Promise<void> {
-  const userPythonPath = vscode.workspace
-    .getConfiguration("cognis")
-    .get<string>("pythonPath", "")
-    .trim();
+  await runInstallBinaryBackend();
+}
+
+/**
+ * Fetch + verify the single ``cognis`` binary and advance setup. Surfaces a
+ * clear message when no binary is published for the platform or the
+ * download/verification fails.
+ */
+async function runInstallBinaryBackend(): Promise<void> {
   try {
     const outcome = await withProgress("Cognis: Install backend", (p, t) =>
-      installManagedBackend(p, t, { userPythonPath: userPythonPath || undefined })
+      installManagedBinary(p, t)
     );
     if (!outcome) {
       return;
     }
     await refreshPrerequisites();
-    const where =
-      outcome.mode === "managed"
-        ? "in a private environment Cognis manages for you"
-        : "in your configured Python environment";
-    // Report how long the whole install took (sum of phases) so the user gets a
-    // sense of the cost and a confirmation it actually finished.
     const totalMs = outcome.timings.reduce((sum, t) => sum + t.ms, 0);
+
+    // Fetch the semantic model (best-effort). Semantic search needs the
+    // bge-small weights; download them now so `diffuse_context` returns real
+    // hits. A failure here is non-fatal — the engine degrades to lexical +
+    // structural until the model is present.
+    let semanticNote = " Semantic search is active.";
+    if (!isModelInstalled()) {
+      try {
+        await withProgress("Cognis: Download semantic model", (p, t) =>
+          installManagedModel(p, t)
+        );
+      } catch (err) {
+        getOutputChannel().appendLine(
+          `[model] install skipped: ${err instanceof Error ? err.message : String(err)}`
+        );
+        semanticNote =
+          " Semantic search will activate once the model finishes downloading " +
+          "(run “Cognis: Install backend” again to retry); lexical + structural search work now.";
+      }
+    }
+
     const next = await vscode.window.showInformationMessage(
-      `Cognis backend installed ${where} in ${formatElapsed(totalMs)}. Set up this workspace now?`,
+      `Cognis engine installed (${outcome.triple}) in ${formatElapsed(totalMs)} — no Python needed.${semanticNote} ` +
+        "Set up this workspace now?",
       "Set Up Workspace",
       "Later"
     );
@@ -637,23 +656,12 @@ async function runInstallBackend(): Promise<void> {
       await runSetupWorkspace();
     }
   } catch (err) {
-    if (err instanceof BackendInstallError) {
-      const actions: string[] = [];
-      if (err.canInstallPython) {
-        actions.push("Get Python");
-      }
-      if (err.actionLabel) {
-        actions.push(err.actionLabel);
-      }
-      actions.push("Show Output");
-      const choice = await vscode.window.showErrorMessage(err.userMessage, ...actions);
-      if (choice === "Get Python") {
-        void vscode.env.openExternal(
-          vscode.Uri.parse("https://www.python.org/downloads/")
-        );
-      } else if (choice === err.actionLabel && err.actionUrl) {
-        void vscode.env.openExternal(vscode.Uri.parse(err.actionUrl));
-      } else if (choice === "Show Output") {
+    if (err instanceof BinaryInstallError) {
+      const choice = await vscode.window.showErrorMessage(
+        err.userMessage,
+        "Show Output"
+      );
+      if (choice === "Show Output") {
         void vscode.commands.executeCommand("cognis.showOutput");
       }
       return;
@@ -663,33 +671,24 @@ async function runInstallBackend(): Promise<void> {
 }
 
 /**
- * After an extension update, detect a managed backend that's older than the
- * extension and offer a one-click upgrade. Only prompts for the managed env
- * (never a bring-your-own Python), and remembers a "skip this version" choice so
- * it doesn't nag. Silent when nothing is installed or versions already match.
+ * After an extension update, detect a managed engine binary that's older than
+ * the extension and offer a one-click upgrade. Remembers a "skip this version"
+ * choice so it doesn't nag. Silent when nothing is installed or versions match.
  */
 async function maybeUpgradeBackend(): Promise<void> {
-  const userPythonPath = vscode.workspace
-    .getConfiguration("cognis")
-    .get<string>("pythonPath", "")
-    .trim();
-  let drift;
-  try {
-    drift = await checkManagedBackendDrift({
-      userPythonPath: userPythonPath || undefined,
-    });
-  } catch {
+  const binaryDrift = checkManagedBinaryDrift();
+  if (!binaryDrift.outdated || !binaryDrift.installed || !binaryDrift.expected) {
     return;
   }
-  if (!drift.outdated || !drift.installed || !drift.expected) {
-    return;
-  }
-  const skipKey = `cognis.skipBackendUpgrade.${drift.expected}`;
+  const installed = binaryDrift.installed;
+  const expected = binaryDrift.expected;
+
+  const skipKey = `cognis.skipBackendUpgrade.${expected}`;
   if (extensionContext?.globalState.get<boolean>(skipKey)) {
     return;
   }
   const choice = await vscode.window.showInformationMessage(
-    `Cognis was updated to ${drift.expected}, but its backend is still ${drift.installed}. ` +
+    `Cognis was updated to ${expected}, but its backend is still ${installed}. ` +
       "Upgrade the backend so features and fixes match?",
     "Upgrade backend",
     "Later",
@@ -708,8 +707,8 @@ async function maybeUpgradeBackend(): Promise<void> {
  * Verify the backend implements the contract version this extension was built
  * against, and surface a clear, actionable warning when they disagree. This is
  * the version-skew guard: the extension updates via the marketplace while the
- * backend updates via PyPI, so a mismatch is a normal production state that the
- * matched-version e2e suite cannot catch. Silent when the backend can't be
+ * engine binary updates via GitHub Releases, so a mismatch is a normal
+ * production state that the matched-version e2e suite cannot catch. Silent when the backend can't be
  * reached (fresh machine) or the contract matches. Remembers a per-skew "skip"
  * so it never nags.
  */
@@ -761,7 +760,8 @@ export function activate(context: vscode.ExtensionContext): void {
       : "info") as TraceLevel
   );
   trace.info("activate", "Cognis extension activating", { extVersion });
-  initManagedBackend(context, extVersion);
+  initManagedBinary(context, extVersion);
+  initManagedModel(context, extVersion);
   panelProvider = new CognisPanelProvider(
     context.extensionUri,
     context.extension?.packageJSON?.version

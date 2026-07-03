@@ -81,19 +81,15 @@ seed, then adds the structural signal they're blind to.
 
 ## Benchmarks (reproducible, honest)
 
-We don't ask you to trust a marketing number — run the comparison yourself. The
-harness is *fair*: every method gets the **same** query embedding, the **same**
-tf‑idf, and the **same** seed set; only the ranking step differs. It reports
-Recall@k, Precision@k, MRR **and Contamination@k** (hub fraction) — the column
-most tools hide — per repo and macro.
+We don't ask you to trust a marketing number. The evaluation harness is *fair*:
+every method gets the **same** query embedding, the **same** tf‑idf, and the
+**same** seed set; only the ranking step differs. It reports Recall@k,
+Precision@k, MRR **and Contamination@k** (hub fraction) — the column most tools
+hide — per repo and macro.
 
-```bash
-make bench-public                 # concept golden sets
-make bench-public BENCH_ARGS="--suffix _pr"   # objective, PR-derived ground truth
-```
-
-(Build the indexed + embedded public repos first — see the "Reproduce" steps in
-[.benchmarks/public/RESULTS.md](.benchmarks/public/RESULTS.md).)
+The full tier-tagged results, including the objective PR-derived ground truth and
+the honest caveats, are recorded in
+[.benchmarks/public/RESULTS.md](.benchmarks/public/RESULTS.md).
 
 **What the numbers actually say** (evidence-tagged; full log in RESULTS.md):
 
@@ -118,46 +114,54 @@ reproducible validation. Honest caveats are kept in RESULTS.md, never omitted.
 
 ![Cognis architecture](assets/architecture.svg)
 
-Everything runs on your machine in four stages:
+cognis ships as a **single static Rust binary** per platform — no Python, no
+runtime to install. Everything runs on your machine in four stages:
 
-1. **Index** (`cognis-indexd`) — watch → tree-sitter parse → resolve edges →
+1. **Index** (`cognis indexd`) — watch → tree-sitter parse → resolve edges →
    enrich (**+ scrub secrets before persisting**) → embed locally → write.
 2. **Store** — one local SQLite **Unified Code Knowledge Graph** (`.cognis/uckg.db`):
-   symbols + edges, FTS5 lexical index, `sqlite-vec` embeddings. No code leaves
-   your computer.
+   symbols + edges, FTS5 lexical index, `sqlite-vec` embeddings (SQLite is
+   bundled into the binary). No code leaves your computer.
 3. **Retrieve** (CSAR) — diffuse over the graph as described above.
-4. **Serve** (`cognis-mcpd`) — read-only MCP tools (flagship: `diffuse_context`)
+4. **Serve** (`cognis mcpd`) — read-only MCP tools (flagship: `diffuse_context`)
    with hard caps on depth, k, tokens, wall time, and concurrency, plus a
    hashed-argument audit log.
 
+The one binary is busybox-style multi-call: `cognis cli …`, `cognis mcpd`, and
+`cognis indexd` select each surface (and it also works when installed/symlinked
+as `cognis-cli` / `cognis-mcpd` / `cognis-indexd`). See
+[docs/distribution.md](docs/distribution.md).
+
 ### Swapping models
 
-The embedding and reranking models sit behind small protocols and a registry,
-so you can plug a different model in without touching the retrieval/capsule
-flow. A backend is selected by `.cognis/config.yaml` (`embedder.backend`,
-`reranker.backend`) and resolved through one factory used by every entry point
-(daemon, MCP server, CLI, eval) — there is no per-call-site `if backend == …`
-to keep in sync.
+The embedding and reranking models sit behind small Rust traits (`Embedder`,
+`Reranker`) and one factory (`build_embedder`), so you can plug a different model
+in without touching the retrieval/capsule flow. A backend is selected by
+`.cognis/config.yaml` (`embedder.backend`, `reranker.backend`) and resolved
+through one factory used by every entry point (daemon, MCP server, CLI, eval) —
+there is no per-call-site `if backend == …` to keep in sync.
 
-- **Embedders.** `local` (sentence-transformers, e.g. `bge-small-en-v1.5`) is
-  the production default. `voyage` and `openai` are opt-in stubs: selectable and
-  schema-compatible, but they return zero vectors until the API call is wired
-  in. Adding your own is one class plus a one-line `@register_embedder`.
-- **Vector dimension follows the model.** `LocalEmbedder` reports its real
+- **Embedders.** `onnx-local` runs `bge-small-en-v1.5` natively through ONNX
+  Runtime (the `ort` crate) — no Python or PyTorch — and is the production
+  default. `stub` returns zero vectors for fully offline lexical/structural-only
+  runs. Adding your own backend is one `impl Embedder` plus a match arm in the
+  factory.
+- **Vector dimension follows the model.** The embedder reports its real
   dimension and the store reconciles to it — swapping to a different-sized model
   recreates the `symbol_vec` table at the new width and re-embeds on the next
   index pass. No constant to edit.
 - **Reranking is an opt-in seam.** Disabled by default, in which case a
-  pass-through reranker leaves ranking byte-for-byte unchanged. Enable
-  `reranker.enabled` to route fused candidates through a cross-encoder
-  (`bge-reranker-v2-m3`); the scoring model itself is a stub today.
+  pass-through `NoOpReranker` leaves ranking byte-for-byte unchanged. Enable
+  `reranker.enabled` to route fused candidates through a cross-encoder; the
+  scoring model itself is a stub today.
 
 See [docs/architecture.md](docs/architecture.md) for the registry contract.
 
 ### Independent audit
 
 The math and security were reviewed against the actual code and tests
-(`packages/retrieval/.../csar.py`, `tests/unit/test_csar.py`, `tests/pbt/`).
+(`crates/cognis-csar/src/`, the CSAR theorem property tests `T1`–`T5`, and the
+`cognis-eval` parity harness).
 
 | Dimension | Rating | Basis |
 | --- | --- | --- |
@@ -173,36 +177,44 @@ Threat model: [docs/security.md](docs/security.md).
 ## Install
 
 **One-click prebuilt build (recommended).** Install the `.vsix`, open the Cognis
-panel, click **Install backend**, then **Set Up Workspace**. No terminal, no Python
-setup. [**Buy Cognis Pro**](https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW)
+panel, click **Install backend**, then **Set Up Workspace**. The extension
+downloads the single prebuilt `cognis` binary for your platform (checksum
+verified) — no terminal, no Python, no `pip`.
+[**Buy Cognis Pro**](https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW)
 and you're running in two minutes; follow the `INSTALL.md` in your download.
 
-**From source (for experts).** Requires Python ≥ 3.11 and Git.
+**Prebuilt binary (no build tools).** Download the `cognis` binary for your
+platform from the [latest release](https://github.com/buimanhtoan-it/cognis/releases),
+verify its `.sha256` sidecar, put it on your `PATH`, and run:
+
+```bash
+cognis bootstrap .   # init + index + health
+cognis mcpd          # start the MCP server (stdio)
+```
+
+The binary is fully self-contained: SQLite is bundled, and no Python runtime is
+required. The same file dispatches every surface — `cognis cli …`,
+`cognis mcpd`, `cognis indexd` — busybox-style.
+
+**From source (for experts).** Requires the [Rust toolchain](https://rustup.rs)
+(stable) and Git. No Python needed.
 
 ```bash
 git clone https://github.com/buimanhtoan-it/cognis && cd cognis
-python -m venv .venv
-# activate: source .venv/bin/activate   (Windows: .\.venv\Scripts\Activate.ps1)
-python -m pip install -e ".[indexer,embed-local,vector,tokenizers,mcp]"
+cargo build --release            # builds the single `cognis` binary
+./target/release/cognis bootstrap .   # init + index + health
+./target/release/cognis mcpd          # start the MCP server (stdio)
 ```
 
-Then either use the editor extension (`python scripts/setup_extension.py
---package`, install the `.vsix`, run **Cognis: Set Up Workspace**) or the CLI:
-
-```bash
-cognis-cli bootstrap .   # init + index + health
-cognis-mcpd              # start the MCP server (stdio)
-```
-
-Point any MCP client at `cognis-mcpd` (see
+Point any MCP client at the `cognis` binary's `mcpd` surface (see
 [docs/mcp-client-config.md](docs/mcp-client-config.md)). Re-index from scratch
-with `cognis-cli index --clear .`.
+with `cognis index --clear .`. Keep an index live with
+`cognis indexd --repo-root .`.
 
-> Module form if not on `PATH`: `python -m cognis.cli.main bootstrap .` and
-> `python -m cognis_mcpd.main`.
-
-See [docs/getting-started.md](docs/getting-started.md) and
-[docs/install.md](docs/install.md) for fresh-machine and `sqlite-vec` details.
+See [docs/getting-started.md](docs/getting-started.md),
+[docs/install.md](docs/install.md), and
+[docs/distribution.md](docs/distribution.md) for fresh-machine, build-matrix,
+and `sqlite-vec` details.
 
 ## Self-hosted (Docker)
 
@@ -223,25 +235,28 @@ See [docs/operations.md](docs/operations.md).
 | Retrieval layers (lexical, semantic, structural) | Implemented (also seed CSAR) |
 | MCP server (8 tools, stdio) | Implemented |
 | VS Code / Cursor extension | Implemented (`apps/cognis-vscode`) |
-| Embedder registry + local backend | Implemented; `voyage`/`openai` are selectable stubs |
+| Embedder registry + local backend | Implemented; `onnx-local` (native ONNX) production, `stub` for offline |
 | Model-driven vector dimension | Implemented (store reconciles to the model) |
 | Reranker seam | Wired; default off (pass-through), cross-encoder backend is a stub |
 | LSP resolver | Detection only; heuristic fallback for edges |
-| PyPI publish | Not yet — install from source |
+| Distribution | Single static Rust binary per platform (no Python runtime); see [docs/distribution.md](docs/distribution.md) |
 
 ## Development
 
+The engine is a Cargo workspace (`crates/*`, `bins/*`, `xtask`). Standard Rust
+tooling drives every check:
+
 | Command | Runs |
 | --- | --- |
-| `make lint` | `ruff format --check` + `ruff check` |
-| `make typecheck` | `mypy` (strict on `packages/core` + `packages/indexer`) |
-| `make test` | `pytest` unit + property tests |
-| `make e2e` | cross-app end-to-end (real CLI + indexd + mcpd) |
-| `make eval` | golden-set runner |
-| `make bench-public` | fair-harness retrieval comparison over public repos (RESULTS.md) |
+| `cargo fmt --all` | format the workspace (`--check` in CI) |
+| `cargo clippy --all-targets` | lints |
+| `cargo test` | unit + property tests (CSAR theorems T1–T5, parity harness) |
+| `cargo test -p cognis-eval` | differential parity + golden-set / fair-harness eval |
+| `cargo bench` | `criterion` kernel + `diffuse_context` latency |
+| `cargo xtask dist` | build + stage the single-binary distribution |
 
-`tasks.py` exposes the same recipes where `make` is unavailable (`invoke lint
-typecheck test`).
+The VS Code / Cursor extension (`apps/cognis-vscode`, TypeScript) is built with
+`npm` from its own directory.
 
 ## License
 

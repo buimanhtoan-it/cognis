@@ -2,7 +2,7 @@
   "name": "cognis-vscode",
   "displayName": "Cognis",
   "description": "Managed Cognis setup: semantic code search, MCP wiring, and live indexing across MCP-capable editors.",
-  "version": "0.7.3",
+  "version": "0.8.0",
   "publisher": "ToanBui",
   "license": "SEE LICENSE IN LICENSE.txt",
   "icon": "media/icon.png",
@@ -170,10 +170,25 @@
     "configuration": {
       "title": "Cognis",
       "properties": {
-        "cognis.pythonPath": {
+        "cognis.binaryRepo": {
           "type": "string",
           "default": "",
-          "description": "Optional: use your own Python environment for the Cognis backend. Leave empty to let Cognis install and manage its own backend automatically."
+          "description": "Advanced: GitHub repository (owner/name) that publishes the Cognis engine release binaries. Leave empty to use the default Cognis repository."
+        },
+        "cognis.binaryDownloadBaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Advanced: override the base URL the engine binary and its .sha256 checksum are downloaded from (for offline mirrors or pre-release testing). Leave empty to use the matching GitHub Release for this extension version."
+        },
+        "cognis.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Advanced: use a specific prebuilt Cognis engine binary at this path instead of the managed (downloaded) one. Intended for bring-your-own builds and end-to-end testing. Can also be set via the COGNIS_BINARY_PATH environment variable."
+        },
+        "cognis.modelDownloadBaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Advanced: override the base URL the semantic embedding model files (bge-small model.onnx / tokenizer.json / pooling.json) and their .sha256 checksums are downloaded from. Leave empty to use the matching GitHub Release for this extension version."
         },
         "cognis.buyUrl": {
           "type": "string",
@@ -188,11 +203,6 @@
           ],
           "default": "global",
           "description": "Where to write MCP client config. global merges cognis-<repo-slug> entries into ~/.cursor/mcp.json so multiple indexed repos can stay connected at once. workspace writes to .cursor/mcp.json inside the target repository."
-        },
-        "cognis.backendPackageSpec": {
-          "type": "string",
-          "default": "",
-          "description": "Advanced: override the pip requirement Cognis installs for its backend. Leave empty to install the engine version that matches this extension (recommended; deterministic). Set a value only to pin a specific version, use a mirror, or test a pre-release."
         },
         "cognis.autoManageOnActivate": {
           "type": "boolean",

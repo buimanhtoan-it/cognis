@@ -1,0 +1,36 @@
+[package]
+name = "cognis-indexer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "cognis indexer: tree-sitter parse → resolve → enrich/scrub → embed → write."
+
+[dependencies]
+cognis-core.workspace = true
+cognis-store.workspace = true
+cognis-embed.workspace = true
+# Parser stage (Task 8.1): tree-sitter + per-language grammars + normalizer.
+tree-sitter.workspace = true
+tree-sitter-python.workspace = true
+tree-sitter-typescript.workspace = true
+tree-sitter-go.workspace = true
+tree-sitter-java.workspace = true
+tree-sitter-c-sharp.workspace = true
+regex = { workspace = true }
+sha2.workspace = true
+# Resolver/Enricher/Writer stage (Task 8.2): edge meta + ambiguous flag JSON.
+serde_json.workspace = true
+tree-sitter-rust = "0.24"
+tree-sitter-c = "0.24.2"
+tree-sitter-cpp = "0.23.4"
+tree-sitter-ruby = "0.23.1"
+tree-sitter-php = "0.24.2"
+
+[dev-dependencies]
+proptest.workspace = true
+
+[features]
+# Forward the ONNX embedder backend to cognis-embed so a release build indexes
+# with real embeddings. Off by default so the workspace build/test stays offline.
+onnx = ["cognis-embed/onnx"]
+onnx-download = ["cognis-embed/onnx-download"]

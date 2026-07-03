@@ -1,42 +1,70 @@
 # Dependency Reference
 
-This document records why each runtime and development dependency exists. Use it
-when reviewing dependency additions or deciding whether a dependency still
-belongs in the project.
+This document records why each dependency exists. Use it when reviewing
+dependency additions or deciding whether a dependency still belongs in the
+project. The engine is a pure-Rust Cargo workspace; shared dependencies are
+declared once in the root `Cargo.toml` `[workspace.dependencies]` and each crate
+opts in as needed.
 
-## Core runtime dependencies
+## Core dependencies
 
 | Dependency | Purpose |
 | --- | --- |
-| `pydantic>=2.7` | Typed configuration loading and schema validation |
-| `pyyaml>=6.0` | Reading `.cognis/config.yaml` |
-| `click>=8.1` | Command-line interface for `cognis-cli` |
+| `serde` (+ derive) | Typed (de)serialization for config, contracts, and store models |
+| `serde_json` | JSON for MCP/CLI contracts, golden fixtures, status files |
+| `serde_yaml` | Reading/writing `.cognis/config.yaml` |
+| `thiserror` | Library error types (`CognisError`) |
+| `anyhow` | Application-level error context in bins |
+| `clap` (+ derive) | Command-line parsing for the `cognis` binary and its surfaces |
+| `rusqlite` (`bundled`) | SQLite (with FTS5) compiled from source into the binary — no system SQLite |
+| `sha2` | SHA-256 for node-id hashing and the hashed-argument audit log |
 
-## Optional feature dependencies
+## Indexer dependencies
 
-| Extra | Dependency | Purpose |
-| --- | --- | --- |
-| `indexer` | `tree-sitter`, `watchdog` | Parsing source files and watching the file system |
-| `indexer` | `tree-sitter-python>=0.21` | Python grammar support |
-| `indexer` | `tree-sitter-typescript>=0.21` | TypeScript grammar support |
-| `indexer` | `tree-sitter-go>=0.21` | Go grammar support |
-| `embed-local` | `sentence-transformers`, `numpy` | Local embedding generation |
-| `vector` | `sqlite-vec` | Vector similarity search |
-| `mcp` | `fastmcp` | MCP server runtime |
-| `tokenizers` | `tiktoken` | Token counting for capsule budgeting |
+| Dependency | Purpose |
+| --- | --- |
+| `tree-sitter` | Parser core for the indexer AST pass |
+| `tree-sitter-python` | Python grammar |
+| `tree-sitter-typescript` | TypeScript / JavaScript grammar |
+| `tree-sitter-go` | Go grammar |
+| `tree-sitter-java` | Java grammar |
+| `tree-sitter-c-sharp` | C# grammar |
+| `regex` | AST-text normalization in the parser stage |
+
+## Daemon dependencies
+
+| Dependency | Purpose |
+| --- | --- |
+| `notify` | File-system watch loop for `cognis indexd` incremental indexing |
+| `ctrlc` | Cross-platform Ctrl-C / SIGTERM handling for clean daemon shutdown |
+
+## Embedding dependencies (feature-gated)
+
+| Dependency | Purpose |
+| --- | --- |
+| `ort` (ONNX Runtime) | Native `bge-small-en-v1.5` inference for the `onnx-local` embedder — no Python/PyTorch at runtime (behind the `onnx` feature) |
+| `tokenizers` | The model's BERT WordPiece tokenizer (`tokenizer.json`) |
 
 ## Development dependencies
 
 | Dependency | Purpose |
 | --- | --- |
-| `ruff>=0.6` | Formatting and linting |
-| `mypy>=1.11` | Static type checking |
-| `pytest>=8.2` | Test runner |
-| `pytest-asyncio>=0.23` | Async test support |
-| `pytest-benchmark>=4.0` | Benchmark and latency checks |
-| `hypothesis>=6.108` | Property-based testing |
-| `pre-commit>=3.7` | Local hook runner |
-| `invoke>=2.2` | Cross-platform task runner |
+| `proptest` | Property-based testing (CSAR theorems, round-trips) |
+| `criterion` | Benchmark / latency harness (`cargo bench`) |
+| `tempfile` | Temp DB copies in parity/integration tests |
+
+## Tooling
+
+Formatting, linting, type/borrow checking, and testing are all provided by the
+Rust toolchain itself — no separate tools to install:
+
+| Command | Purpose |
+| --- | --- |
+| `cargo fmt --all` | Formatting (`--check` in CI) |
+| `cargo clippy --workspace --all-targets` | Linting |
+| `cargo test --workspace` | Unit + property + parity tests |
+| `cargo llvm-cov --workspace` | Coverage |
+| `cargo xtask dist` | Build + stage the single-binary distribution |
 
 ## Dependency policy
 
@@ -44,5 +72,6 @@ When adding a dependency:
 
 1. prefer the smallest viable dependency surface
 2. document the reason here
-3. keep optional features behind extras where possible
-4. avoid overlapping tools unless there is a clear operational reason
+3. declare shared deps in `[workspace.dependencies]`; gate optional ones behind
+   cargo features where possible
+4. avoid overlapping crates unless there is a clear operational reason

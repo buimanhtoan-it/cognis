@@ -8,8 +8,8 @@ debug `cognis`.
 The current implementation exposes these observability surfaces:
 
 - a structured diagnostics trace in the VS Code extension (JSON Lines)
-- in-memory metrics inside the MCP server
-- Python logging from the CLI and daemon processes
+- in-memory metrics inside the MCP server (`cognis mcpd`)
+- structured logging from the CLI and daemon surfaces
 - the append-only audit log under `.cognis/`
 
 ## Extension diagnostics trace
@@ -29,31 +29,24 @@ that closes the "e2e green, production broken" gap.
   (identifiers/counts only — never query text, file contents, or secrets),
   optional `durationMs`, and the `extVersion` so an entry can be correlated with
   a release.
-- **What is captured today:** every `cognis-cli` invocation (exit code +
+- **What is captured today:** every `cognis cli` invocation (exit code +
   duration), JSON parse/contract failures at the boundary, the startup
   version/capability handshake result, unknown indexd status phases, and the
   MCP-config write.
 
 ## Version/capability handshake
 
-On activation the extension runs `cognis-cli handshake` and compares the
+On activation the extension runs `cognis cli handshake` and compares the
 backend's `contract_version` against the version it was built with
 (`EXPECTED_CONTRACT_VERSION`). A skew (older/newer backend, or a missing required
 command/tool) is recorded to the trace and surfaced as an actionable warning,
-rather than failing silently downstream. The contract source of truth is
-`packages/core/cognis/contract.py`; the two version constants are kept in
-lockstep by an e2e test.
+rather than failing silently downstream. The two version constants are kept in
+lockstep by a test.
 
 ## Metrics
 
-`cognis-mcpd` records lightweight in-memory metrics during MCP tool execution.
+`cognis mcpd` records lightweight in-memory metrics during MCP tool execution.
 These metrics are intended for local inspection and internal debugging.
-
-The implementation lives in:
-
-```text
-apps/cognis-mcpd/cognis_mcpd/metrics.py
-```
 
 ### Current metric families
 
@@ -66,29 +59,9 @@ apps/cognis-mcpd/cognis_mcpd/metrics.py
 | `cognis_cache_misses_total` | Cache misses by cache name |
 | `cognis_index_size_rows` | Row count by database table |
 
-### Inspecting metrics in code
-
-```python
-from cognis_mcpd.metrics import METRICS
-
-snapshot = METRICS.snapshot()
-print(snapshot)
-```
-
-### Adding instrumentation
-
-```python
-from cognis_mcpd.metrics import METRICS
-
-METRICS.tool_calls.inc("my_tool")
-
-with METRICS.tool_latency.time("my_tool"):
-    result = do_work()
-```
-
 ## Logging
 
-`cognis` uses Python logging for operator-visible runtime events.
+`cognis` emits structured, operator-visible runtime events.
 
 ### Typical log levels
 
@@ -96,14 +69,14 @@ with METRICS.tool_latency.time("my_tool"):
 | --- | --- |
 | `DEBUG` | Per-query details and diagnostic information |
 | `INFO` | Startup, shutdown, indexing progress, and normal tool activity |
-| `WARNING` | Degraded behavior or partial failures |
+| `WARN` | Degraded behavior or partial failures |
 | `ERROR` | Hard failures that require attention |
 
 ### Configure the log level
 
 ```bash
 export COGNIS_LOG_LEVEL=DEBUG
-cognis-mcpd
+cognis mcpd
 ```
 
 ## Audit log
@@ -126,28 +99,25 @@ arguments so that sensitive request contents are not stored directly.
 
 ## Resource hygiene (RAM / handle leaks)
 
-`cognis-mcpd` is a long-lived process, so a per-call resource leak (an unclosed
-sqlite connection, a file handle, an unbounded cache) would climb until the
+`cognis mcpd` is a long-lived process, so a per-call resource leak (an unclosed
+SQLite connection, a file handle, an unbounded cache) would climb until the
 editor's MCP host is sluggish or the process is OOM-killed.
 
-- **Guard:** `tests/e2e/test_memory.py` spins up the real server over a real
-  process boundary, drives hundreds of MCP tool calls through one session, and
-  asserts bounded OS-handle and RSS growth (`pytest -m e2e -k memory`). A
-  near-linear handle climb is the fingerprint of a per-call connection/file
-  leak. Run it on a target machine to reproduce a suspected leak quantitatively.
-- **Deterministic cleanup:** semantic tool stages run on a throwaway worker
-  thread, and `Database.connect()` caches a sqlite connection *per thread*. The
-  worker now closes its connection in `_run_with_deadline`'s `finally`
-  (`_close_worker_db_connections`) so it is released immediately rather than
-  lingering until GC — this keeps peak handles/RSS low under concurrent bursts
-  and avoids the "unclosed database" finalizer warnings.
+- **Guard:** an e2e memory guard spins up the real server over a real process
+  boundary, drives hundreds of MCP tool calls through one session, and asserts
+  bounded OS-handle and RSS growth. A near-linear handle climb is the fingerprint
+  of a per-call connection/file leak. Run it on a target machine to reproduce a
+  suspected leak quantitatively.
+- **Deterministic cleanup:** per-thread SQLite connections are closed as soon as
+  a worker finishes rather than lingering until GC, which keeps peak handles/RSS
+  low under concurrent bursts.
 
 ## Operator workflow
 
 When debugging a deployment or local environment, check these in order:
 
-1. process logs from `cognis-mcpd` and `cognis-indexd`
-2. `cognis-cli health`
+1. process logs from `cognis mcpd` and `cognis indexd`
+2. `cognis cli health`
 3. `.cognis/audit.log`
 4. the local database and index status
 

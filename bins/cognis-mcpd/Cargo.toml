@@ -1,0 +1,27 @@
+[package]
+name = "cognis-mcpd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "cognis MCP daemon: stdio JSON-RPC server serving the 8 tools."
+
+[lib]
+name = "cognis_mcpd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cognis-mcpd"
+path = "src/main.rs"
+
+[dependencies]
+cognis-core.workspace = true
+cognis-mcp.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[features]
+# Forward the ONNX embedder backend so the release MCP daemon serves real
+# semantic search. Off by default (offline workspace build/test).
+onnx = ["cognis-mcp/onnx"]
+onnx-download = ["cognis-mcp/onnx-download"]

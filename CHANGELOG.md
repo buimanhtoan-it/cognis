@@ -4,6 +4,43 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1]
+
+### Fixed
+
+- **Self-contained release binary actually links ONNX Runtime.** The
+  `onnx-download` feature inherited `ort/load-dynamic` from `onnx`, so the
+  "self-contained" release binary was in fact built to resolve `onnxruntime.dll`
+  at runtime — and hung looking for it. Split the embed features so
+  `onnx-download` statically links via `ort/download-binaries` with **no**
+  `load-dynamic` (`_onnx` internal gate; `onnx` stays dynamic for dev/tests).
+- **Kiro editor support for MCP wiring.** The extension detected Kiro as
+  VS Code and wrote `.vscode/mcp.json`, which Kiro doesn't read. Added a `kiro`
+  host: auto-detected from the app name, writing the workspace
+  `.kiro/settings/mcp.json` (repo-scoped, matching each repo's `COGNIS_DB_PATH`),
+  labelled "Kiro" in the panel. Selectable via `cognis.mcpHost`.
+- **`Install Backend` no longer fails with `EPERM` on Windows.** Replacing the
+  engine binary while the editor had it running (as `mcpd`/`indexd`) failed to
+  rename over the in-use `.exe`. The install now swings the running binary aside
+  to `*.old-<ts>` before moving the new one in (rolling back on failure, sweeping
+  stale copies next run) — the standard Windows self-update pattern.
+
+### Added
+
+- **Release model provisioning + semantic smoke gate.** The release workflow now
+  attaches the bge-small model assets (`model.onnx`/`tokenizer.json`/
+  `pooling.json` + `.sha256`) to every release automatically, and gates the
+  release on an end-to-end `semantic_search` smoke test run against the freshly
+  built self-contained Linux binary.
+
+### Changed
+
+- **Shipped platforms narrowed to those with a prebuilt ONNX Runtime.** Windows
+  x64, Linux x64, and macOS arm64 (Intel macOS and arm64 Linux have no `ort`
+  prebuilt, so they aren't shipped); the extension's platform detection matches.
+- Renamed the parity oracle fixture `python_uckg.db` → `uckg_oracle.db` (it is a
+  static SQLite test asset, not a Python dependency).
+
 ## [Unreleased]
 
 ### Removed

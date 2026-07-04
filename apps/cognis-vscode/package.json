@@ -2,7 +2,7 @@
   "name": "cognis-vscode",
   "displayName": "Cognis",
   "description": "Managed Cognis setup: semantic code search, MCP wiring, and live indexing across MCP-capable editors.",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "publisher": "ToanBui",
   "license": "SEE LICENSE IN LICENSE.txt",
   "icon": "media/icon.png",
@@ -236,10 +236,11 @@
             "auto",
             "cursor",
             "vscode",
+            "kiro",
             "claude"
           ],
           "default": "auto",
-          "description": "MCP config target host. Use auto to detect the current editor."
+          "description": "MCP config target host. Use auto to detect the current editor (Cursor, VS Code, Kiro). Kiro writes .kiro/settings/mcp.json."
         },
         "cognis.pollHealthSeconds": {
           "type": "number",

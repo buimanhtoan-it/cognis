@@ -19,7 +19,7 @@ import type { McpConfigPayload, McpServerBlock } from "./types";
 export type { McpConfigScope } from "./mcpConfigPaths";
 export { deriveMcpServerName, isCognisMcpServerName } from "./mcpServerName";
 
-type ConfiguredMcpHost = "auto" | "cursor" | "vscode" | "claude";
+type ConfiguredMcpHost = "auto" | "cursor" | "vscode" | "kiro" | "claude";
 type McpTimeoutSetting =
   | "mcpSoftTimeoutSeconds"
   | "mcpHardTimeoutSeconds"
@@ -54,7 +54,7 @@ type RepoMcpMatch = {
   block: McpServerBlock;
 };
 
-export function resolveMcpHost(): "cursor" | "vscode" | "claude" {
+export function resolveMcpHost(): "cursor" | "vscode" | "kiro" | "claude" {
   const configured = vscode.workspace
     .getConfiguration("cognis")
     .get<string>("mcpHost") as ConfiguredMcpHost | undefined;
@@ -70,8 +70,14 @@ export function resolveMcpConfigScope(): McpConfigScope {
     .get<McpConfigScope>("mcpConfigScope", "workspace");
 }
 
-function detectDefaultHost(): "cursor" | "vscode" | "claude" {
+function detectDefaultHost(): "cursor" | "vscode" | "kiro" | "claude" {
   const appName = vscode.env.appName.toLowerCase();
+  // Kiro is a VS Code fork (its appName does NOT contain "code"), but it reads
+  // MCP from .kiro/settings/mcp.json — detect it before the generic "code" check
+  // so we never mis-write a Kiro workspace as if it were VS Code.
+  if (appName.includes("kiro")) {
+    return "kiro";
+  }
   if (appName.includes("cursor")) {
     return "cursor";
   }

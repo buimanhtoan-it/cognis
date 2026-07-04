@@ -583,6 +583,8 @@ function hostLabel(host: string | undefined): string {
       return "Cursor";
     case "vscode":
       return "VS Code";
+    case "kiro":
+      return "Kiro";
     case "claude":
       return "Claude";
     default:

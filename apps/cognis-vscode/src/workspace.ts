@@ -756,6 +756,8 @@ function hostDisplayName(host: string): string {
       return "Cursor";
     case "vscode":
       return "VS Code";
+    case "kiro":
+      return "Kiro";
     case "claude":
       return "Claude Desktop";
     default:

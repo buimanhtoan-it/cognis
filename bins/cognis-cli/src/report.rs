@@ -268,6 +268,7 @@ fn mcp_config_rel_for_host(host: &str) -> String {
     match host {
         "cursor" => ".cursor/mcp.json".to_string(),
         "vscode" => ".vscode/mcp.json".to_string(),
+        "kiro" => ".kiro/settings/mcp.json".to_string(),
         _ => ".mcp.json".to_string(),
     }
 }

@@ -450,12 +450,14 @@ export async function installManagedBinary(
 
   await phase("write binary", async () => {
     fs.mkdirSync(binDir, { recursive: true });
+    // Sweep any leftover *.old-* from a previous in-use swap (best effort).
+    sweepStaleOldBinaries(binDir);
     const tmp = `${destPath}.download`;
     fs.writeFileSync(tmp, binResp.body);
     if (process.platform !== "win32") {
       fs.chmodSync(tmp, 0o755);
     }
-    fs.renameSync(tmp, destPath);
+    swapBinaryIntoPlace(tmp, destPath);
     const marker = versionMarkerPath();
     if (marker) {
       fs.writeFileSync(marker, version, "utf8");
@@ -492,6 +494,66 @@ export async function uninstallManagedBinary(): Promise<BinaryUninstallOutcome> 
     throw err;
   }
   return { removed: true, detail: `Deleted the managed Cognis engine binary at ${dir}.` };
+}
+
+/**
+ * Move `tmp` to `destPath`, tolerant of `destPath` being a **running**
+ * executable (the common case on Windows: the extension has already spawned the
+ * engine as `mcpd`/`indexd`, so a plain rename over it fails with EPERM).
+ *
+ * Windows allows *renaming* an open file even though it forbids
+ * overwriting/deleting it, so we swing the in-use binary aside to `*.old-<ts>`
+ * first, then move the fresh one into place. If the swap fails we roll the old
+ * binary back so we never leave the install without a usable binary. The
+ * `.old-*` file is cleaned up on the next install (it may still be locked now).
+ */
+function swapBinaryIntoPlace(tmp: string, destPath: string): void {
+  if (!fs.existsSync(destPath)) {
+    fs.renameSync(tmp, destPath);
+    return;
+  }
+  try {
+    // Fast path: replace in place (works on POSIX and when not running).
+    fs.renameSync(tmp, destPath);
+    return;
+  } catch {
+    // Fall through to the aside-swap for the in-use (EPERM/EBUSY) case.
+  }
+  const aside = `${destPath}.old-${Date.now()}`;
+  fs.renameSync(destPath, aside); // renaming an open file is allowed on Windows
+  try {
+    fs.renameSync(tmp, destPath);
+  } catch (err) {
+    // Roll back so the previous (working) binary stays in place.
+    try {
+      fs.renameSync(aside, destPath);
+    } catch {
+      /* best effort */
+    }
+    throw err;
+  }
+  try {
+    fs.rmSync(aside, { force: true });
+  } catch {
+    /* still locked by the running process — swept on next install */
+  }
+}
+
+/** Best-effort removal of leftover `*.old-*` binaries from prior in-use swaps. */
+function sweepStaleOldBinaries(binDir: string): void {
+  try {
+    for (const name of fs.readdirSync(binDir)) {
+      if (/\.old-\d+$/.test(name)) {
+        try {
+          fs.rmSync(path.join(binDir, name), { force: true });
+        } catch {
+          /* still locked — try again next time */
+        }
+      }
+    }
+  } catch {
+    /* dir unreadable — nothing to sweep */
+  }
 }
 
 // ---------------------------------------------------------------------------

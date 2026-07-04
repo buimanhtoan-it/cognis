@@ -574,12 +574,40 @@ fn strip_verbatim(p: &Path) -> PathBuf {
 /// Repo-relative, forward-slash path for `abs` under `repo_root`, tolerant of a
 /// verbatim-prefix mismatch between the two. `None` when `abs` is not under the
 /// root.
+///
+/// Callers always pass an already-`canonical` `repo_root` (symlinks resolved,
+/// e.g. macOS `/var -> /private/var`; Windows verbatim / 8.3 short names). A
+/// cold walk yields paths that already sit under that canonical root, so the
+/// textual fast path hits. But an incremental / watcher event can carry the
+/// *un*-resolved form of the same path, so a pure textual strip would miss and
+/// silently drop the file (stale symbols never replaced, deletes never
+/// applied). When the fast path misses we resolve against the filesystem to
+/// match: canonicalize the path directly if it still exists, or canonicalize
+/// its (still-present) parent dir and re-attach the file name for a delete
+/// event whose path no longer exists.
 fn relativize(abs: &Path, repo_root: &Path) -> Option<String> {
-    let a = strip_verbatim(abs);
-    let r = strip_verbatim(repo_root);
-    a.strip_prefix(&r)
-        .ok()
-        .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+    fn strip(abs: &Path, repo_root: &Path) -> Option<String> {
+        let a = strip_verbatim(abs);
+        let r = strip_verbatim(repo_root);
+        a.strip_prefix(&r)
+            .ok()
+            .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+    }
+
+    if let Some(rel) = strip(abs, repo_root) {
+        return Some(rel);
+    }
+    if let Ok(canon) = abs.canonicalize() {
+        if let Some(rel) = strip(&canon, repo_root) {
+            return Some(rel);
+        }
+    }
+    if let (Some(parent), Some(name)) = (abs.parent(), abs.file_name()) {
+        if let Ok(canon_parent) = parent.canonicalize() {
+            return strip(&canon_parent.join(name), repo_root);
+        }
+    }
+    None
 }
 
 #[cfg(test)]

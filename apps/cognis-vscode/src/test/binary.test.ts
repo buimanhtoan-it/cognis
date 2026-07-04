@@ -43,15 +43,16 @@ import {
 test("detectTargetTriple maps every published platform to its triple", () => {
   assert.equal(detectTargetTriple("win32", "x64"), "x86_64-pc-windows-msvc");
   assert.equal(detectTargetTriple("darwin", "arm64"), "aarch64-apple-darwin");
-  assert.equal(detectTargetTriple("darwin", "x64"), "x86_64-apple-darwin");
   assert.equal(detectTargetTriple("linux", "x64"), "x86_64-unknown-linux-gnu");
-  assert.equal(detectTargetTriple("linux", "arm64"), "aarch64-unknown-linux-gnu");
 });
 
 test("detectTargetTriple returns undefined for an unsupported platform", () => {
   assert.equal(detectTargetTriple("win32", "arm64"), undefined);
   assert.equal(detectTargetTriple("linux", "ia32"), undefined);
   assert.equal(detectTargetTriple("aix", "ppc64"), undefined);
+  // No ort prebuilt ONNX Runtime → intentionally not shipped (see binary.ts).
+  assert.equal(detectTargetTriple("darwin", "x64"), undefined);
+  assert.equal(detectTargetTriple("linux", "arm64"), undefined);
 });
 
 // ---------------------------------------------------------------------------

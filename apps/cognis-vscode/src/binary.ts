@@ -38,11 +38,18 @@ export function formatElapsed(ms: number): string {
 /** GitHub repo that publishes the release binaries (owner/name). */
 const DEFAULT_BINARY_REPO = "buimanhtoan-it/cognis";
 
-/** The five platforms the release matrix builds (release.yml `dist-binaries`). */
+/**
+ * The platforms the release matrix ships a self-contained binary for
+ * (release.yml `dist-binaries`). Limited to the targets ort publishes a
+ * prebuilt ONNX Runtime for, since `--features onnx-download` statically links
+ * it: Windows x64, Linux x64, macOS arm64. Intel macOS (x86_64-apple-darwin)
+ * and arm64 Linux have no ort prebuilt and are intentionally absent — a user on
+ * one gets a clear "no binary for your platform" message rather than a 404.
+ */
 const TRIPLE_BY_PLATFORM: Record<string, Record<string, string>> = {
   win32: { x64: "x86_64-pc-windows-msvc" },
-  darwin: { arm64: "aarch64-apple-darwin", x64: "x86_64-apple-darwin" },
-  linux: { x64: "x86_64-unknown-linux-gnu", arm64: "aarch64-unknown-linux-gnu" },
+  darwin: { arm64: "aarch64-apple-darwin" },
+  linux: { x64: "x86_64-unknown-linux-gnu" },
 };
 
 // ---------------------------------------------------------------------------

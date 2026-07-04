@@ -34,11 +34,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Only the targets ort (2.0-rc.12) publishes a prebuilt ONNX Runtime
+        # for — `--features onnx-download` statically links that prebuilt, so a
+        # target without one can't produce the self-contained semantic binary.
+        # ort has NO prebuilt for x86_64-apple-darwin (Intel Mac) or
+        # aarch64-unknown-linux-gnu, so those are intentionally not shipped (the
+        # extension's detectTargetTriple advertises only these three and shows a
+        # clear "no binary for your platform" message elsewhere). Revisit if ort
+        # adds prebuilts or we vendor an ONNX Runtime build for them.
         include:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, cross: false }
-          - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu, cross: true }
           - { os: macos-latest, target: aarch64-apple-darwin, cross: false }
-          - { os: macos-latest, target: x86_64-apple-darwin, cross: false }
           - { os: windows-latest, target: x86_64-pc-windows-msvc, cross: false }
     steps:
       - uses: actions/checkout@v4

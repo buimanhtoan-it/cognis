@@ -140,10 +140,66 @@ jobs:
           name: cognis-model
           path: model/*
 
+  # End-to-end semantic smoke test on the REAL shipped artifact (the thing a
+  # buyer downloads): the freshly-built self-contained Linux binary + the
+  # provisioned bge-small model. Proves the whole semantic path actually returns
+  # correct results — engine binary runs with no external deps, loads the model,
+  # produces embeddings, and `semantic_search` over MCP ranks the right symbol
+  # top. Gates the release: a broken semantic pipeline blocks publishing.
+  semantic-smoke:
+    name: smoke · semantic (shipped linux binary)
+    runs-on: ubuntu-latest
+    needs: [dist-binaries, provision-model]
+    steps:
+      - name: Fetch shipped binary + model artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cognis-*
+          path: art/
+          merge-multiple: true
+
+      - name: Run a real semantic query against the shipped binary
+        run: |
+          set -euo pipefail
+          bin="art/cognis-x86_64-unknown-linux-gnu"
+          chmod +x "$bin"
+
+          echo "== binary is self-contained (no external ONNX Runtime) =="
+          "$bin" --version
+
+          # Arrange the model dir the way the extension does (plain leaf names).
+          mkdir -p model repo
+          cp art/bge-small-en-v1.5-model.onnx      model/model.onnx
+          cp art/bge-small-en-v1.5-tokenizer.json  model/tokenizer.json
+          cp art/bge-small-en-v1.5-pooling.json    model/pooling.json
+
+          # A tiny fixture repo with a semantically-distinctive function
+          # (printf, not heredoc — robust to YAML block-scalar indentation).
+          printf 'import time\ndef retry_http_request(url, max_attempts=3, backoff=0.5):\n    """Send an HTTP GET and retry on transient network failure with exponential backoff."""\n    return _send(url)\ndef _send(url):\n    raise ConnectionError("network down")\n' > repo/net.py
+          printf 'import json\ndef to_json(obj):\n    """Serialize a Python object into a compact JSON string."""\n    return json.dumps(obj, sort_keys=True)\n' > repo/serialize.py
+
+          echo "== index with real embeddings =="
+          COGNIS_ONNX_MODEL_DIR="$PWD/model" "$bin" cli --repo-root repo bootstrap | tee boot.log
+          grep -q "symbol vectors present" boot.log \
+            || { echo "::error::no embeddings produced — semantic pipeline broken"; exit 1; }
+
+          echo "== semantic_search over MCP (stdio) =="
+          {
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"semantic_search","arguments":{"query":"retry a failed network request with exponential backoff","k":3}}}'
+          } | COGNIS_DB_PATH="$PWD/repo/.cognis/uckg.db" COGNIS_ONNX_MODEL_DIR="$PWD/model" \
+                timeout 90 "$bin" mcpd > mcp_out.jsonl 2>/dev/null || true
+          echo "---- mcp response ----"; cat mcp_out.jsonl
+
+          grep -q "retry_http_request" mcp_out.jsonl \
+            || { echo "::error::semantic_search did not return the expected symbol"; exit 1; }
+          echo "== semantic smoke PASSED =="
+
   github-release:
     name: GitHub Release
     runs-on: ubuntu-latest
-    needs: [dist-binaries, provision-model]
+    needs: [dist-binaries, provision-model, semantic-smoke]
     steps:
       - uses: actions/checkout@v5
 

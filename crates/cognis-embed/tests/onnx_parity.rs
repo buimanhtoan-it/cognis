@@ -25,7 +25,7 @@
 //! 3. Run with the backend compiled in:
 //!    `cargo test -p cognis-embed --features onnx --test onnx_parity -- --nocapture`
 
-#![cfg(feature = "onnx")]
+#![cfg(feature = "_onnx")]
 
 use std::path::PathBuf;
 

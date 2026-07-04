@@ -19,13 +19,13 @@ use cognis_core::{CognisError, Config, Hit};
 mod reranker;
 mod stub;
 
-#[cfg(feature = "onnx")]
+#[cfg(feature = "_onnx")]
 mod onnx;
 
 pub use reranker::NoOpReranker;
 pub use stub::StubEmbedder;
 
-#[cfg(feature = "onnx")]
+#[cfg(feature = "_onnx")]
 pub use onnx::OnnxEmbedder;
 
 /// An embedding backend: turns text into fixed-dimension dense vectors.
@@ -87,7 +87,7 @@ pub fn build_embedder(cfg: &Config) -> Result<Box<dyn Embedder>> {
 }
 
 /// Construct the `onnx-local` backend (bge-small via `ort`) — Requirement 7.2.
-#[cfg(feature = "onnx")]
+#[cfg(feature = "_onnx")]
 fn build_onnx_embedder(cfg: &Config) -> Result<Box<dyn Embedder>> {
     let dir = onnx::resolve_model_dir(&cfg.embedder.model);
     let emb = OnnxEmbedder::from_model_dir(&dir, cfg.embedder.dim as usize)?;
@@ -97,7 +97,7 @@ fn build_onnx_embedder(cfg: &Config) -> Result<Box<dyn Embedder>> {
 /// Stand-in when the crate is built without the `onnx` feature: the id is known
 /// but the backend wasn't compiled in, so report exactly how to enable it
 /// rather than pretending the backend is merely unknown.
-#[cfg(not(feature = "onnx"))]
+#[cfg(not(feature = "_onnx"))]
 fn build_onnx_embedder(_cfg: &Config) -> Result<Box<dyn Embedder>> {
     Err(CognisError::Model(
         "embedder backend \"onnx-local\" was not compiled in; rebuild cognis-embed \
@@ -150,7 +150,7 @@ mod tests {
         assert!(matches!(build_embedder(&cfg), Err(CognisError::Model(_))));
     }
 
-    #[cfg(not(feature = "onnx"))]
+    #[cfg(not(feature = "_onnx"))]
     #[test]
     fn onnx_local_without_feature_reports_how_to_enable() {
         let cfg = cfg_with_backend("onnx-local", 384);
@@ -166,7 +166,7 @@ mod tests {
         }
     }
 
-    #[cfg(not(feature = "onnx"))]
+    #[cfg(not(feature = "_onnx"))]
     #[test]
     fn local_is_an_alias_for_the_onnx_backend() {
         // The default `.cognis/config.yaml` ships `embedder.backend: local`. It

@@ -34,7 +34,7 @@
 //! Run (needs the checked-in model assets under assets/models/):
 //!   cargo bench -p cognis-embed --features onnx
 
-#![cfg(feature = "onnx")]
+#![cfg(feature = "_onnx")]
 
 use std::path::PathBuf;
 

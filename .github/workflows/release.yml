@@ -72,14 +72,76 @@ jobs:
           path: |
             dist/cognis-${{ matrix.target }}*
 
+  # Semantic-model provisioning (Option B, end-to-end automation). The extension
+  # downloads the bge-small model assets from THIS release on first semantic use
+  # (see apps/cognis-vscode/src/model.ts): model.onnx + tokenizer.json +
+  # pooling.json, each checksum-verified against a `.sha256` sidecar. Without
+  # these assets a fresh buyer's semantic search silently stays off, so we attach
+  # them to every release automatically — no manual upload.
+  #
+  # Source: the community ONNX export `Xenova/bge-small-en-v1.5` (a BertModel
+  # feature-extraction graph: inputs input_ids/attention_mask/token_type_ids,
+  # output last_hidden_state[batch,seq,384] — exactly what the onnx-local backend
+  # in crates/cognis-embed/src/onnx.rs consumes). Pinned to a specific commit for
+  # reproducibility; the sidecars are generated from the bytes we actually
+  # download, so verification is self-consistent per release. pooling.json encodes
+  # bge's real policy (CLS pooling + L2 normalise).
+  provision-model:
+    name: provision · semantic model
+    runs-on: ubuntu-latest
+    env:
+      HF_REPO: Xenova/bge-small-en-v1.5
+      HF_REV: ea104dacec62c0de699686887e3f920caeb4f3e3
+      MODEL_ID: bge-small-en-v1.5
+    steps:
+      - name: Download + stage model assets
+        run: |
+          set -euo pipefail
+          base="https://huggingface.co/${HF_REPO}/resolve/${HF_REV}"
+          mkdir -p model
+          echo "[model] downloading model.onnx"
+          curl --fail --location --retry 3 --retry-delay 5 \
+            -o "model/${MODEL_ID}-model.onnx" "${base}/onnx/model.onnx"
+          echo "[model] downloading tokenizer.json"
+          curl --fail --location --retry 3 --retry-delay 5 \
+            -o "model/${MODEL_ID}-tokenizer.json" "${base}/tokenizer.json"
+          echo "[model] writing pooling.json (bge: CLS pooling + L2 normalise)"
+          printf '{"pooling":"cls","normalize":true}\n' > "model/${MODEL_ID}-pooling.json"
+
+          echo "[model] sanity-checking downloaded assets"
+          # Guard against a silent failure returning a tiny HTML error page
+          # instead of the real weights (bge-small fp32 model.onnx is ~130 MB).
+          onnx_bytes="$(stat -c%s "model/${MODEL_ID}-model.onnx")"
+          test "$onnx_bytes" -gt 50000000 \
+            || { echo "::error::model.onnx is only ${onnx_bytes} bytes — download likely failed"; exit 1; }
+          # last_hidden_state is the output tensor the engine reads; fail loudly
+          # if the upstream export ever changes its name so we never ship a model
+          # the onnx-local backend can't consume.
+          grep -q "last_hidden_state" "model/${MODEL_ID}-model.onnx" \
+            || { echo "::error::model.onnx has no last_hidden_state output tensor"; exit 1; }
+          test "$(stat -c%s "model/${MODEL_ID}-tokenizer.json")" -gt 100000 \
+            || { echo "::error::tokenizer.json looks too small — download likely failed"; exit 1; }
+
+          echo "[model] generating sha256 sidecars"
+          cd model
+          for f in "${MODEL_ID}-model.onnx" "${MODEL_ID}-tokenizer.json" "${MODEL_ID}-pooling.json"; do
+            sha256sum "$f" > "$f.sha256"
+            echo "  $(cat "$f.sha256")"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cognis-model
+          path: model/*
+
   github-release:
     name: GitHub Release
     runs-on: ubuntu-latest
-    needs: [dist-binaries]
+    needs: [dist-binaries, provision-model]
     steps:
       - uses: actions/checkout@v5
 
-      - name: Download platform binaries
+      - name: Download platform binaries + model assets
         uses: actions/download-artifact@v4
         with:
           pattern: cognis-*

@@ -37,17 +37,24 @@ criterion.workspace = true
 [[bench]]
 name = "embed_latency"
 harness = false
-required-features = ["onnx"]
+required-features = ["_onnx"]
 
 [features]
-# Compile the `onnx-local` backend. Uses ONNX Runtime via `ort`'s load-dynamic
-# strategy (resolves the shared lib at runtime — no build-time download).
-onnx = ["dep:ort", "dep:tokenizers", "dep:serde_json", "ort/load-dynamic"]
-# Same backend but linking the prebuilt ONNX Runtime downloaded at build time
-# (heavier build, fully self-contained binary). Implies `onnx`.
-# `ort/download-binaries` fetches the prebuilt lib over HTTPS at build time and
-# therefore *requires* a TLS backend to be selected explicitly (ort 2.0-rc will
-# hard-error otherwise). We pick `tls-rustls` — it uses `ring`, which
-# cross-compiles cleanly for the aarch64/musl release-matrix targets (no system
-# OpenSSL needed), unlike `tls-native`.
-onnx-download = ["onnx", "ort/download-binaries", "ort/tls-rustls"]
+# Internal: compile the `onnx-local` backend code + its deps. Strategy-agnostic
+# — it deliberately picks NO ONNX Runtime linking strategy, so a concrete one
+# (below) must be layered on top. Not meant to be selected on its own (ort-sys
+# needs a linking strategy or the build fails). All `#[cfg]` gates key off this
+# so the backend code compiles identically under either strategy.
+_onnx = ["dep:ort", "dep:tokenizers", "dep:serde_json"]
+# Dev/test build: resolve ONNX Runtime as a shared library at *runtime*
+# (`load-dynamic`), so the *build* stays offline (no native-lib download). The
+# host must provide onnxruntime (system lib or `ORT_DYLIB_PATH`) to actually run.
+onnx = ["_onnx", "ort/load-dynamic"]
+# Release build: download + **statically link** ONNX Runtime so the shipped
+# `cognis` is a single self-contained binary (design G2) — no external
+# onnxruntime.dll, and crucially NOT `load-dynamic` (mixing the two yields a
+# binary that silently looks for a dll at runtime and hangs). `download-binaries`
+# fetches the prebuilt lib over HTTPS at build time and therefore requires a TLS
+# backend; `tls-rustls` uses `ring`, which cross-compiles cleanly for the
+# aarch64 release-matrix targets (no system OpenSSL), unlike `tls-native`.
+onnx-download = ["_onnx", "ort/download-binaries", "ort/tls-rustls"]

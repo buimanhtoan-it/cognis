@@ -214,6 +214,20 @@ fn check_vector(repo_root: &Path) -> HealthCheck {
             HealthCheck::warn("no vectors stored yet (semantic search degraded)".to_string())
         }
         Ok(ids) => HealthCheck::ok(format!("{} symbol vectors present", ids.len())),
-        Err(err) => HealthCheck::warn(format!("vector check failed: {err}")),
+        Err(err) => {
+            let msg = err.to_string();
+            if msg.contains("vec0") {
+                // A legacy sqlite-vec `vec0` index this build can't read. It
+                // self-heals to the built-in vector format on the next index
+                // pass, so point the user at that instead of a cryptic error.
+                HealthCheck::warn(
+                    "legacy vector index from another build; run Rebuild Index \
+                     (after Install Backend) to migrate it and enable semantic search"
+                        .to_string(),
+                )
+            } else {
+                HealthCheck::warn(format!("vector check failed: {err}"))
+            }
+        }
     }
 }

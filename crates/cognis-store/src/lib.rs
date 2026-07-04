@@ -824,15 +824,27 @@ impl SymbolWriter for Database {
         // `vec0` carries a FLOAT[n] width; the BLOB fallback carries none.
         let table_dim = vec_table_dim(&conn)?;
 
-        // Idempotent no-op: stored dim already matches and the table form is
-        // consistent (BLOB fallback has no width, so it's always consistent).
-        if current == dim && table_dim.is_none_or(|d| d == dim) {
+        // Self-heal a legacy `vec0` table this build can't read: the shipped
+        // single binary has no sqlite-vec, so a `symbol_vec` virtual table
+        // created by an engine that *did* (e.g. migrated dev DBs) is unreadable
+        // here — every query hits `no such module: vec0`. When the extension
+        // can't load, rebuild `symbol_vec` as the plain-BLOB fallback so the
+        // linear-scan `vec_search` path works. Vectors are re-embedded on this
+        // same index pass, so the heal is transparent. A build WITH sqlite-vec
+        // keeps the vec0 form.
+        let vec_ext_ok = try_load_vec_extension(&conn);
+        let heal_vec0 = is_vec0 && !vec_ext_ok;
+        let target_is_vec0 = is_vec0 && vec_ext_ok;
+
+        // Idempotent no-op: stored dim already matches, the table form is
+        // consistent, and there's no legacy vec0 table to heal.
+        if current == dim && table_dim.is_none_or(|d| d == dim) && !heal_vec0 {
             return Ok(());
         }
 
         with_write_txn(&conn, |conn| {
             write_meta(conn, EMBEDDING_DIM_META_KEY, &dim.to_string())?;
-            recreate_vec_table(conn, is_vec0, dim)?;
+            recreate_vec_table(conn, target_is_vec0, dim)?;
             Ok(())
         })
     }

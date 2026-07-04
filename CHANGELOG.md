@@ -4,6 +4,22 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2]
+
+### Fixed
+
+- **Legacy `vec0` vector index self-heals.** A `symbol_vec` sqlite-vec `vec0`
+  virtual table created by an engine build that had sqlite-vec is unreadable by
+  the shipped single binary (no sqlite-vec) — every query hit
+  `no such module: vec0` and semantic search returned nothing. Indexing now
+  rebuilds such a table as the plain-BLOB fallback (`reconcile_embedding_dim`),
+  re-embedding on the same pass, so migrated/dev DBs recover automatically
+  instead of needing a manual `.cognis` wipe. Builds *with* sqlite-vec keep the
+  `vec0` form.
+- **Actionable health message for a legacy vector index.** `health` now reports
+  "legacy vector index … run Rebuild Index" instead of the raw
+  `no such module: vec0` store error.
+
 ## [0.8.1]
 
 ### Fixed

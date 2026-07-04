@@ -1,6 +1,6 @@
 {
   "_comment": "Python CSR code-graph oracle for cognis-store SymbolStore::build_code_graph (spec rust-engine-migration task 3.5, Requirement 4.3 / Property 2). Frozen oracle output captured from the Python engine; checked in, not regenerated.",
-  "db": "python_uckg.db",
+  "db": "uckg_oracle.db",
   "cases": [
     {
       "edge_kinds": null,

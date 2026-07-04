@@ -1,6 +1,6 @@
 {
   "_comment": "Python cosine-KNN oracle for cognis-store SymbolStore::vec_search fallback (spec rust-engine-migration task 3.3, Requirements 2.4 & 4.2 / P-PAR-VEC). Frozen oracle output captured from the Python engine; checked in, not regenerated.",
-  "db": "python_uckg.db",
+  "db": "uckg_oracle.db",
   "k": 10,
   "dim": 384,
   "cases": [

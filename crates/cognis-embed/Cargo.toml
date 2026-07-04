@@ -45,4 +45,9 @@ required-features = ["onnx"]
 onnx = ["dep:ort", "dep:tokenizers", "dep:serde_json", "ort/load-dynamic"]
 # Same backend but linking the prebuilt ONNX Runtime downloaded at build time
 # (heavier build, fully self-contained binary). Implies `onnx`.
-onnx-download = ["onnx", "ort/download-binaries"]
+# `ort/download-binaries` fetches the prebuilt lib over HTTPS at build time and
+# therefore *requires* a TLS backend to be selected explicitly (ort 2.0-rc will
+# hard-error otherwise). We pick `tls-rustls` — it uses `ring`, which
+# cross-compiles cleanly for the aarch64/musl release-matrix targets (no system
+# OpenSSL needed), unlike `tls-native`.
+onnx-download = ["onnx", "ort/download-binaries", "ort/tls-rustls"]

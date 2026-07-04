@@ -4,9 +4,10 @@
 //! distance/score within numeric tolerance) as the Python oracle on the same DB
 //! — P-PAR-VEC: `∀ query: top-k vec KNN Rust ≈ Python trong tol số học`.
 //!
-//! The checked-in fixture `tests/fixtures/python_uckg.db` stores embeddings in
-//! the plain-BLOB `symbol_vec` fallback shape (built by the Python oracle with
-//! sqlite-vec forced off), so this exercises the **fallback
+//! The checked-in fixture `tests/fixtures/uckg_oracle.db` (a static SQLite DB,
+//! not a Python dependency) stores embeddings in the plain-BLOB `symbol_vec`
+//! fallback shape (captured with sqlite-vec forced off), so this exercises the
+//! **fallback
 //! linear-scan path** — the path that runs whenever sqlite-vec can't be loaded
 //! (Requirement 2.4), and the only one available in an offline CI.
 //!
@@ -167,7 +168,7 @@ fn vec_search_self_query_returns_self_top1() {
 #[test]
 fn vec_search_graceful_edge_cases() {
     let tmp = tempfile::tempdir().unwrap();
-    let db = open_temp_copy(&tmp, "python_uckg.db");
+    let db = open_temp_copy(&tmp, "uckg_oracle.db");
 
     // Empty query and k = 0 are graceful no-ops, not errors.
     assert!(db.vec_search(&[], 10).expect("empty query").is_empty());

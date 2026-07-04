@@ -7,7 +7,7 @@
 //! and self-loops on isolated nodes.
 //!
 //! The oracle is captured in `tests/fixtures/code_graph_parity_golden.json` from
-//! the Python builder run against the checked-in fixture `python_uckg.db`,
+//! the builder run against the checked-in fixture `uckg_oracle.db`,
 //! flattening its adjacency list into the same CSR layout. Capturing the
 //! golden lets this run under plain `cargo test` with no Python runtime,
 //! mirroring `tests/fts_parity.rs` / `tests/vec_parity.rs`. The golden and the

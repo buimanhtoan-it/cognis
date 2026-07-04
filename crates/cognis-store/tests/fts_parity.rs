@@ -6,7 +6,7 @@
 //!
 //! The oracle is captured in `tests/fixtures/fts_parity_golden.json` from the
 //! Python oracle — the exact `symbol_fts MATCH` query the engine's lexical layer
-//! issued against the checked-in fixture `python_uckg.db`. Capturing the
+//! issued against the checked-in fixture `uckg_oracle.db`. Capturing the
 //! golden lets this run under plain `cargo test` with no Python runtime,
 //! mirroring the approach in `tests/python_db_compat.rs`. The golden and the
 //! fixture DB are checked in as frozen oracle output; there is no toolchain in
@@ -33,7 +33,7 @@ fn open_temp_copy(tmp: &tempfile::TempDir, db_name: &str) -> Database {
     );
     let dst = tmp.path().join(db_name);
     fs::copy(&src, &dst).expect("copy fixture");
-    Database::open(&dst).expect("open Python-built DB")
+    Database::open(&dst).expect("open oracle fixture DB")
 }
 
 fn load_golden() -> Value {
@@ -100,7 +100,7 @@ fn fts_search_hit_set_matches_python_oracle() {
 #[test]
 fn fts_search_respects_k_limit_and_blank_query() {
     let tmp = tempfile::tempdir().unwrap();
-    let db = open_temp_copy(&tmp, "python_uckg.db");
+    let db = open_temp_copy(&tmp, "uckg_oracle.db");
 
     // "tokens" matches all 4 fixture symbols; k caps the result.
     let top1 = db.fts_search("tokens", 1).expect("fts_search k=1");

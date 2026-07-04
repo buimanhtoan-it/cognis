@@ -112,6 +112,11 @@ scratch_*
 *.db-wal
 *.db-shm
 *.duckdb
+# Exception: the frozen parity oracle fixture is a checked-in test asset (a
+# static SQLite DB — NOT a Python runtime dependency). It is small (~104KB) and
+# required by crates/cognis-store parity tests in fresh CI clones (the golden
+# JSONs are tracked but useless without this DB).
+!crates/cognis-store/tests/fixtures/uckg_oracle.db
 *.duckdb-journal
 *.idx
 *.index

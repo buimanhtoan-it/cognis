@@ -171,7 +171,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   benchmark harnesses under `.benchmarks/`. Preserved the data the Rust tests
   consume: `tests/e2e/baselines/` (Rust `index_parity`), `tests/e2e/contracts/`
   (extension `contractParity`), the per-crate `crates/*/tests/fixtures/` parity
-  goldens + `python_uckg.db`, and the `.benchmarks` data (`*.db`/`*.json`/
+  goldens + `uckg_oracle.db`, and the `.benchmarks` data (`*.db`/`*.json`/
   `*.npy`). Scrubbed Python from active docs and dev guides (`CONTRIBUTING.md`,
   `business/release-cheatsheet.md`, `docs/eval/phase1-baseline.md`,
   `docs/troubleshooting-huggingface.md`, `docs/native-core-rust.md`,

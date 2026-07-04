@@ -67,9 +67,9 @@ fn store_fixtures_dir() -> PathBuf {
         .join("fixtures")
 }
 
-/// The checked-in Python-built UCKG, if present.
-fn python_fixture_db() -> Option<PathBuf> {
-    let p = store_fixtures_dir().join("python_uckg.db");
+/// The checked-in frozen UCKG oracle fixture (a static SQLite DB), if present.
+fn oracle_fixture_db() -> Option<PathBuf> {
+    let p = store_fixtures_dir().join("uckg_oracle.db");
     p.is_file().then_some(p)
 }
 
@@ -120,11 +120,11 @@ fn fixture_cases() -> Vec<QueryCase> {
 
 #[test]
 fn rust_vs_rust_determinism_on_shared_db() {
-    let Some(src) = python_fixture_db() else {
+    let Some(src) = oracle_fixture_db() else {
         eprintln!(
             "SKIP differential parity (determinism): fixture {:?} not found \
              (checked-in frozen oracle fixture).",
-            store_fixtures_dir().join("python_uckg.db")
+            store_fixtures_dir().join("uckg_oracle.db")
         );
         return;
     };
@@ -197,16 +197,16 @@ fn hits_from_ids(ids: &[&str], layer: &str) -> Vec<Hit> {
 }
 
 #[test]
-fn rust_engine_reproduces_python_oracle_outputs() {
-    let Some(src) = python_fixture_db() else {
-        eprintln!("SKIP differential parity (oracle): fixture python_uckg.db not found.");
+fn rust_engine_reproduces_oracle_outputs() {
+    let Some(src) = oracle_fixture_db() else {
+        eprintln!("SKIP differential parity (oracle): fixture uckg_oracle.db not found.");
         return;
     };
     let fts_golden = load_golden("fts_parity_golden.json");
     let vec_golden = load_golden("vec_parity_golden.json");
     if fts_golden.is_none() && vec_golden.is_none() {
         eprintln!(
-            "SKIP differential parity (oracle): no captured Python goldens in {:?} \
+            "SKIP differential parity (oracle): no captured goldens in {:?} \
              (checked-in frozen oracle fixtures).",
             store_fixtures_dir()
         );

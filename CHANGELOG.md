@@ -4,20 +4,65 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4]
+
+### Added
+
+- **Non-destructive lifecycle actions.** New commands + panel buttons: **Disconnect
+  MCP** (removes only this repo's entry from `mcp.json`, keeps the index),
+  **Cancel Indexing** (stops a running index build, keeps the partial index), and
+  **Uninstall Engine** (modal-confirmed; removes the downloaded binary + semantic
+  model but keeps `.cognis` and MCP config).
+- **View title-bar shortcuts.** The Cognis panel's title bar exposes Start/Stop
+  MCP server and Pause/Resume sync as toggle buttons, so the core actions no
+  longer require the Command Palette.
+
+### Changed
+
+- **Coherent command labels.** Removed the duplicated "Cognis: Cognis:" prefix
+  from every command title, unified on the term **Engine** (dropping "Backend")
+  across all user-visible text, and gave the six easily-confused commands
+  distinct labels (e.g. "Show Activity Log" vs "Show Diagnostics Log", "Rebuild
+  Index (this workspace)" vs "Cold Restart").
+- **Plain-language panel wording.** Hid internal jargon (stdio transport, raw
+  MCP URLs/server ids, raw error strings) from the main status text, relocating
+  raw values to labeled detail rows. Unified the "Resume sync" label so the same
+  action always reads the same.
+
+### Fixed
+
+- **No orphaned daemons on shutdown.** `deactivate()` now terminates every tracked
+  `cognis-indexd` process, including pid-only handles attached to an existing
+  daemon (tree-kill on Windows), so closing the editor never leaves a stray
+  indexing process running.
+
+## [0.8.3]
+
+### Added
+
+- **Danger-zone recovery buttons.** The panel's Danger zone gains a "Reset &
+  recover" group: **Reinstall engine** (delete + re-download the checksum-verified
+  binary + model, keeping the index/MCP wiring) and **Cold restart (wipe &
+  rebuild)** (wipe `.cognis`, purge all Cognis MCP entries, uninstall engine +
+  model, then re-download everything and re-index from scratch). Both are also in
+  the Command Palette (`Cognis: Reinstall Engine`, `Cognis: Cold Restart`). The
+  one-click fix for a corrupted/stale state (legacy vector index, locked binary,
+  half-finished setup).
+
 ## [0.8.2]
 
 ### Fixed
 
 - **Legacy `vec0` vector index self-heals.** A `symbol_vec` sqlite-vec `vec0`
   virtual table created by an engine build that had sqlite-vec is unreadable by
-  the shipped single binary (no sqlite-vec) — every query hit
+  the shipped single binary (no sqlite-vec) â€” every query hit
   `no such module: vec0` and semantic search returned nothing. Indexing now
   rebuilds such a table as the plain-BLOB fallback (`reconcile_embedding_dim`),
   re-embedding on the same pass, so migrated/dev DBs recover automatically
   instead of needing a manual `.cognis` wipe. Builds *with* sqlite-vec keep the
   `vec0` form.
 - **Actionable health message for a legacy vector index.** `health` now reports
-  "legacy vector index … run Rebuild Index" instead of the raw
+  "legacy vector index â€¦ run Rebuild Index" instead of the raw
   `no such module: vec0` store error.
 
 ## [0.8.1]
@@ -27,7 +72,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Self-contained release binary actually links ONNX Runtime.** The
   `onnx-download` feature inherited `ort/load-dynamic` from `onnx`, so the
   "self-contained" release binary was in fact built to resolve `onnxruntime.dll`
-  at runtime — and hung looking for it. Split the embed features so
+  at runtime â€” and hung looking for it. Split the embed features so
   `onnx-download` statically links via `ort/download-binaries` with **no**
   `load-dynamic` (`_onnx` internal gate; `onnx` stays dynamic for dev/tests).
 - **Kiro editor support for MCP wiring.** The extension detected Kiro as
@@ -39,7 +84,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   engine binary while the editor had it running (as `mcpd`/`indexd`) failed to
   rename over the in-use `.exe`. The install now swings the running binary aside
   to `*.old-<ts>` before moving the new one in (rolling back on failure, sweeping
-  stale copies next run) — the standard Windows self-update pattern.
+  stale copies next run) â€” the standard Windows self-update pattern.
 
 ### Added
 
@@ -54,20 +99,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Shipped platforms narrowed to those with a prebuilt ONNX Runtime.** Windows
   x64, Linux x64, and macOS arm64 (Intel macOS and arm64 Linux have no `ort`
   prebuilt, so they aren't shipped); the extension's platform detection matches.
-- Renamed the parity oracle fixture `python_uckg.db` → `uckg_oracle.db` (it is a
+- Renamed the parity oracle fixture `python_uckg.db` â†’ `uckg_oracle.db` (it is a
   static SQLite test asset, not a Python dependency).
 
 ## [Unreleased]
 
 ### Removed
 
-- **All Python-backend/runtime remnants — the engine is now pure Rust, end to
+- **All Python-backend/runtime remnants â€” the engine is now pure Rust, end to
   end.** The extension no longer has any Python runtime path: deleted
   `apps/cognis-vscode/src/backend.ts` (pip/venv managed-install) and
   `python.ts` (interpreter resolution + preflight), and removed the
   `cognis.pythonPath` and `cognis.backendPackageSpec` settings. `Install
   backend` always downloads the prebuilt `cognis` binary from the GitHub
-  Release (checksum-verified) — no `pip install`, no PyPI, no interpreter
+  Release (checksum-verified) â€” no `pip install`, no PyPI, no interpreter
   discovery. The `cli`/`mcpd`/`indexd` surfaces are always dispatched from the
   managed binary (`resolveCliInvocation`/`resolveMcpdInvocation`/
   `resolveIndexdInvocation`), keeping the `COGNIS_BINARY_PATH` /
@@ -79,7 +124,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   "Checking Python environment" preflight (health/doctor cover it), and the
   docs/business runbooks now describe "download the Rust binary + model from
   GitHub Releases" instead of publishing to PyPI. **Python as an *indexed
-  language* is untouched** — tree-sitter-python parsing, `.py` fixtures, and the
+  language* is untouched** â€” tree-sitter-python parsing, `.py` fixtures, and the
   benchmark repos all remain.
 
 ### Changed
@@ -87,14 +132,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Edge resolver: defused a catastrophic edge explosion.** The heuristic
   `calls` resolver scanned **every identifier** in each symbol body and linked
   it to **every** same-named symbol repo-wide, plus a fuzzy-prefix phase
-  (`get` → every `get*`), and treated class bodies as callers. On real code this
+  (`get` â†’ every `get*`), and treated class bodies as callers. On real code this
   exploded: indexing jsoup produced **739,940 edges for 4,469 symbols** (~165/
   symbol) and made `diffuse_context` take ~16.6s. Rewrote it to resolve only at
   real **call sites** (`name(`), only from **callable** sources (not class
   bodies), dropped the fuzzy phase, dropped cross-language matches, and **capped
   cross-module fan-out** for common names (`get`/`toString` no longer fan out
-  across the repo). Result on jsoup: **45,910 edges (~10/symbol, a 16× drop)**,
-  index time 174s → 50s, and `diffuse_context` back to interactive latency.
+  across the repo). Result on jsoup: **45,910 edges (~10/symbol, a 16Ã— drop)**,
+  index time 174s â†’ 50s, and `diffuse_context` back to interactive latency.
   Same-file resolution is unchanged. (`crates/cognis-indexer/src/resolver.rs`,
   +4 tests: call-site precision, class-body exclusion, fan-out cap, cross-module.)
 
@@ -106,14 +151,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in the binary. New `apps/cognis-vscode/src/model.ts` fetches them from the
   GitHub Release after the engine binary installs, **checksum-verifies each file**
   against its `.sha256` sidecar, stages them under global storage, and points the
-  engine at them via `COGNIS_ONNX_MODEL_DIR` — wired into the `mcp.json` server
+  engine at them via `COGNIS_ONNX_MODEL_DIR` â€” wired into the `mcp.json` server
   env (editor-spawned `mcpd`), the `indexd` daemon, the HTTP MCP server, and
   `cli` spawns. Until the model is present, semantic degrades to empty (lexical +
   structural + diffusion still work). New `cognis.modelDownloadBaseUrl` setting;
   the model is removed by "Remove everything". +6 unit tests (manifest, env
   gating, download+verify, checksum rejection, uninstall). **Release note:** the
   release must publish the 6 model assets (`bge-small-en-v1.5-<file>` + `.sha256`)
-  or semantic stays off — see `business/release-cheatsheet.md`.
+  or semantic stays off â€” see `business/release-cheatsheet.md`.
 - **Language support expanded to Rust, C, C++, Ruby, and PHP** (on top of
   TypeScript/JavaScript, Python, Go, C#, Java) via a new **table-driven generic
   tree-sitter extractor** (`crates/cognis-indexer/src/parser/generic.rs`): a
@@ -122,7 +167,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   qualified-name nesting (`Class.method`, C/C++ names resolved through the
   declarator chain). Wired `language_for_path`, the walker's extension table,
   and the default `languages.enabled` config. Verified by per-language
-  extraction tests and by indexing real Rust (`cognis-core`) end to end —
+  extraction tests and by indexing real Rust (`cognis-core`) end to end â€”
   `symbol_search` returns real Rust symbols over MCP. Grammars:
   tree-sitter-rust 0.24, -c 0.24, -cpp 0.23, -ruby 0.23, -php 0.24 (ABI-
   compatible with tree-sitter 0.26).
@@ -132,7 +177,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `cognis-cli` `index`/`bootstrap`/`health` tests are now isolated from an
   ambient `COGNIS_DB_PATH` (they exercise default-path resolution), so a set
   env var no longer causes false failures.
-- **The extension ↔ CLI JSON contract is now complete and honest — the setup
+- **The extension â†” CLI JSON contract is now complete and honest â€” the setup
   flow works against the Rust binary (Requirement 3).** The handshake advertised
   `paths`, `doctor`, and `mcp-config` but the Rust CLI never implemented them,
   and `health` / `bootstrap` emitted the wrong JSON shape, so the extension's
@@ -140,28 +185,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   broke against the pure-Rust backend. Aligned the whole surface:
   - Added `cognis-cli paths` (`WorkspacePaths`), `doctor` (`PrerequisiteReport`),
     and `mcp-config` (`McpConfigPayload`, server block launching `<binary> mcpd`
-    with `COGNIS_DB_PATH`) — matching `tests/e2e/contracts/*.json` and `types.ts`.
+    with `COGNIS_DB_PATH`) â€” matching `tests/e2e/contracts/*.json` and `types.ts`.
   - `health --json` now serializes `checks` as a JSON **object** keyed by check
     name (was an array of pairs), matching the contract.
   - `bootstrap --json` now emits the full `BootstrapPayload`
     (command/runtime_version/repo_root/index_path/db_path/skip_embeddings/paths/
     phases/health/overall/exit_code) instead of an ad-hoc `{init,index,health}`.
   - `cognis-cli index` / `bootstrap` now run the **real** `cognis-indexer`
-    pipeline (was a "pending — Task 8" stub), so bootstrap produces a queryable
+    pipeline (was a "pending â€” Task 8" stub), so bootstrap produces a queryable
     UCKG and health reports actual symbol counts. `--skip-embeddings` indexes
     with no embedder (no model, and no vectors written).
 - **Full-stack host e2e now drives the real Rust binary.** The harness
   (`runHostTests.ts`) builds `cognis` and points the extension at it via the new
   `COGNIS_BINARY_PATH` / `cognis.binaryPath` override (`binary.ts`); the
   full-stack test (`fullStack.hosttest.ts`) drops the deleted-`COGNIS_TEST_PYTHON`
-  gate and exercises `setupWorkspace` → `.cognis` + `mcp.json` end to end against
-  the engine binary. This closes the last "unverified editor↔backend path" gap.
+  gate and exercises `setupWorkspace` â†’ `.cognis` + `mcp.json` end to end against
+  the engine binary. This closes the last "unverified editorâ†”backend path" gap.
 
-- **Semantic search over MCP now actually returns hits — the end-to-end
+- **Semantic search over MCP now actually returns hits â€” the end-to-end
   embedding pipeline was never wired (Requirements 4.2, 7.1, 7.2).** Tasks 5/6/8
   had landed the pieces in isolation (an ONNX bge-small embedder with a parity
   test, `SymbolStore::vec_search` with a parity test) but nothing connected
-  index-time embedding → vector persistence → query-time semantic search, so the
+  index-time embedding â†’ vector persistence â†’ query-time semantic search, so the
   shipping engine served **lexical-only**: `StoreEngine::semantic_search` was a
   hardcoded `Ok(vec![])`, `semantic_available()` was hardcoded `false`,
   `cognis-mcp` had no `cognis-embed` dependency, the indexer's embedder field was
@@ -189,7 +234,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     *Wiring: verified offline (unit/integration, injected deterministic
     embedder). ONNX parity: proven previously (`onnx_parity`). Release-matrix
     ONNX build + model provisioning: needs a tagged CI run to confirm.*
-- **`cognis-mcpd --transport http` now binds and serves — the HTTP transport was
+- **`cognis-mcpd --transport http` now binds and serves â€” the HTTP transport was
   a no-op (Requirement 3).** `run()` ignored argv and always ran stdio, so the
   panel-managed "Start MCP server" flow timed out waiting for a bind. Added
   argv parsing (`--transport`/`--host`/`--port`) and a dependency-free HTTP/1.1
@@ -201,7 +246,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 
-- **Python is gone — the engine is now pure Rust (rust-engine-migration Task 11
+- **Python is gone â€” the engine is now pure Rust (rust-engine-migration Task 11
   / K8, Requirements 1.1, 1.2).** Deleted the five Python packages
   (`packages/core`, `packages/retrieval`, `packages/indexer`, `packages/adapters`,
   `packages/eval`), the three Python console apps (`cognis-cli`, `cognis-mcpd`,
@@ -211,15 +256,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   non-Rust component is the VS Code / Cursor extension (`apps/cognis-vscode`,
   TypeScript), which is out of scope and unchanged. This was the **final** step
   of the strangler-fig migration: it landed only after every parity gate was
-  green (Property 1–5 — CSAR theorems T1–T5, kernel/RRF/FTS/vec parity, MCP
+  green (Property 1â€“5 â€” CSAR theorems T1â€“T5, kernel/RRF/FTS/vec parity, MCP
   contract invariance, quality non-regression). *Migration parity:
   empirically-supported (differential harness on identical UCKG DBs); CSAR
   theorems: proven (machine-verified algebra, reproduced in `proptest`).*
-- **Full Python purge — every remaining Python artifact and reference removed.**
+- **Full Python purge â€” every remaining Python artifact and reference removed.**
   Following K8, deleted the checked-in Python virtualenv (`.venv-bootstrap/`),
   all developer/oracle Python scripts under `scripts/` (`build_*_golden.py`,
   `build_rust_store_fixture.py`, `export_bge_onnx.py`, `bump_version.py`,
-  `run_eval.py`, `build_installer.py`, …), the entire top-level Python `tests/`
+  `run_eval.py`, `build_installer.py`, â€¦), the entire top-level Python `tests/`
   suite (unit/pbt/integration/e2e/benchmark/coverage Python), and the Python
   benchmark harnesses under `.benchmarks/`. Preserved the data the Rust tests
   consume: `tests/e2e/baselines/` (Rust `index_parity`), `tests/e2e/contracts/`
@@ -242,7 +287,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `docs/install.md`, `docs/getting-started.md`, `docs/quickstart.md`, and
   `docs/mcp-client-config.md` describe the single static `cognis` binary instead
   of `pip install`: download a prebuilt per-platform artifact (or
-  `cargo build --release`), then run the multi-call binary (`cognis cli …`,
+  `cargo build --release`), then run the multi-call binary (`cognis cli â€¦`,
   `cognis mcpd`, `cognis indexd`). `docs/architecture.md` now documents the
   all-Rust Cargo-workspace crate map (`cognis-core/store/embed/indexer/retrieval/
   csar/mcp/eval` + `bins/*` + `xtask`), the bundled-SQLite store, the `Embedder`/
@@ -254,13 +299,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **Single-binary distribution scaffolding (rust-engine-migration Task 10.1 /
-  G2, Requirements 8.1–8.2).** A per-platform release matrix builds the static
+  G2, Requirements 8.1â€“8.2).** A per-platform release matrix builds the static
   multi-call `cognis` binary with SQLite bundled (`rusqlite` `bundled`, no system
   SQLite or Python at runtime). New `xtask` crate (`cargo xtask dist`) builds
   `--release -p cognis`, stages `dist/cognis-<triple>[.exe]`, and emits a
   `.sha256` sidecar. `.github/workflows/release.yml` gains a `dist-binaries`
-  matrix (Linux amd64/arm64, macOS arm64/amd64, Windows amd64) — native runners
-  plus `cross` for Linux aarch64 (`Cross.toml`) — and attaches the binaries to
+  matrix (Linux amd64/arm64, macOS arm64/amd64, Windows amd64) â€” native runners
+  plus `cross` for Linux aarch64 (`Cross.toml`) â€” and attaches the binaries to
   the GitHub Release. `[profile.release]` now strips symbols. The default binary
   uses the in-Rust BLOB vec fallback and fetches the ONNX model asset on first
   run, staying self-contained and offline; `--features onnx-download` links ONNX
@@ -273,22 +318,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Embedding runtime: `ort` (ONNX Runtime) over `candle`** for the native
   `cognis-embed` backend (rust-engine-migration Open Question 1 / Task 6.3). The
-  decision turns on **parity fidelity** — `ort` runs the exact exported ONNX
-  graph, so reproducing the `sentence-transformers` vectors (cosine ≈ 1.0) is a
-  property of the export, not of a second re-implementation — over `candle`'s
+  decision turns on **parity fidelity** â€” `ort` runs the exact exported ONNX
+  graph, so reproducing the `sentence-transformers` vectors (cosine â‰ˆ 1.0) is a
+  property of the export, not of a second re-implementation â€” over `candle`'s
   cleaner pure-Rust static link, which `ort` matches via the `onnx-download`
   feature (bundled runtime, self-contained binary). `candle` stays the documented
   fallback with explicit re-evaluation triggers. The speed axis is **conjectured**
   (the model assets cannot be downloaded offline, so no real numbers were
-  produced — none are fabricated); the runnable harness to settle it ships as
+  produced â€” none are fabricated); the runnable harness to settle it ships as
   `crates/cognis-embed/benches/embed_latency.rs` (gated behind `--features onnx`,
   graceful-skips without assets). Full rationale and evidence tiers:
   `docs/decisions/ADR-0001-embedding-runtime.md`.
 
-## [0.7.3] — 2026-06-15
+## [0.7.3] â€” 2026-06-15
 
 Two new languages: C# and Java are now first-class. The retrieval core is
-unchanged — CSAR is language-agnostic — so this is purely new parser coverage
+unchanged â€” CSAR is language-agnostic â€” so this is purely new parser coverage
 plus the wiring to enable it by default.
 
 ### Added
@@ -308,17 +353,17 @@ plus the wiring to enable it by default.
 - **Snapshot fixtures** `mini-cs-app` and `mini-java-svc` with curated
   `expected_symbols.json`, wired into the parser snapshot suite.
 - `languages.enabled` now defaults to
-  `[typescript, python, go, csharp, java]`; the indexer maps `.cs → csharp` and
-  `.java → java`. Existing workspaces pick the new languages up on the next full
+  `[typescript, python, go, csharp, java]`; the indexer maps `.cs â†’ csharp` and
+  `.java â†’ java`. Existing workspaces pick the new languages up on the next full
   index.
 
 ### Changed
 
 - `cognis-engine[indexer]` now also pulls `tree-sitter-c-sharp` and
-  `tree-sitter-java`. A missing grammar degrades gracefully — those files are
+  `tree-sitter-java`. A missing grammar degrades gracefully â€” those files are
   skipped, the rest of the index still builds.
 
-## [0.7.2] — 2026-06-15
+## [0.7.2] â€” 2026-06-15
 
 Status-honesty patch: a stale on-disk index version no longer gets stuck
 mid-onboarding while quietly driving an endless rebuild loop. The fix is in the
@@ -331,15 +376,15 @@ indexer itself, so every entrypoint (CLI and daemon) agrees.
   path wrote `index_version`; the `cognis-indexd` `--full-rebuild` rebuilt the
   index but left the stamp untouched. After an upgrade (e.g. an index built by
   0.3.0 served by 0.7.1), the `health` version check failed *forever*, the
-  onboarding stepper's **Index synced** step showed an error, and — because the
-  extension's auto-manage treats a failing version check as "needs rebuild" — it
+  onboarding stepper's **Index synced** step showed an error, and â€” because the
+  extension's auto-manage treats a failing version check as "needs rebuild" â€” it
   re-forced `--full-rebuild` on every activation, an endless loop that never
   cleared the mismatch. The stamp now lives in `IndexerPipeline.index_repo`
   (written on any `full=True` index), so the CLI and daemon share one source of
   truth and a forced rebuild actually resolves the mismatch.
 - **Onboarding stepper and headline no longer disagree during `watching`.** The
   panel's "active indexing" bypass was gated on the broad `indexStatus.active`,
-  which is still true in the steady-state `watching` phase — so a genuine health
+  which is still true in the steady-state `watching` phase â€” so a genuine health
   failure (like the stale `index_version` above) was masked by "Watching for
   file changes" in the headline while the stepper (which reads `health.overall`)
   showed an error. The bypass is now gated on `isIndexStatusBusy` (genuine
@@ -349,7 +394,7 @@ indexer itself, so every entrypoint (CLI and daemon) agrees.
 ### Changed
 
 - **`health` version-check docstring** now matches behavior (`index_version`
-  drift → `fail`, not `warn`): a stale index must be rebuilt before it is served.
+  drift â†’ `fail`, not `warn`): a stale index must be rebuilt before it is served.
 - **CI typing stability for the embedder.** `LocalEmbedder.embed_batch` now
   narrows the `object`-typed model handle with `typing.cast` instead of an
   annotated assignment. Newer `sentence-transformers` releases ship `py.typed`,
@@ -359,7 +404,7 @@ indexer itself, so every entrypoint (CLI and daemon) agrees.
   dependency-version float.
 
 
-## [0.7.1] — 2026-06-14
+## [0.7.1] â€” 2026-06-14
 
 Honesty + correctness patch: the panel now reports MCP connectivity from the
 *real* running server (not just on-disk config), the eval gate stops asserting a
@@ -370,7 +415,7 @@ version file from drifting at release time.
 
 - **Live MCP runtime probe (`mcpRuntime.ts`).** The panel now detects the actual
   editor-spawned `cognis_mcpd` stdio processes (Cursor-style), so "connected"
-  means *configured in `mcp.json` **and** a server is really running* — not just
+  means *configured in `mcp.json` **and** a server is really running* â€” not just
   that the config was written. The count is repo-scoped on Linux/macOS (verified
   against each process's environment via `envMatchesRepo`); on Windows the OS
   does not expose another process's environment through built-in tooling, so the
@@ -380,13 +425,13 @@ version file from drifting at release time.
   and scaffolds the CHANGELOG section. `--check` mode is now a CI gate that fails
   the build on version drift across files (e.g. extension 0.7.x vs engine 0.6.x).
 - **`make bench-public` / `invoke bench-public`.** Runs the fair-harness
-  retrieval comparison (BM25/DENSE/RRF/2HOP/CSAR/UNION) over the public repos —
+  retrieval comparison (BM25/DENSE/RRF/2HOP/CSAR/UNION) over the public repos â€”
   the reproducible numbers behind `.benchmarks/public/RESULTS.md`.
 
 ### Changed
 
 - **Eval gate is now an explicit no-regression smoke gate.** `eval-baselines/phase1.json`
-  recorded aspirational minimums (Recall@10 ≥ 0.70, MRR ≥ 0.50) the engine never
+  recorded aspirational minimums (Recall@10 â‰¥ 0.70, MRR â‰¥ 0.50) the engine never
   met on the synthetic golden, so the build failed on an ungrounded absolute, not
   a regression. It now records the *measured* Recall@k / MRR as a baseline and
   fails only on a regression beyond `regression_tolerance` (default 0.05).
@@ -398,7 +443,7 @@ version file from drifting at release time.
 
 ### Fixed
 
-- **Panel ↔ mcpd connectivity desync.** The panel previously showed "connected"
+- **Panel â†” mcpd connectivity desync.** The panel previously showed "connected"
   from the presence of the `mcp.json` entry alone, so it could claim a working
   MCP server when the editor had not actually launched one. It now reflects the
   live process state and distinguishes *not connected* / *configured (not
@@ -410,9 +455,9 @@ version file from drifting at release time.
   slash style (`D:\...` vs `d:/...`) no longer cause a false mismatch when
   attributing a config/process to a repo (`pathsEqual` / `normalizePathForCompare`).
 
-## [0.7.0] — 2026-06-12
+## [0.7.0] â€” 2026-06-12
 
-Reliability + observability release: close the extension ↔ backend integration
+Reliability + observability release: close the extension â†” backend integration
 gaps, make every user flow traceable, and cover all interaction paths end to end.
 
 ### Added
@@ -422,7 +467,7 @@ gaps, make every user flow traceable, and cover all interaction paths end to end
   surfaced by the new **Cognis: Show Diagnostics Log** command and tuned by the
   `cognis.logLevel` setting. Every CLI call (exit + duration), every command
   flow (start/ok/fail + duration), every surfaced error, the startup handshake,
-  and unknown indexd phases are recorded — so a production bug is reconstructable.
+  and unknown indexd phases are recorded â€” so a production bug is reconstructable.
 - **Contract version handshake.** `cognis-cli handshake` advertises
   `{contract_version, engine_version, cli_commands, mcp_tools}` from a single
   source of truth (`cognis/contract.py`); the extension negotiates it at startup
@@ -437,11 +482,11 @@ gaps, make every user flow traceable, and cover all interaction paths end to end
 
 ### Changed
 
-- **Removed all "AI" wording for concrete language.** "Set Up for AI" → **Set Up
-  Workspace**, "Connect to AI" → **Connect MCP**; commands renamed
-  (`cognis.setupForAi` → `cognis.setupWorkspace`, `cognis.connectToAi` →
+- **Removed all "AI" wording for concrete language.** "Set Up for AI" â†’ **Set Up
+  Workspace**, "Connect to AI" â†’ **Connect MCP**; commands renamed
+  (`cognis.setupForAi` â†’ `cognis.setupWorkspace`, `cognis.connectToAi` â†’
   `cognis.connectMcp`).
-- **Connect MCP now does the work concretely** — writes the real workspace
+- **Connect MCP now does the work concretely** â€” writes the real workspace
   `mcp.json` and opens it, instead of printing a copy-paste guide.
 - Boundary parsing (`runCliJson`, indexd status) now traces contract/parse
   failures instead of propagating a silent `undefined`.
@@ -459,7 +504,7 @@ gaps, make every user flow traceable, and cover all interaction paths end to end
   dedicated memory guards).
 
 
-## [0.6.2] — 2026-06-12
+## [0.6.2] â€” 2026-06-12
 
 Patch release. CI/test-only fix (no engine or extension code change).
 
@@ -481,7 +526,7 @@ Patch release. CI/test-only fix (no engine or extension code change).
   the unpatched availability check. Widened to test-only budgets that keep the
   overlap small relative to the deadline (production timeouts unchanged).
 
-## [0.6.1] — 2026-06-11
+## [0.6.1] â€” 2026-06-11
 
 Patch release. CI/test-only fix (no engine or extension code change).
 
@@ -496,7 +541,7 @@ Patch release. CI/test-only fix (no engine or extension code change).
   `python -m` block shape, passthrough env keys, timing-dependent status file
   lists), so they pin the real contract shape and pass on every platform.
 
-## [0.6.0] — 2026-06-11
+## [0.6.0] â€” 2026-06-11
 
 Feature release. Adds an optional standalone **HTTP MCP server** (panel-managed,
 per workspace) alongside the default stdio transport, MCP-focused panel UX,
@@ -523,9 +568,9 @@ never-published 0.5.3.
 
 ### Changed
 
-- **The panel now states the MCP server status explicitly** — connected/not,
+- **The panel now states the MCP server status explicitly** â€” connected/not,
   server name, and workspace `mcp.json` path, with a single **Set up MCP
-  (mcp.json)** action — replacing the vague "Set Up for AI" / "Connect to AI" /
+  (mcp.json)** action â€” replacing the vague "Set Up for AI" / "Connect to AI" /
   "AI connected" wording. Connected reads "Cognis MCP server connected"; the
   onboarding step is "MCP connected".
 - **MCP config is written into the workspace by default** so it is visible and
@@ -538,7 +583,7 @@ never-published 0.5.3.
 - **A clear message when the engine version isn't on PyPI yet.** A pin to an
   unpublished `cognis-engine` previously showed a misleading "your Python is too
   new" error; it is now reported honestly as "this engine version is not on PyPI
-  yet — wait and retry".
+  yet â€” wait and retry".
 
 ### Internal
 
@@ -547,7 +592,7 @@ never-published 0.5.3.
   asset), an HTTP-MCP round-trip e2e, `buildPackageSpec` pin tests, and a filter
   for a third-party opentelemetry deprecation that broke the MCP e2e suite.
 
-## [0.5.2] — 2026-06-11
+## [0.5.2] â€” 2026-06-11
 
 Patch release. Fixes a first-run panel state regression in the VS Code/Cursor
 extension (no engine code change; the engine version is bumped only to keep the
@@ -559,16 +604,16 @@ bundle's pinned install in lockstep).
   embedding backfill runs, the engine WAL-locks the DB and the vector table is
   briefly incomplete, so a health poll could momentarily read a failing
   `vector`/`index` check or fail to open the DB. The panel misread this as a
-  failure and (a) reverted from "Generating embeddings…" back to "Set Up for
+  failure and (a) reverted from "Generating embeddingsâ€¦" back to "Set Up for
   AI", and (b) looped on "Troubleshoot" / "repair semantic index". The panel now
   keeps showing progress whenever the daemon reports an active index operation,
-  and an already-configured workspace shows a non-destructive "Finishing setup…"
+  and an already-configured workspace shows a non-destructive "Finishing setupâ€¦"
   state on a transient health gap instead of a first-run setup/repair verdict.
 - Added panel state-machine regression tests and simulator fixtures for the
-  embedding-backfill and transient-health-gap states — the cross-process e2e
+  embedding-backfill and transient-health-gap states â€” the cross-process e2e
   never sampled the panel during embedding, so these races slipped through.
 
-## [0.5.1] — 2026-06-11
+## [0.5.1] â€” 2026-06-11
 
 Patch release. Fixes the CI unit/PBT suite (no functional engine change).
 
@@ -582,7 +627,7 @@ Patch release. Fixes the CI unit/PBT suite (no functional engine change).
   weights aren't already cached, honoring the module's "no network" contract;
   where the model is cached it still runs the full semantic+fusion path.
 
-## [0.5.0] — 2026-06-11
+## [0.5.0] â€” 2026-06-11
 
 Positioning + measurement-infrastructure release. Ships the live-indexing
 UX improvements, RRF fusion, and the full development-criteria / regression-gate
@@ -591,29 +636,29 @@ loop, and corrects public copy to claim only what the benchmark supports.
 ### Added
 
 - **Live embedding progress on cold index.** The initial index now publishes a
-  moving "Generating semantic embeddings… X/N symbols (search already works)"
-  status (70→100%) instead of sitting at a static 70% for minutes. Lexical and
+  moving "Generating semantic embeddingsâ€¦ X/N symbols (search already works)"
+  status (70â†’100%) instead of sitting at a static 70% for minutes. Lexical and
   structural search remain available within seconds while embeddings backfill in
   the background (the two-phase cold index is now progress-reported end to end).
 - **RRF fusion as the cross-layer ranker.** Lexical (BM25) and semantic (cosine)
   hits are now fused with parameter-free Reciprocal Rank Fusion
-  (`cognis_retrieval.fusion`) instead of a scale-incoherent max-score merge —
+  (`cognis_retrieval.fusion`) instead of a scale-incoherent max-score merge â€”
   the strongest fusion on the reproducible objective benchmark.
 - **Observability for first-use latency.** Structured timing logs for embedder
   model load (cache-hit vs online-fallback), MCP semantic-layer warm, per-call
   `semantic_search` latency, and a per-phase cold-index breakdown
-  (parse/resolve/embed/write) — the basis for UX/perf decisions.
+  (parse/resolve/embed/write) â€” the basis for UX/perf decisions.
 - **Full-flow coverage harness** (`make coverage`) that measures in-process and
   spawned-subprocess (CLI/indexd/mcpd) coverage together.
 - **Cross-app e2e report** (`make e2e-report`) capturing per-stage latency,
   throughput, retrieval correctness, embedding-progress trajectory, and semantic
-  warm-vs-hot latency split — runnable against the bundled sample repo or any
+  warm-vs-hot latency split â€” runnable against the bundled sample repo or any
   repo via `--repo`.
 - **VS Code panel simulator + Playwright UI tests** (`npm run test:e2e`) that
   render the real webview markup per state and assert every button posts a valid
   command intent, with no VS Code instance required.
 - **Offline per-version licensing.** The prebuilt build verifies an Ed25519
-  license key fully offline (no license server), with a **version band** —
+  license key fully offline (no license server), with a **version band** â€”
   a `0.5` key unlocks every `0.5.x` patch but not `0.6` (free patches, next
   minor is a separate purchase). The "Buy" action is configurable via the
   `cognis.buyUrl` setting. The open-source build ships no embedded key, so its
@@ -637,10 +682,10 @@ loop, and corrects public copy to claim only what the benchmark supports.
 
 - Type-checking is now strict over `cognis_indexer` in addition to
   `packages/core` (`make typecheck`), with the embedder-pipeline Optional
-  narrowing fixed — the planned per-cycle ratchet toward full strict coverage.
+  narrowing fixed â€” the planned per-cycle ratchet toward full strict coverage.
 
 
-## [0.4.0] — 2026-06-06
+## [0.4.0] â€” 2026-06-06
 
 First commercial release of the VS Code / Cursor extension.
 
@@ -651,7 +696,7 @@ First commercial release of the VS Code / Cursor extension.
   `cognis.enterLicense` command. Paid features call `requireLicense(...)`, which
   is a no-op in the open-source/source build (no embedded key) and enforces in
   the prebuilt commercial build. `Set Up for AI` is gated as the first example.
-  Verification is fully offline — no license server, zero ops after a sale.
+  Verification is fully offline â€” no license server, zero ops after a sale.
 - **Real MCP concurrency cap.** `cognis-mcpd` now bounds concurrent tool
   execution with a process-wide semaphore (`COGNIS_MCP_MAX_CONCURRENCY`,
   default 16) via a `_bounded_tool` decorator; a saturated server returns a
@@ -662,19 +707,19 @@ First commercial release of the VS Code / Cursor extension.
   extension test harness reads its version from `package.json`. Engine and
   extension are both **0.4.0**; the Docker image tag is parameterized
   (`COGNIS_VERSION`).
-- **Stronger math tests.** Added a unit test verifying the CSAR `α→0 ⇒
+- **Stronger math tests.** Added a unit test verifying the CSAR `Î±â†’0 â‡’
   stationary distribution` endpoint (previously docs-only) and concurrency-cap
   tests for the MCP server.
 - **Version badge in the panel.** The Cognis sidebar header now shows the
   installed extension version (e.g. `v0.4.0`).
 - **Standalone sellable installer build.** `scripts/build_installer.py` packages
   the compiled extension `.vsix` plus an `INSTALL.md` and the commercial license
-  into `dist/cognis-pro-<version>.zip` — the artifact distributed via a
+  into `dist/cognis-pro-<version>.zip` â€” the artifact distributed via a
   Merchant-of-Record. The `dist/` output is git-ignored (never committed).
 - **Architecture + audit section in the README.** A diagram
   (`assets/architecture.svg`) and a plain-language "how it works" walkthrough,
   plus an independent capability/security audit summary (ratings backed by code
-  and tests), so users understand the system well enough to self-set-up — while
+  and tests), so users understand the system well enough to self-set-up â€” while
   most still choose the one-click installer.
 - **"Connect to AI" MCP setup guide.** New command `cognis.connectToAi` (and the
   panel's "Connect to AI" primary action) writes/refreshes the workspace MCP
@@ -698,14 +743,14 @@ First commercial release of the VS Code / Cursor extension.
   the paid product distributed via a Merchant-of-Record.
 
 
-## [0.3.2] — 2026-06-05
+## [0.3.2] â€” 2026-06-05
 
 ### Fixed
 
 - **MCP server keys are now identical across operating systems.** The
   human-readable slug part of the key was derived with a platform-specific path
   helper, so a Windows-style path processed on a non-Windows host (e.g. CI, or a
-  remote/WSL backend) produced a different key than the same repo on Windows —
+  remote/WSL backend) produced a different key than the same repo on Windows â€”
   which could create a duplicate MCP entry. The slug now extracts the final path
   segment in a separator-agnostic way, matching the already-normalized path
   hash, so the extension and `cognis-cli` always agree regardless of platform.
@@ -714,29 +759,29 @@ First commercial release of the VS Code / Cursor extension.
   upgrade on activation (managed environments only; a bring-your-own Python is
   never touched), with a "skip this version" option so it doesn't nag.
 
-## [0.3.1] — 2026-06-05
+## [0.3.1] â€” 2026-06-05
 
 ### Fixed
 
 - **MCP server entries no longer collide for repos that share a folder name.**
   The per-repo MCP key was derived from the folder basename only, so two repos
   named the same (e.g. `work/api` and `personal/api`) both became `cognis-api`
-  and overwrote each other in the shared global MCP config — breaking semantic
+  and overwrote each other in the shared global MCP config â€” breaking semantic
   search for whichever was wired first. Keys now include a short, stable hash of
-  the full repo path (`cognis-api-3f9a2c`), so any number of repos — including
-  same-named ones — can be connected at once. The extension and the
+  the full repo path (`cognis-api-3f9a2c`), so any number of repos â€” including
+  same-named ones â€” can be connected at once. The extension and the
   `cognis-cli mcp-config` command derive identical keys, and existing entries
   are migrated automatically on the next connect (matched by `COGNIS_DB_PATH`,
   not by name, so nothing is left orphaned).
 
-## [0.3.0] — 2026-06-05
+## [0.3.0] â€” 2026-06-05
 
 ### Added
 
 - **One-click backend install/uninstall.** The VS Code / Cursor panel now
-  installs the Cognis Python backend for you — it creates a private environment
+  installs the Cognis Python backend for you â€” it creates a private environment
   it manages (no terminal, no `pip`, no choosing a Python) and offers to set up
-  the workspace right after. The **Danger zone → Remove everything** action
+  the workspace right after. The **Danger zone â†’ Remove everything** action
   reverses it, deleting that managed environment cleanly. If you bring your own
   Python via `cognis.pythonPath`, install/uninstall operate on the `cognis`
   package there and never touch your environment. New `cognis.installBackend`
@@ -747,7 +792,7 @@ First commercial release of the VS Code / Cursor extension.
   shared MCP config and uninstalls the managed backend, so nothing is orphaned
   after the extension is removed.
 - **Onboarding stepper.** The panel shows a fixed 4-step path
-  (Backend → Components → Index synced → AI connected) so a first-time user
+  (Backend â†’ Components â†’ Index synced â†’ AI connected) so a first-time user
   always sees where they are and the single next action. A dedicated "Install
   the Cognis backend" state guides fresh machines instead of failing setup with
   a raw import error.
@@ -756,10 +801,10 @@ First commercial release of the VS Code / Cursor extension.
 
 - **`.cognis/` is added to `.gitignore` automatically** after setup when the
   workspace is a git repo and the entry is missing (idempotent), with a
-  non-blocking notice — instead of a prompt with a "Don't ask again" choice.
+  non-blocking notice â€” instead of a prompt with a "Don't ask again" choice.
 - **Plainer, behavior-based wording.** Removed the term "interpreter" from
-  user-facing copy; renamed **Repair Setup → Troubleshoot & Repair** and
-  **Clear Index & Re-index → Rebuild Index** (command IDs unchanged). The status
+  user-facing copy; renamed **Repair Setup â†’ Troubleshoot & Repair** and
+  **Clear Index & Re-index â†’ Rebuild Index** (command IDs unchanged). The status
   bar now uses a short, stable vocabulary (Indexing / Ready / Action needed /
   Not set up).
 - The VS Code / Cursor panel's **Prerequisites checklist now collapses** once
@@ -774,8 +819,8 @@ First commercial release of the VS Code / Cursor extension.
   seconds instead of appearing to fail.** The `cognis-indexd` cold rebuild
   (spawned by the extension's "Set Up for AI" / live indexing) embedded *every*
   symbol before writing any of them, so on a real repository the index DB stayed
-  empty — and the health panel reported `index: fail` ("0 files … excluded by
-  .gitignore") — for the entire multi-minute embed. The daemon now cold-indexes
+  empty â€” and the health panel reported `index: fail` ("0 files â€¦ excluded by
+  .gitignore") â€” for the entire multi-minute embed. The daemon now cold-indexes
   in two phases: lexical + structural data first (fast, commits immediately so
   search works and health flips to `ok`), then backfills semantic embeddings in
   the background. Manual `cognis-cli index` was unaffected because operators
@@ -786,7 +831,7 @@ First commercial release of the VS Code / Cursor extension.
   When indexable source exists but the DB is empty, they now point to running
   `index --full` instead of asserting the source was excluded.
 
-## [0.2.1] — 2026-06-02
+## [0.2.1] â€” 2026-06-02
 
 ### Added
 
@@ -808,7 +853,7 @@ First commercial release of the VS Code / Cursor extension.
   user explicitly runs **Set Up for AI**. Activation still auto-manages
   workspaces that are already configured.
 
-## [0.2.0] — 2026-06-02
+## [0.2.0] â€” 2026-06-02
 
 ### Fixed
 
@@ -842,20 +887,20 @@ First commercial release of the VS Code / Cursor extension.
   `semantic_search` returns over stdio instead of hanging. See
   `docs/e2e-testing.md`.
 
-## [0.1.17] — 2026-05-31
+## [0.1.17] â€” 2026-05-31
 
 ### Added
 
-- **CSAR — Code Spreading-Activation Retrieval**, the new primary retrieval
+- **CSAR â€” Code Spreading-Activation Retrieval**, the new primary retrieval
   engine. Seeds a relevance distribution from cheap lexical + semantic matches
   and diffuses it across the Unified Code Knowledge Graph via Personalized
   PageRank (random walk with restart), recovering on-path symbols that
   independent embedding/lexical ranking misses. Includes exact, power-iteration,
-  and Andersen–Chung–Lang forward-push solvers. The forward-push solver has a
+  and Andersenâ€“Chungâ€“Lang forward-push solvers. The forward-push solver has a
   provable work bound `1/(alpha*eps)` independent of repository size. Math and
   proofs in `docs/csar.md`; verified by `tests/unit/test_csar.py` and
   `tests/pbt/test_csar_pbt.py` (CP-CSAR-1..5).
-- MCP tool `diffuse_context` — flagship CSAR retrieval; returns a unified ranked
+- MCP tool `diffuse_context` â€” flagship CSAR retrieval; returns a unified ranked
   shortlist (with `on_path` flags) in one round trip, replacing separate
   `discover_symbols` + `dependency_trace` calls. Tunable via `COGNIS_MCP_CSAR_*`.
 - `retrieve_context_capsule` structural stage is now CSAR-powered: lexical +
@@ -867,9 +912,9 @@ First commercial release of the VS Code / Cursor extension.
   command `Cognis: Clear Index & Re-index` (and a button in the panel's Index
   Status section, with a confirmation prompt) and as the CLI flag
   `cognis-cli index --clear`.
-- MCP tool `discover_symbols` — hybrid lexical + semantic discovery with
+- MCP tool `discover_symbols` â€” hybrid lexical + semantic discovery with
   reciprocal-rank fusion in one call.
-- MCP tool `resolve_symbols` — batch hydrate up to 50 symbol ids without repeated
+- MCP tool `resolve_symbols` â€” batch hydrate up to 50 symbol ids without repeated
   `symbol_lookup` round trips.
 - Enriched `semantic_search` payloads (file location, signature, docstring) plus
   optional `kind` / path filters; batch SQL hydration replaces per-hit lookups.
@@ -920,14 +965,14 @@ First commercial release of the VS Code / Cursor extension.
 
 ---
 
-## [0.1.0] — Phase 1 MVP
+## [0.1.0] â€” Phase 1 MVP
 
 ### Added
 
-**Phase 0 — Foundations**
+**Phase 0 â€” Foundations**
 
 - Repo scaffold per design "Build and Release" layout (`apps/`, `packages/`, `tests/`).
-- `pyproject.toml` pinning Python ≥ 3.11 and Phase 0/1 dev dependencies (ruff,
+- `pyproject.toml` pinning Python â‰¥ 3.11 and Phase 0/1 dev dependencies (ruff,
   mypy, pytest, pytest-asyncio, pytest-benchmark, hypothesis).
 - `Makefile` and `tasks.py` recipes for `lint`, `typecheck`, `test`, `bench`, `eval`.
 - GitHub Actions workflows: lint+unit on push, integration on PR, nightly eval.
@@ -941,7 +986,7 @@ First commercial release of the VS Code / Cursor extension.
 - Eval harness skeleton (`packages/eval/runner.py`) with Recall@k, MRR metrics.
 - Test fixture repos: `mini-ts-app`, `mini-py-svc`, `mini-go-svc` with planted bugs.
 
-**Phase 1 — MVP Cognition**
+**Phase 1 â€” MVP Cognition**
 
 - Tree-sitter parsers for TypeScript, Python, and Go.
 - File watcher with 200ms debounce and `.gitignore` awareness (`watchdog`).
@@ -955,10 +1000,10 @@ First commercial release of the VS Code / Cursor extension.
 - Capsule composer v1 with Pydantic schema, tiktoken budget, untrusted content wrapping.
 - MCP server (`cognis-mcpd`) with 4 tools: `symbol_lookup`, `semantic_search`,
   `dependency_trace`, `retrieve_context_capsule`.
-- Hard limits enforcement: depth ≤ 8, k ≤ 50, max_tokens ≤ 32000, 10s hard timeout.
+- Hard limits enforcement: depth â‰¤ 8, k â‰¤ 50, max_tokens â‰¤ 32000, 10s hard timeout.
 - Audit log (append-only JSONL, args hash only).
 
-**Phase 1 — Conformance, Eval, Performance, Release (Tasks 16–18)**
+**Phase 1 â€” Conformance, Eval, Performance, Release (Tasks 16â€“18)**
 
 - `cognis-cli mcp-conformance`: built-in conformance check for all 4 tools; optional
   upstream harness integration when `mcp_conformance` package is installed.

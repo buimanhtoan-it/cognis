@@ -113,3 +113,165 @@ for (const fx of manifest.fixtures) {
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// Wording / jargon coherence (Requirements R12.7, R12.8; backed by R9.1, R3).
+//
+// For every rendered fixture page we assert the *visible* text (body
+// textContent — not raw attributes) is free of the doubled command prefix,
+// of internal jargon, and of user-visible "Backend". The raw MCP URL / server
+// id / error string are allowed because they now live in labeled detail rows
+// (Address:/Server:/Details:) — the jargon *words* themselves must be absent.
+// ---------------------------------------------------------------------------
+
+// Banned internal jargon — Requirement 9, criterion 1 (case-insensitive match
+// against visible text). "transport" also covers "stdio transport".
+const BANNED_JARGON = [
+  "stdio transport",
+  "binding port",
+  "debounce queue",
+  "transport",
+  "handshake",
+  "socket",
+];
+
+test.describe("panel wording coherence", () => {
+  for (const fx of manifest.fixtures) {
+    test(`${fx.name}: no doubled prefix, no jargon, Engine not Backend`, async ({ page }) => {
+      await page.goto(pageUrl(fx.file));
+      // Expand collapsed sections so their text is part of the visible tree.
+      await expandAll(page);
+      const text = (await page.locator("body").textContent()) ?? "";
+      const lower = text.toLowerCase();
+
+      // R12.7: the "Cognis: " command prefix must never be doubled.
+      expect(text, 'visible text must not contain "Cognis: Cognis:"').not.toContain(
+        "Cognis: Cognis:",
+      );
+
+      // R12.7 / R3: no user-visible "Backend"/"backend" — the core binary is
+      // consistently called the "Engine".
+      expect(lower, 'visible text must not contain "Backend"').not.toContain("backend");
+
+      // R12.8 / R9.1: none of the banned jargon terms in visible text.
+      for (const term of BANNED_JARGON) {
+        expect(
+          lower,
+          `visible text must not contain banned jargon "${term}"`,
+        ).not.toContain(term.toLowerCase());
+      }
+    });
+  }
+
+  test("engine-install flow uses the Engine terminology", async ({ page }) => {
+    // The fresh-machine state surfaces the install-engine call to action; it
+    // must speak of the "Engine" (R3) — proves the terminology is present, not
+    // merely that "Backend" is absent.
+    await page.goto(pageUrl("fresh-machine.html"));
+    const lower = ((await page.locator("body").textContent()) ?? "").toLowerCase();
+    expect(lower, 'expected user-visible "Engine" terminology').toContain("engine");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round-trip command intent (Requirements R12.3–R12.6, R12.11).
+//
+// "Round trip" in the static simulator = complementary fixtures each render the
+// button that transitions in one direction, and clicking it posts the action id
+// that resolves — through manifest.commandMap — to the expected cognis.* command
+// (no dead buttons). Bounding render time ≤10s is trivial in the simulator.
+// ---------------------------------------------------------------------------
+
+function fixtureByName(name: string): Manifest["fixtures"][number] {
+  const fx = manifest.fixtures.find((f) => f.name === name);
+  if (!fx) throw new Error(`fixture "${name}" missing from manifest`);
+  return fx;
+}
+
+async function assertButtonResolves(
+  page: import("@playwright/test").Page,
+  file: string,
+  actionId: string,
+  expectedCommand: string,
+): Promise<void> {
+  await page.goto(pageUrl(file));
+  await expandAll(page);
+
+  const buttons = page.locator(`[data-action="${actionId}"]`);
+  expect(
+    await buttons.count(),
+    `${file} must render at least one "${actionId}" button`,
+  ).toBeGreaterThanOrEqual(1);
+  await buttons.first().click();
+
+  const posted = await readPosted(page);
+  const match = posted.find((m) => m.id === actionId);
+  expect(match, `clicking "${actionId}" must post an action message`).toBeTruthy();
+  expect(match?.type).toBe("action");
+
+  // The posted id must resolve to the expected real command (R12.11: any
+  // unresolved id fails the round trip).
+  expect(
+    manifest.commandMap[actionId],
+    `action "${actionId}" must resolve to "${expectedCommand}"`,
+  ).toBe(expectedCommand);
+}
+
+test.describe("panel round-trip command pairs", () => {
+  // R12.3: start MCP ↔ stop MCP.
+  test("start ↔ stop MCP post the complementary commands", async ({ page }) => {
+    await assertButtonResolves(
+      page,
+      fixtureByName("mcp-http-stopped").file,
+      "startMcp",
+      "cognis.startMcpServer",
+    );
+    await assertButtonResolves(
+      page,
+      fixtureByName("mcp-http-running").file,
+      "stopMcp",
+      "cognis.stopMcpServer",
+    );
+  });
+
+  // R12.4: pause sync ↔ resume sync.
+  test("pause ↔ resume sync post the complementary commands", async ({ page }) => {
+    const running = manifest.fixtures.find((f) =>
+      f.actions.some((a) => a.id === "pauseSync" && !a.disabled),
+    );
+    expect(running, "expected a fixture that renders an enabled pauseSync button").toBeTruthy();
+    await assertButtonResolves(page, running!.file, "pauseSync", "cognis.pauseSync");
+    await assertButtonResolves(
+      page,
+      fixtureByName("sync-paused").file,
+      "resumeSync",
+      "cognis.resumeSync",
+    );
+  });
+
+  // R12.5: connect MCP ↔ disconnect MCP.
+  test("connect ↔ disconnect MCP post the complementary commands", async ({ page }) => {
+    await assertButtonResolves(
+      page,
+      fixtureByName("ready-not-connected").file,
+      "connectMcp",
+      "cognis.connectMcp",
+    );
+    await assertButtonResolves(
+      page,
+      fixtureByName("mcp-connected-disconnectable").file,
+      "disconnectMcp",
+      "cognis.disconnectMcp",
+    );
+  });
+
+  // R12.6: cancel a running rebuild.
+  test("cancel indexing posts cognis.cancelIndexing", async ({ page }) => {
+    await assertButtonResolves(
+      page,
+      fixtureByName("indexing-cancelable").file,
+      "cancelIndexing",
+      "cognis.cancelIndexing",
+    );
+  });
+});

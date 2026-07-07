@@ -68,6 +68,7 @@ import {
   rehydrateWorkspaceState,
   clearIndexAndReindex,
   connectMcp,
+  disableMcp,
   pauseSync,
   removeFromWorkspace,
   repairSetup,
@@ -75,6 +76,7 @@ import {
   setupWorkspace,
   showHealthReport,
   startLive,
+  stopLive,
 } from "./workspace";
 
 let statusBarItem: vscode.StatusBarItem;
@@ -132,10 +134,32 @@ async function refreshPrerequisites(): Promise<void> {
   await pollHealth();
 }
 
+/**
+ * Mirror the panel's runtime state into VS Code context keys so the
+ * ``view/title`` toggle buttons (Start/Stop MCP, Pause/Resume sync) show the
+ * action that matches the current state. These keys are ephemeral and are
+ * re-evaluated on every render via {@link updateStatusBar}.
+ */
+function setPanelContextKeys(ctx: PanelContext): void {
+  const running =
+    ctx.mcpServerPhase === "running" || ctx.mcpServerPhase === "starting";
+  void vscode.commands.executeCommand(
+    "setContext",
+    "cognis.mcpServerRunning",
+    running
+  );
+  void vscode.commands.executeCommand(
+    "setContext",
+    "cognis.syncPaused",
+    Boolean(ctx.syncPaused)
+  );
+}
+
 function updateStatusBar(context: PanelContext): void {
   statusBarItem.text = outcomeLabelForContext(context);
   statusBarItem.tooltip = "Cognis: click for indexing and MCP setup status";
   statusBarItem.show();
+  setPanelContextKeys(context);
   panelProvider?.updateContext(context);
 }
 
@@ -377,6 +401,43 @@ async function runConnectMcp(): Promise<void> {
     await connectMcp();
   } catch (err) {
     await showErrorGuidance(err, "Connect MCP");
+  }
+}
+
+/**
+ * Disconnect MCP: the non-destructive counterpart to Connect MCP. Removes only
+ * this repo's Cognis entry from the editor's ``mcp.json`` (global + workspace
+ * scope) via {@link disableMcp}, keeping the local ``.cognis`` index, source
+ * code, and other workspaces' MCP entries untouched. The panel reflects the
+ * disconnected state on the next health poll (≤2s).
+ */
+async function runDisconnectMcp(): Promise<void> {
+  try {
+    await disableMcp();
+    await pollHealth();
+  } catch (err) {
+    await showErrorGuidance(err, "Disconnect MCP");
+  }
+}
+
+/**
+ * Cancel a running index build. Reuses {@link stopLive}, which stops the live
+ * indexing daemon for this workspace (kill by pid/proc, waiting up to 5s for the
+ * process to exit). This is non-destructive: the existing ``.cognis`` index
+ * (including anything written before the cancel) and source code are kept, so
+ * the partial index stays queryable. The panel returns to idle on the next
+ * health poll.
+ */
+async function runCancelIndexing(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    return;
+  }
+  try {
+    await stopLive();
+    await pollHealth();
+  } catch (err) {
+    await showErrorGuidance(err, "Cancel indexing");
   }
 }
 
@@ -671,6 +732,143 @@ async function runInstallBinaryBackend(): Promise<void> {
 }
 
 /**
+ * Reinstall just the engine: delete the managed binary + semantic model, then
+ * re-download + checksum-verify fresh copies. Fixes a corrupt, stale, or
+ * version-mismatched engine without touching the index or MCP wiring. The
+ * install uses the Windows-safe swap, so a still-running engine is replaced
+ * rather than failing with EPERM.
+ */
+async function runReinstallEngine(): Promise<void> {
+  const confirm = await vscode.window.showWarningMessage(
+    "Reinstall the Cognis engine? This deletes the downloaded binary + semantic " +
+      "model and fetches fresh, checksum-verified copies from the release. Your " +
+      "index and MCP config are kept.",
+    { modal: true },
+    "Reinstall Engine"
+  );
+  if (confirm !== "Reinstall Engine") {
+    return;
+  }
+  try {
+    await withProgress("Cognis: Reinstall engine — removing", async () => {
+      try {
+        await uninstallManagedBinary();
+      } catch (err) {
+        getOutputChannel().appendLine(
+          `[reinstall] binary remove warning: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+      uninstallManagedModel();
+    });
+  } catch (err) {
+    await showErrorGuidance(err, "Reinstall engine");
+    return;
+  }
+  lastPrerequisites = undefined;
+  // Re-download binary + model (also offers Set Up Workspace on success).
+  await runInstallBinaryBackend();
+}
+
+/**
+ * Uninstall the engine: the non-destructive inverse of Install Engine. Deletes
+ * only the downloaded engine binary + semantic model. The workspace index
+ * (`.cognis`), MCP config, and source code are all kept. If the user cancels
+ * the confirmation, nothing changes. On failure, existing state is preserved
+ * and an error indicator is shown.
+ */
+async function runUninstallEngine(): Promise<void> {
+  const confirm = await vscode.window.showWarningMessage(
+    "Uninstall the Cognis engine (downloaded binary + semantic model)? Your " +
+      "workspace index (.cognis) and MCP config are kept.",
+    { modal: true },
+    "Uninstall Engine"
+  );
+  if (confirm !== "Uninstall Engine") {
+    return;
+  }
+  try {
+    await uninstallManagedBinary();
+    uninstallManagedModel();
+    lastPrerequisites = undefined;
+    await refreshPrerequisites();
+  } catch (err) {
+    await showErrorGuidance(err, "Uninstall engine");
+  }
+}
+
+/**
+ * Cold restart: the one-click recovery from a corrupted/stale state. Wipes
+ * everything Cognis manages — this workspace's `.cognis` index, ALL cognis MCP
+ * entries, and the downloaded engine binary + model — then rebuilds from
+ * scratch: re-download the engine + model and re-index the workspace fresh.
+ * Source code is never touched.
+ */
+async function runColdRestart(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    await showErrorGuidance(
+      new Error("Open a workspace folder before restarting Cognis."),
+      "Cold restart"
+    );
+    return;
+  }
+  const confirm = await vscode.window.showWarningMessage(
+    "Cold restart Cognis? This deletes this workspace's .cognis index, removes ALL " +
+      "Cognis MCP entries from your editor, uninstalls the downloaded engine + model, " +
+      "then re-downloads everything and sets the workspace up fresh. Your source code " +
+      "is not touched.",
+    { modal: true },
+    "Cold Restart"
+  );
+  if (confirm !== "Cold Restart") {
+    return;
+  }
+  try {
+    // 1. Full wipe: stops live indexing, deletes .cognis, purges every cognis
+    //    MCP entry (removeFromWorkspace stops the daemon first to free the DB).
+    await withProgress("Cognis: Cold restart — cleaning up", async () =>
+      removeFromWorkspace({ purgeAllMcp: true })
+    );
+    try {
+      await uninstallManagedBinary();
+    } catch (err) {
+      getOutputChannel().appendLine(
+        `[cold-restart] binary remove warning: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+    uninstallManagedModel();
+    lastPrerequisites = undefined;
+
+    // 2. Rebuild: fresh binary + model, then set the workspace up from scratch.
+    const outcome = await withProgress("Cognis: Cold restart — installing engine", (p, t) =>
+      installManagedBinary(p, t)
+    );
+    if (!outcome) {
+      return;
+    }
+    if (!isModelInstalled()) {
+      try {
+        await withProgress("Cognis: Cold restart — downloading model", (p, t) =>
+          installManagedModel(p, t)
+        );
+      } catch (err) {
+        getOutputChannel().appendLine(
+          `[cold-restart] model install skipped: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+    await refreshPrerequisites();
+    await runSetupWorkspace();
+    await vscode.window.showInformationMessage(
+      "Cognis cold restart complete — engine + model reinstalled and the workspace re-indexed from scratch. " +
+        "Reload the window so your editor picks up the fresh MCP server."
+    );
+  } catch (err) {
+    await showErrorGuidance(err, "Cold restart");
+  }
+}
+
+/**
  * After an extension update, detect a managed engine binary that's older than
  * the extension and offer a one-click upgrade. Remembers a "skip this version"
  * choice so it doesn't nag. Silent when nothing is installed or versions match.
@@ -883,6 +1081,17 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("cognis.disconnectMcp", () =>
+      runDisconnectMcp()
+    )
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("cognis.cancelIndexing", () =>
+      runCancelIndexing()
+    )
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("cognis.pauseSync", () => runPauseSync())
   );
 
@@ -912,6 +1121,22 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("cognis.prepareUninstall", () =>
       runRemoveFromWorkspace("all")
     )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("cognis.reinstallEngine", () =>
+      runReinstallEngine()
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("cognis.uninstallEngine", () =>
+      runUninstallEngine()
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("cognis.coldRestart", () => runColdRestart())
   );
 
   context.subscriptions.push(
@@ -1058,9 +1283,11 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 }
 
-export function deactivate(): void {
+export async function deactivate(): Promise<void> {
   stopAllIndexing();
-  void stopAllMcpServers();
+  // Await (not `void`) so cleanup confirms every MCP server has stopped within
+  // its budget before the host finishes tearing the extension down (R10.2, R13.2).
+  await stopAllMcpServers();
   if (healthPollTimer) {
     clearInterval(healthPollTimer);
   }

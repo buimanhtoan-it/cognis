@@ -2,7 +2,7 @@
   "name": "cognis-vscode",
   "displayName": "Cognis",
   "description": "Managed Cognis setup: semantic code search, MCP wiring, and live indexing across MCP-capable editors.",
-  "version": "0.8.2",
+  "version": "0.8.4",
   "publisher": "ToanBui",
   "license": "SEE LICENSE IN LICENSE.txt",
   "icon": "media/icon.png",
@@ -60,113 +60,177 @@
     "commands": [
       {
         "command": "cognis.setupWorkspace",
-        "title": "Cognis: Set Up Workspace",
+        "title": "Set Up Workspace",
         "category": "Cognis",
         "icon": "media/command.png"
       },
       {
         "command": "cognis.installBackend",
-        "title": "Cognis: Install Backend",
+        "title": "Install Engine",
         "category": "Cognis",
         "icon": "media/command.png"
       },
       {
         "command": "cognis.repairSetup",
-        "title": "Cognis: Troubleshoot & Repair",
+        "title": "Troubleshoot & Repair",
         "category": "Cognis",
         "icon": "media/command.png"
       },
       {
         "command": "cognis.clearAndReindex",
-        "title": "Cognis: Rebuild Index",
+        "title": "Rebuild Index (this workspace)",
         "category": "Cognis",
         "icon": "media/command.png"
       },
       {
         "command": "cognis.connectMcp",
-        "title": "Cognis: Connect MCP (write mcp.json)",
+        "title": "Connect MCP",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.disconnectMcp",
+        "title": "Disconnect MCP",
         "category": "Cognis",
         "icon": "media/command.png"
       },
       {
         "command": "cognis.startMcpServer",
-        "title": "Cognis: Start MCP Server (HTTP)",
+        "title": "Start HTTP MCP Server",
         "category": "Cognis",
         "icon": "media/command.png"
       },
       {
         "command": "cognis.stopMcpServer",
-        "title": "Cognis: Stop MCP Server (HTTP)",
+        "title": "Stop HTTP MCP Server",
         "category": "Cognis",
         "icon": "media/command.png"
       },
       {
         "command": "cognis.pauseSync",
-        "title": "Cognis: Pause Index Sync",
+        "title": "Pause Index Sync",
         "category": "Cognis",
         "icon": "media/command.png"
       },
       {
         "command": "cognis.resumeSync",
-        "title": "Cognis: Resume Index Sync",
+        "title": "Resume Index Sync",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.cancelIndexing",
+        "title": "Cancel Indexing",
         "category": "Cognis",
         "icon": "media/command.png"
       },
       {
         "command": "cognis.enterLicense",
-        "title": "Cognis: Enter License Key",
+        "title": "Enter License Key",
         "category": "Cognis",
         "icon": "media/command.png"
       },
       {
         "command": "cognis.removeFromWorkspace",
-        "title": "Cognis: Remove from Workspace",
+        "title": "Remove from This Workspace",
         "category": "Cognis",
         "icon": "media/command.png"
       },
       {
         "command": "cognis.prepareUninstall",
-        "title": "Cognis: Remove Everything (Prepare for Uninstall)",
+        "title": "Remove Everything & Uninstall",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.reinstallEngine",
+        "title": "Reinstall Engine",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.uninstallEngine",
+        "title": "Uninstall Engine",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.coldRestart",
+        "title": "Cold Restart (Wipe & Rebuild)",
         "category": "Cognis",
         "icon": "media/command.png"
       },
       {
         "command": "cognis.showHealth",
-        "title": "Cognis: Show Health",
+        "title": "Show Health",
         "category": "Cognis",
         "icon": "media/command.png"
       },
       {
         "command": "cognis.openPanel",
-        "title": "Cognis: Open Overview",
+        "title": "Open Overview",
         "category": "Cognis",
         "icon": "media/command.png"
       },
       {
         "command": "cognis.refreshPrerequisites",
-        "title": "Cognis: Re-check Prerequisites",
+        "title": "Re-check Prerequisites",
         "category": "Cognis",
         "icon": "media/command.png"
       },
       {
         "command": "cognis.installAllPrerequisites",
-        "title": "Cognis: Install Missing Prerequisites",
+        "title": "Install Missing Prerequisites",
         "category": "Cognis",
         "icon": "media/command.png"
       },
       {
         "command": "cognis.showOutput",
-        "title": "Cognis: Show Output",
+        "title": "Show Activity Log",
         "category": "Cognis",
         "icon": "media/command.png"
       },
       {
         "command": "cognis.showDiagnostics",
-        "title": "Cognis: Show Diagnostics Log",
+        "title": "Show Diagnostics Log",
         "category": "Cognis",
         "icon": "media/command.png"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "cognis.startMcpServer",
+          "when": "view == cognis.controlPanel && !cognis.mcpServerRunning",
+          "group": "navigation@1"
+        },
+        {
+          "command": "cognis.stopMcpServer",
+          "when": "view == cognis.controlPanel && cognis.mcpServerRunning",
+          "group": "navigation@1"
+        },
+        {
+          "command": "cognis.resumeSync",
+          "when": "view == cognis.controlPanel && cognis.syncPaused",
+          "group": "navigation@2"
+        },
+        {
+          "command": "cognis.pauseSync",
+          "when": "view == cognis.controlPanel && !cognis.syncPaused",
+          "group": "navigation@2"
+        },
+        {
+          "command": "cognis.openPanel",
+          "when": "view == cognis.controlPanel",
+          "group": "overflow@1"
+        },
+        {
+          "command": "cognis.showHealth",
+          "when": "view == cognis.controlPanel",
+          "group": "overflow@2"
+        }
+      ]
+    },
     "configuration": {
       "title": "Cognis",
       "properties": {
@@ -314,3 +378,4 @@
     "typescript": "^5.7.0"
   }
 }
+

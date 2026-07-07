@@ -160,7 +160,7 @@ test("backend present (doctor ran) but no health keeps backend step done", () =>
 
 test("fresh machine panel guides the user to install the backend first", () => {
   const view = derivePanelView({ status: "notInstalled", backendAvailable: false });
-  assert.match(view.headline, /Install the Cognis backend/);
+  assert.match(view.headline, /Install the Cognis engine/);
   // It must offer a one-click install, not a setup button that would fail.
   assert.equal(view.primary?.id, "installBackend");
 });
@@ -547,4 +547,59 @@ test("active embedding still masks a transient health failure (bypass preserved)
   });
   assert.match(view.headline, /generating embeddings/i);
   assert.notEqual(view.primary?.id, "repair");
+});
+
+// ---------------------------------------------------------------------------
+// Regression: pausing sync (or live indexing simply not running) on a healthy,
+// MCP-connected workspace must NOT be mislabeled "Managed setup needs repair".
+// The old logic hit the `mcpEnabled && !liveIndexing` branch and offered
+// Troubleshoot, directly contradicting the "Index sync paused" panel below it.
+// A healthy index with sync off is an intentional, recoverable state — offer to
+// turn sync back on, and keep the status green.
+// ---------------------------------------------------------------------------
+
+test("paused sync on a connected workspace stays green and offers Resume (not Troubleshoot)", () => {
+  const view = derivePanelView({
+    status: "mcpEnabled",
+    health: okHealth(),
+    configured: true,
+    mcpEnabled: true,
+    liveIndexing: false,
+    syncPaused: true,
+  });
+  assert.equal(view.statusClass, "status-ok");
+  assert.equal(view.primary?.id, "resumeSync");
+  assert.doesNotMatch(view.headline, /repair/i);
+  assert.match(view.headline, /paused/i);
+});
+
+test("live sync off (not paused) on a healthy workspace offers to restart it, not repair", () => {
+  const view = derivePanelView({
+    status: "mcpEnabled",
+    health: okHealth(),
+    configured: true,
+    mcpEnabled: true,
+    liveIndexing: false,
+    syncPaused: false,
+  });
+  assert.equal(view.statusClass, "status-ok");
+  assert.equal(view.primary?.id, "resumeSync");
+  assert.notEqual(view.primary?.id, "repair");
+});
+
+test("stepper completes (and hides) once MCP is wired + health is ok, even with no observable runtime", () => {
+  // Windows can't always scope the mcpd process to this repo, so mcpRuntimeCount
+  // is 0 even when connected. The stepper must still finish rather than sit on
+  // "active" forever — matching the "connected" panel headline.
+  const ctx: PanelContext = {
+    status: "mcpEnabled",
+    health: okHealth(),
+    prerequisites: readyPrereqs(true),
+    configured: true,
+    mcpEnabled: true,
+    mcpRuntimeCount: 0,
+    liveIndexing: true,
+  };
+  assert.equal(stepState(ctx, "connected"), "done");
+  assert.equal(renderStepperSection(ctx), "");
 });

@@ -39,7 +39,7 @@ const REPAIR_ACTION: GuidanceAction = {
 };
 
 const INSTALL_BACKEND_ACTION: GuidanceAction = {
-  label: "Install backend",
+  label: "Install engine",
   command: "cognis.installBackend",
 };
 
@@ -66,7 +66,7 @@ export function backendNotReadyGuidance(detail?: string): UserGuidance {
   return {
     title: "Cognis engine not ready",
     message:
-      "Cognis couldn't start its engine. Click Install backend and Cognis will download and set it up for you automatically.",
+      "Cognis couldn't start its engine. Click Install engine and Cognis will download and set it up for you automatically.",
     severity: "error",
     actions: [INSTALL_BACKEND_ACTION, OUTPUT_ACTION],
     technicalDetail: detail?.trim() || undefined,

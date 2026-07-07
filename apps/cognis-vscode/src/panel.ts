@@ -17,18 +17,27 @@ export const ACTION_COMMANDS: Record<string, string> = {
   repair: "cognis.repairSetup",
   clearReindex: "cognis.clearAndReindex",
   connectMcp: "cognis.connectMcp",
+  disconnectMcp: "cognis.disconnectMcp",
   startMcp: "cognis.startMcpServer",
   stopMcp: "cognis.stopMcpServer",
   pauseSync: "cognis.pauseSync",
   resumeSync: "cognis.resumeSync",
+  cancelIndexing: "cognis.cancelIndexing",
   health: "cognis.showHealth",
   output: "cognis.showOutput",
   refreshPrerequisites: "cognis.refreshPrerequisites",
   installAllPrerequisites: "cognis.installAllPrerequisites",
   installBackend: "cognis.installBackend",
+  reinstallEngine: "cognis.reinstallEngine",
+  coldRestart: "cognis.coldRestart",
   remove: "cognis.removeFromWorkspace",
   prepareUninstall: "cognis.prepareUninstall",
 };
+
+// Canonical display label for the `cognis.resumeSync` action. Every rendered
+// location that resolves to `resumeSync` MUST use this constant so the label is
+// byte-for-byte identical across all panel states (R8.1–R8.3).
+const RESUME_SYNC_LABEL = "Resume sync";
 
 export interface PanelContext {
   status: WorkspaceStatus;
@@ -309,12 +318,12 @@ export function derivePanelView(ctx: PanelContext): PanelView {
     // setup.
     if (ctx.backendAvailable === false && !ctx.prerequisites) {
       return {
-        headline: "Install the Cognis backend",
+        headline: "Install the Cognis engine",
         detail:
           "This extension is the control panel; the search engine is a small, self-contained binary. " +
-          "Click Install backend and Cognis downloads it for you — no terminal, no setup.",
+          "Click Install engine and Cognis downloads it for you — no terminal, no setup.",
         statusClass: "status-warn",
-        primary: { id: "installBackend", label: "Install backend" },
+        primary: { id: "installBackend", label: "Install engine" },
       };
     }
     // Gate setup on the prerequisite checklist: if a required component is
@@ -352,32 +361,46 @@ export function derivePanelView(ctx: PanelContext): PanelView {
     };
   }
 
-  if (mcpEnabled && liveIndexing && health.overall === "ok") {
+  // All healthy-index states live in this single block so the top-of-panel
+  // verdict, the onboarding stepper, and the Index Status section always agree.
+  // Critically, a healthy index with live sync *off* — whether the user paused
+  // it or the daemon simply isn't running — is NOT a broken state: it only
+  // means new file changes aren't being tracked. Offer to turn sync back on
+  // instead of mislabeling an intentional pause as "needs repair" (which
+  // previously contradicted the "Index sync paused" panel just below it).
+  if (health.overall === "ok") {
+    if (!mcpEnabled) {
+      return {
+        headline: "Connect Cognis to your editor (MCP)",
+        detail:
+          "Your index is built. One step left: add Cognis as an MCP server so your editor can search your code in chat. This writes a workspace mcp.json.",
+        statusClass: "status-ok",
+        primary: { id: "connectMcp", label: "Connect MCP (mcp.json)" },
+      };
+    }
+    if (ctx.syncPaused) {
+      return {
+        headline: "Connected — index sync paused",
+        detail:
+          "Cognis is answering from the last-synced index. Resume sync so saved file changes are re-indexed automatically.",
+        statusClass: "status-ok",
+        primary: { id: "resumeSync", label: RESUME_SYNC_LABEL },
+      };
+    }
+    if (!liveIndexing) {
+      return {
+        headline: "Connected — live sync is off",
+        detail:
+          "Your index is healthy and MCP is connected. Turn live indexing back on so saved changes are re-indexed automatically.",
+        statusClass: "status-ok",
+        primary: { id: "resumeSync", label: RESUME_SYNC_LABEL },
+      };
+    }
     return {
       headline: "Cognis MCP server connected",
       detail:
         "Semantic search and live indexing are active. If the Cognis tools don't appear in your editor's chat yet, reload the editor window.",
       statusClass: "status-ok",
-    };
-  }
-
-  if (health.overall === "ok" && !mcpEnabled) {
-    return {
-      headline: "Connect Cognis to your editor (MCP)",
-      detail:
-        "Your index is built. One step left: add Cognis as an MCP server so your editor can search your code in chat. This writes a workspace mcp.json.",
-      statusClass: "status-ok",
-      primary: { id: "connectMcp", label: "Connect MCP (mcp.json)" },
-    };
-  }
-
-  if (mcpEnabled && !liveIndexing) {
-    return {
-      headline: "Managed setup needs repair",
-      detail:
-        "MCP is configured, but live indexing is not active. Run Troubleshoot so Cognis can restore the workspace through the normal managed flow.",
-      statusClass: "status-warn",
-      primary: { id: "repair", label: "Troubleshoot" },
     };
   }
 
@@ -485,21 +508,25 @@ export function deriveSetupSteps(ctx: PanelContext): SetupStep[] {
     indexed = "pending";
   }
 
-  // ④ MCP tools connected to the editor.
+  // ④ MCP tools connected to the editor. Reaches "done" once mcp.json is
+  // written and the index is healthy — the completion criterion the user
+  // actually controls, and the one that matches the "connected" panel headline.
+  // A live runtime process is a stronger signal but isn't always observable
+  // (e.g. Windows can't scope the process to this repo), so requiring it would
+  // leave the stepper stuck "active" forever on the happy path — making setup
+  // feel like it never finishes.
   let connected: SetupStepState;
   const mcpRuntimeActive = (ctx.mcpRuntimeCount ?? 0) > 0;
   if (indexed !== "done") {
     connected = "pending";
-  } else if (mcpEnabled && mcpRuntimeActive) {
+  } else if (mcpEnabled && (mcpRuntimeActive || healthOk)) {
     connected = "done";
-  } else if (mcpEnabled) {
-    connected = "active";
   } else {
     connected = "active";
   }
 
   return [
-    { id: "backend", label: "Backend", state: backend },
+    { id: "backend", label: "Engine", state: backend },
     { id: "components", label: "Components", state: components },
     { id: "indexed", label: "Index synced", state: indexed },
     { id: "connected", label: "MCP connected", state: connected },
@@ -625,8 +652,12 @@ export function renderMcpSection(context: PanelContext): string {
   } else {
     statusText = `Not connected yet. Add Cognis as an MCP server in ${escapeHtml(host)} — this writes a workspace mcp.json the editor reads to launch the server.`;
   }
+  // When connected, offer a non-destructive Disconnect alongside the re-write
+  // action. This lives in the MCP card (not the Danger-zone) because it only
+  // removes this repo's entry from mcp.json — it keeps the index and data.
   const action = configured
     ? `<button data-action="connectMcp" title="Rewrite this workspace's MCP config (mcp.json) for the current editor.">Re-write mcp.json</button>`
+      + `<button data-action="disconnectMcp" title="Remove this repo's Cognis entry from mcp.json. Non-destructive; keeps your index.">Disconnect MCP</button>`
     : `<button data-action="connectMcp" title="Write this workspace's MCP config (mcp.json) so your editor can use Cognis.">Connect MCP (mcp.json)</button>`;
   const serverRow = context.mcpServerName
     ? `<div class="surface-detail">Server: <code>${escapeHtml(context.mcpServerName)}</code></div>`
@@ -664,7 +695,7 @@ export function renderMcpSection(context: PanelContext): string {
         ${serverRow}
         ${pathRow}
         ${duplicateRow}
-        <div class="surface-detail">The editor starts and stops the MCP server automatically from this config (stdio transport) — there is no separate server URL to manage.</div>
+        <div class="surface-detail">Your editor starts and stops the MCP server automatically from this file.</div>
         ${renderMcpHttpSubsection(context)}
       </div>
     </details>
@@ -684,26 +715,43 @@ function renderMcpHttpSubsection(context: PanelContext): string {
   const url = context.mcpServerUrl;
   const err = context.mcpServerError;
   const stoppedDetail =
-    "Optional: run a standalone HTTP server with a stable URL (panel-managed, per workspace). Most users do not need this — the stdio config above is enough for Cursor / VS Code.";
+    "Optional: run a standalone HTTP server with a stable address (panel-managed, per workspace). Most users do not need this — the config above is enough for Cursor / VS Code.";
   let label: string;
   let detail: string;
   let button: string;
+  // Raw technical values (address URL, error string) never appear in the main
+  // status text above — they are relocated to labeled detail rows in the body
+  // so they stay one glance away without leaking jargon into the headline (R9).
+  const detailRows: string[] = [];
   switch (phase) {
     case "starting":
       label = "Starting…";
-      detail = url ? `Binding ${escapeHtml(url)}` : "Binding port…";
+      detail = "Starting the server…";
+      if (url) {
+        detailRows.push(
+          `<div class="surface-detail">Address: <code>${escapeHtml(url)}</code></div>`
+        );
+      }
       button = `<button data-action="stopMcp" title="Stop the panel-managed HTTP MCP server.">Stop</button>`;
       break;
     case "running":
       label = "Running";
-      detail = url
-        ? `Listening at <code>${escapeHtml(url)}</code>`
-        : "Listening…";
+      detail = "The server is running.";
+      if (url) {
+        detailRows.push(
+          `<div class="surface-detail">Address: <code>${escapeHtml(url)}</code></div>`
+        );
+      }
       button = `<button data-action="stopMcp" title="Stop the panel-managed HTTP MCP server.">Stop</button>`;
       break;
     case "error":
       label = "Error";
-      detail = err ? escapeHtml(err) : "The server exited unexpectedly.";
+      detail = "The MCP server stopped unexpectedly.";
+      if (err) {
+        detailRows.push(
+          `<div class="surface-detail">Details: <code>${escapeHtml(err)}</code></div>`
+        );
+      }
       button = `<button data-action="startMcp" title="Start a standalone HTTP MCP server for this workspace.">Start</button>`;
       break;
     default:
@@ -711,6 +759,7 @@ function renderMcpHttpSubsection(context: PanelContext): string {
       detail = stoppedDetail;
       button = `<button data-action="startMcp" title="Start a standalone HTTP MCP server for this workspace.">Start</button>`;
   }
+  const extraRows = detailRows.join("\n      ");
   return `<details class="prereq-details">
     <summary class="prereq-summary">
       <span class="prereq-summary-mark prereq-optional">•</span>
@@ -722,6 +771,7 @@ function renderMcpHttpSubsection(context: PanelContext): string {
     </summary>
     <div class="prereq-body">
       <div class="surface-actions">${button}</div>
+      ${extraRows}
     </div>
   </details>`;
 }
@@ -1410,10 +1460,15 @@ function panelHtml(
       <div class="surface-actions">
         ${
           context.syncPaused
-            ? `<button data-action="resumeSync" title="Resume automatic indexing of file changes in this workspace.">Resume sync</button>`
+            ? `<button data-action="resumeSync" title="Resume automatic indexing of file changes in this workspace.">${RESUME_SYNC_LABEL}</button>`
             : `<button data-action="pauseSync" title="Pause automatic indexing. Cognis keeps answering from the current index but stops tracking new changes.">Pause sync</button>`
         }
         <button data-action="clearReindex" title="Delete the stored index and rebuild from scratch. Keeps your config and MCP wiring.">Rebuild index</button>
+        ${
+          indexView.busy
+            ? `<button data-action="cancelIndexing" title="Stop the running index build. Keeps the partial index; you can rebuild later.">Cancel indexing</button>`
+            : ""
+        }
       </div>
     </div>
     <div class="progress-summary">
@@ -1431,7 +1486,7 @@ function panelHtml(
       ${renderFileGroup(
         "Queued files",
         indexView.pendingFiles,
-        "No files are waiting in the debounce queue."
+        "No files are waiting to be indexed."
       )}
       ${renderFileGroup(
         "Indexing now",
@@ -1454,12 +1509,20 @@ function panelHtml(
   <details class="advanced">
     <summary>Danger zone</summary>
     <div class="advanced-group">
+      <div class="advanced-label">Reset &amp; recover</div>
+      <div class="link-actions">
+        <button class="link link-danger" data-action="reinstallEngine" title="Delete the downloaded engine binary + semantic model and fetch fresh, checksum-verified copies. Keeps your index and MCP wiring.">Reinstall engine</button>
+        <button class="link link-danger" data-action="coldRestart" title="Full clean slate: wipe this workspace's .cognis index, remove ALL cognis MCP entries, uninstall the engine + model, then re-download everything and re-index from scratch. Your source code is untouched.">Cold restart (wipe &amp; rebuild)</button>
+      </div>
+      <div class="surface-detail">Cold restart fixes a corrupted or stale state — a legacy vector index, a locked binary, or a half-finished setup.</div>
+    </div>
+    <div class="advanced-group">
       <div class="advanced-label">Remove Cognis</div>
       <div class="link-actions">
         <button class="link link-danger" data-action="remove" title="Stop indexing, disconnect MCP for this repo, and delete the local .cognis index for this workspace.">Remove from this workspace</button>
-        <button class="link link-danger" data-action="prepareUninstall" title="Stop indexing, delete this workspace's .cognis index, remove ALL cognis MCP entries from your editor, and uninstall the Cognis backend Cognis installed. Run this before uninstalling the extension.">Remove everything (prepare to uninstall)</button>
+        <button class="link link-danger" data-action="prepareUninstall" title="Stop indexing, delete this workspace's .cognis index, remove ALL cognis MCP entries from your editor, and uninstall the Cognis engine Cognis installed. Run this before uninstalling the extension.">Remove everything (prepare to uninstall)</button>
       </div>
-      <div class="surface-detail">Your source code is never touched. "Remove everything" also uninstalls the backend Cognis installed for you.</div>
+      <div class="surface-detail">Your source code is never touched. "Remove everything" also uninstalls the engine Cognis installed for you.</div>
     </div>
   </details>
 

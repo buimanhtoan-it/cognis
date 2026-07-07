@@ -1,4 +1,4 @@
-# cognis — Rust engine workspace (rust-engine-migration spec).
+# cognis â€” Rust engine workspace (rust-engine-migration spec).
 # This is now the engine: the Python packages/apps were removed at K8 (Task
 # 11.2), so the shipped product is pure-Rust. native/csar-rs is excluded from
 # the workspace (it sets its own release profile + is the C-ABI parity bridge);
@@ -9,7 +9,7 @@ members = ["crates/*", "bins/*", "xtask"]
 exclude = ["native/csar-rs"]
 
 [workspace.package]
-version = "0.8.2"
+version = "0.8.4"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -59,10 +59,11 @@ cognis-mcpd = { path = "bins/cognis-mcpd" }
 # Release profile for the shipped single-binary distribution (Task 10.1 / G2).
 # `lto` + single codegen unit optimise the static binary; `strip` drops symbols
 # so the per-platform artifact stays small. `panic` is left as the default
-# (unwind) at the workspace level so proptest/`should_panic` tests still work —
+# (unwind) at the workspace level so proptest/`should_panic` tests still work â€”
 # the CSAR `cdylib` keeps its own `panic = "abort"` in native/csar-rs.
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
 strip = "symbols"
+

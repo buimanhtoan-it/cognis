@@ -1,5 +1,9 @@
 import * as fs from "fs";
-import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
+import {
+  spawn,
+  spawnSync,
+  type ChildProcessWithoutNullStreams,
+} from "child_process";
 import * as path from "path";
 import * as vscode from "vscode";
 import { getOutputChannel } from "./cli";
@@ -122,6 +126,39 @@ function isPidAlive(pid: number | undefined): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Terminate a process by pid for handles that have no live `proc` reference
+ * (pid-only handles attached via {@link attachToExistingIndexd}). Idempotent:
+ * a falsy/invalid pid or an already-dead process is treated as success (R10.6).
+ *
+ * On Windows the indexd children are NOT spawned detached, so killing just the
+ * pid would orphan them; we tree-kill via `taskkill /T` to reap the whole
+ * process tree (R10.3). On other platforms a plain `process.kill` suffices.
+ *
+ * Failures are swallowed and logged (with the offending pid) to the output
+ * channel so one stubborn process never blocks cleanup of the rest (R10.5).
+ */
+function killByPid(pid: number | undefined): void {
+  if (!pid || pid <= 0 || !isPidAlive(pid)) {
+    return;
+  }
+  try {
+    if (process.platform === "win32") {
+      // tree-kill: indexd's children are not detached, so a pid-only kill
+      // would leave them orphaned.
+      spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"]);
+    } else {
+      process.kill(pid);
+    }
+  } catch (err) {
+    getOutputChannel().appendLine(
+      `[indexd] failed to terminate pid ${pid}: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
   }
 }
 
@@ -441,10 +478,15 @@ export function stopAllIndexing(): void {
   for (const [root, handle] of processes) {
     handle.statusWatcher?.close();
     processes.delete(root);
-    if (!handle.proc) {
-      continue;
+    if (handle.proc) {
+      // Graceful stop first (R10.4); waitForProcessExit escalation is handled
+      // by the per-repo stopLiveIndexing path.
+      handle.proc.kill();
+    } else {
+      // pid-only handle (attached via attachToExistingIndexd): don't skip it —
+      // tree-kill by pid so no orphaned daemon survives deactivate (R10.1, R10.3).
+      killByPid(handle.pid);
     }
-    handle.proc.kill();
     const previous = statuses.get(root);
     publishIndexStatus(
       root,

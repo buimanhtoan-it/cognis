@@ -88,6 +88,29 @@ let backendAvailable: boolean | undefined;
 let indexingActive = false;
 let blockingIndexMessage: string | undefined;
 let autoIndexStartPromise: Promise<void> | undefined;
+/**
+ * The most recent {@link PanelContext} handed to {@link updateStatusBar}. Kept
+ * so the ``cognis.advancedMode`` configuration listener can flip
+ * ``advancedMode`` and re-render the panel in place (≤2s, no window reload)
+ * without re-deriving the whole workspace state (R3.3).
+ */
+let lastContext: PanelContext | undefined;
+
+/**
+ * Read the ``cognis.advancedMode`` setting (default ``false``). Advanced/Debug
+ * mode only controls which panel surface renders; if reading the config throws
+ * for any reason, keep the safe default (``false``) so the panel falls back to
+ * the Minimal_Surface (R3.4).
+ */
+function readAdvancedMode(): boolean {
+  try {
+    return vscode.workspace
+      .getConfiguration("cognis")
+      .get<boolean>("advancedMode", false);
+  } catch {
+    return false;
+  }
+}
 
 function buildIndexingContext(repoRoot: string): PanelContext {
   const state = getState(repoRoot);
@@ -101,6 +124,7 @@ function buildIndexingContext(repoRoot: string): PanelContext {
     prerequisites: lastPrerequisites,
     configured: isWorkspaceConfigured(repoRoot),
     backendAvailable,
+    advancedMode: readAdvancedMode(),
   };
 }
 
@@ -111,6 +135,7 @@ async function fetchPanelContext(repoRoot: string): Promise<PanelContext> {
     prerequisites: lastPrerequisites,
     configured: isWorkspaceConfigured(repoRoot),
     backendAvailable,
+    advancedMode: readAdvancedMode(),
   };
 }
 
@@ -156,6 +181,7 @@ function setPanelContextKeys(ctx: PanelContext): void {
 }
 
 function updateStatusBar(context: PanelContext): void {
+  lastContext = context;
   statusBarItem.text = outcomeLabelForContext(context);
   statusBarItem.tooltip = "Cognis: click for indexing and MCP setup status";
   statusBarItem.show();
@@ -672,6 +698,88 @@ async function runInstallBackend(): Promise<void> {
 }
 
 /**
+ * One-click "Start Cognis" flow behind the Unified_Control's ``off`` state.
+ *
+ * Reuses the existing routines sequentially to turn Cognis on for this
+ * workspace (R1.5):
+ *   1. ensure the engine binary is installed (``runInstallBackend`` when
+ *      ``backendAvailable === false``),
+ *   2. set the workspace up when it isn't ``configured`` yet
+ *      (``runSetupWorkspace``),
+ *   3. start live indexing, and
+ *   4. connect MCP (``runConnectMcp``).
+ *
+ * The sequence stops early on the first step that fails or is cancelled in a
+ * user-visible way. The reused routines already surface their own detailed
+ * error guidance; between steps we re-check state (``backendAvailable`` /
+ * ``isWorkspaceConfigured``) and, on a stall, show a short "not finished"
+ * message and halt — without deleting or modifying the user's source or the
+ * local ``.cognis`` index (R6.5, R9.2).
+ */
+async function runStartCognis(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    await showErrorGuidance(
+      new Error("Open a workspace folder before starting Cognis."),
+      "Start Cognis"
+    );
+    return;
+  }
+  const repoRoot = folder.uri.fsPath;
+
+  // Stop early: surface an actionable "not finished" notice and leave the
+  // source tree + local .cognis index untouched (R6.5, R9.2).
+  const stopEarly = (detail: string): void => {
+    trace.warn("flow", `Start Cognis stopped early: ${detail}`);
+    void vscode.window.showWarningMessage(
+      `Cognis isn't fully started yet — ${detail} Your code and local index are ` +
+        "unchanged; run “Start Cognis” again to continue."
+    );
+  };
+
+  // 1. Ensure the engine binary is installed (fresh machine). Read the module
+  // flag through helpers so its value is re-observed after the awaited install
+  // re-probes prerequisites (a plain `if` would let the type narrow to stale).
+  const engineKnownMissing = (): boolean => backendAvailable === false;
+  const engineReady = (): boolean => backendAvailable === true;
+  if (engineKnownMissing()) {
+    await runInstallBackend();
+    // runInstallBackend re-probes prerequisites and updates backendAvailable;
+    // if the engine still isn't runnable, stop before touching the workspace.
+    if (!engineReady()) {
+      stopEarly("the Cognis engine isn't installed.");
+      return;
+    }
+  }
+
+  // 2. Set the workspace up if it hasn't been configured yet.
+  if (!isWorkspaceConfigured(repoRoot)) {
+    await runSetupWorkspace();
+    if (!isWorkspaceConfigured(repoRoot)) {
+      stopEarly("workspace setup did not complete.");
+      return;
+    }
+  }
+
+  // 3. Start live indexing (idempotent — skip when the daemon already runs).
+  if (!isLiveIndexing(repoRoot)) {
+    try {
+      await withProgress("Cognis: Start live indexing", async () => startLive());
+      startHealthPolling();
+    } catch (err) {
+      await showErrorGuidance(err, "Start Cognis");
+      stopEarly("live indexing could not start.");
+      return;
+    }
+  }
+
+  // 4. Connect MCP so the editor can reach the index (handles its own errors).
+  await runConnectMcp();
+
+  await pollHealth();
+}
+
+/**
  * Fetch + verify the single ``cognis`` binary and advance setup. Surfaces a
  * clear message when no binary is published for the platform or the
  * download/verification fails.
@@ -981,31 +1089,43 @@ export function activate(context: vscode.ExtensionContext): void {
   const output = getOutputChannel();
   context.subscriptions.push(output);
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.showOutput", () => {
-      output.show(true);
-    })
-  );
+  // Register a command with partial-failure tolerance (R7.5): if one
+  // registration throws (e.g. a duplicate id or a host quirk), log a
+  // diagnostics warning and keep activating so the remaining commands still
+  // register. Activation never aborts because a single command failed.
+  const safeRegister = (
+    id: string,
+    handler: (...args: any[]) => any
+  ): void => {
+    try {
+      context.subscriptions.push(vscode.commands.registerCommand(id, handler));
+    } catch (err) {
+      trace.warn("activate", `command ${id} failed to register: ${String(err)}`);
+      // Continue activation with partial functionality.
+    }
+  };
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.showDiagnostics", async () => {
-      const file = trace.logFilePath();
-      if (!file) {
-        await vscode.window.showWarningMessage(
-          "Diagnostics log is not ready yet. Try again in a moment."
-        );
-        return;
-      }
-      try {
-        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
-        await vscode.window.showTextDocument(doc);
-      } catch {
-        await vscode.window.showWarningMessage(
-          `Could not open the diagnostics log at ${file}.`
-        );
-      }
-    })
-  );
+  safeRegister("cognis.showOutput", () => {
+    output.show(true);
+  });
+
+  safeRegister("cognis.showDiagnostics", async () => {
+    const file = trace.logFilePath();
+    if (!file) {
+      await vscode.window.showWarningMessage(
+        "Diagnostics log is not ready yet. Try again in a moment."
+      );
+      return;
+    }
+    try {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+      await vscode.window.showTextDocument(doc);
+    } catch {
+      await vscode.window.showWarningMessage(
+        `Could not open the diagnostics log at ${file}.`
+      );
+    }
+  });
 
   context.subscriptions.push(
     onDidChangeIndexStatus(({ repoRoot, status }) => {
@@ -1029,6 +1149,7 @@ export function activate(context: vscode.ExtensionContext): void {
           mcpEnabled: state.mcpEnabled,
           syncPaused: state.syncPaused,
           indexStatus: state.indexStatus,
+          advancedMode: readAdvancedMode(),
         });
         return;
       }
@@ -1060,102 +1181,72 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
+  // React to `cognis.advancedMode` toggles by re-rendering the panel in place
+  // (≤2s, no window reload). We flip `advancedMode` on the most recent context
+  // and re-run `updateStatusBar`; if nothing has been rendered yet, fall back
+  // to a fresh health poll. This is a plain event listener (not a command), so
+  // it's pushed directly rather than via `safeRegister` (R3.3, R3.4).
   context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.setupWorkspace", () => runSetupWorkspace())
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.repairSetup", () => runRepairSetup())
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.clearAndReindex", () =>
-      runClearAndReindex()
-    )
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.connectMcp", () =>
-      runConnectMcp()
-    )
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.disconnectMcp", () =>
-      runDisconnectMcp()
-    )
-  );
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.cancelIndexing", () =>
-      runCancelIndexing()
-    )
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.pauseSync", () => runPauseSync())
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.resumeSync", () => runResumeSync())
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.enterLicense", () =>
-      enterLicenseKey(context)
-    )
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.installBackend", () =>
-      runInstallBackend()
-    )
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.removeFromWorkspace", () =>
-      runRemoveFromWorkspace("workspace")
-    )
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.prepareUninstall", () =>
-      runRemoveFromWorkspace("all")
-    )
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.reinstallEngine", () =>
-      runReinstallEngine()
-    )
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.uninstallEngine", () =>
-      runUninstallEngine()
-    )
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.coldRestart", () => runColdRestart())
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.showHealth", async () => {
-      try {
-        await showHealthReport();
-      } catch (err) {
-        await showErrorGuidance(err, "Health report");
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (!e.affectsConfiguration("cognis.advancedMode")) {
+        return;
+      }
+      const advancedMode = readAdvancedMode();
+      if (lastContext) {
+        updateStatusBar({ ...lastContext, advancedMode });
+      } else {
+        void pollHealth();
       }
     })
   );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.startMcpServer", () => runStartMcpServer())
+  safeRegister("cognis.setupWorkspace", () => runSetupWorkspace());
+
+  // Unified_Control "Start Cognis" one-click flow, registered in the same
+  // partial-failure-tolerant group as every other command (R1.6, R7.3).
+  safeRegister("cognis.startCognis", () => runStartCognis());
+
+  safeRegister("cognis.repairSetup", () => runRepairSetup());
+
+  safeRegister("cognis.clearAndReindex", () => runClearAndReindex());
+
+  safeRegister("cognis.connectMcp", () => runConnectMcp());
+
+  safeRegister("cognis.disconnectMcp", () => runDisconnectMcp());
+
+  safeRegister("cognis.cancelIndexing", () => runCancelIndexing());
+
+  safeRegister("cognis.pauseSync", () => runPauseSync());
+
+  safeRegister("cognis.resumeSync", () => runResumeSync());
+
+  safeRegister("cognis.enterLicense", () => enterLicenseKey(context));
+
+  safeRegister("cognis.installBackend", () => runInstallBackend());
+
+  safeRegister("cognis.removeFromWorkspace", () =>
+    runRemoveFromWorkspace("workspace")
   );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.stopMcpServer", () => runStopMcpServer())
-  );
+  safeRegister("cognis.prepareUninstall", () => runRemoveFromWorkspace("all"));
+
+  safeRegister("cognis.reinstallEngine", () => runReinstallEngine());
+
+  safeRegister("cognis.uninstallEngine", () => runUninstallEngine());
+
+  safeRegister("cognis.coldRestart", () => runColdRestart());
+
+  safeRegister("cognis.showHealth", async () => {
+    try {
+      await showHealthReport();
+    } catch (err) {
+      await showErrorGuidance(err, "Health report");
+    }
+  });
+
+  safeRegister("cognis.startMcpServer", () => runStartMcpServer());
+
+  safeRegister("cognis.stopMcpServer", () => runStopMcpServer());
 
   context.subscriptions.push(
     onDidChangeMcpServerState(({ repoRoot }) => {
@@ -1166,44 +1257,31 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.openPanel", () => {
-      panelProvider.reveal();
-    })
-  );
+  safeRegister("cognis.openPanel", () => {
+    panelProvider.reveal();
+  });
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.refreshPrerequisites", () =>
-      refreshPrerequisites()
-    )
-  );
+  safeRegister("cognis.refreshPrerequisites", () => refreshPrerequisites());
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "cognis.installPrerequisite",
-      async (itemId?: string) => {
-        const folder = getWorkspaceFolder();
-        if (!folder || !itemId) {
-          return;
-        }
-        const item = lastPrerequisites?.items.find((i) => i.id === itemId);
-        if (!item) {
-          return;
-        }
-        installPrerequisite(folder.uri.fsPath, item.install_target);
-      }
-    )
-  );
+  safeRegister("cognis.installPrerequisite", async (itemId?: string) => {
+    const folder = getWorkspaceFolder();
+    if (!folder || !itemId) {
+      return;
+    }
+    const item = lastPrerequisites?.items.find((i) => i.id === itemId);
+    if (!item) {
+      return;
+    }
+    installPrerequisite(folder.uri.fsPath, item.install_target);
+  });
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand("cognis.installAllPrerequisites", () => {
-      const folder = getWorkspaceFolder();
-      if (!folder || !lastPrerequisites) {
-        return;
-      }
-      installAllMissing(folder.uri.fsPath, lastPrerequisites.combined_install_target);
-    })
-  );
+  safeRegister("cognis.installAllPrerequisites", () => {
+    const folder = getWorkspaceFolder();
+    if (!folder || !lastPrerequisites) {
+      return;
+    }
+    installAllMissing(folder.uri.fsPath, lastPrerequisites.combined_install_target);
+  });
 
   void (async () => {
     await rehydrateWorkspaceState();
@@ -1217,6 +1295,7 @@ export function activate(context: vscode.ExtensionContext): void {
           mcpEnabled: state.mcpEnabled,
           syncPaused: state.syncPaused,
           indexStatus: state.indexStatus,
+          advancedMode: readAdvancedMode(),
         });
       }
     }

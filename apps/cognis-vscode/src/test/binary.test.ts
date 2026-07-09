@@ -193,6 +193,20 @@ test("rewriteServerBlockToBinary tolerates a block with no module prefix", () =>
   assert.deepEqual(rewritten.args, ["mcpd"]);
 });
 
+test("rewriteServerBlockToBinary is idempotent on an already-binary block (no duplicate mcpd)", () => {
+  // Re-writing a block that is already in binary form must not accumulate a
+  // second selector token: ["mcpd"] must stay ["mcpd"], not become
+  // ["mcpd", "mcpd"] (the bug that produced `args: ["mcpd", "mcpd"]`).
+  const already = { command: "/bin/cognis", args: ["mcpd"], env: {} };
+  const once = rewriteServerBlockToBinary(already, "/bin/cognis");
+  assert.deepEqual(once.args, ["mcpd"]);
+  // Idempotent under repeated application, and any already-doubled config is
+  // collapsed back to a single selector while trailing flags survive.
+  const doubled = { command: "/bin/cognis", args: ["mcpd", "mcpd", "--transport", "stdio"], env: {} };
+  const fixed = rewriteServerBlockToBinary(doubled, "/bin/cognis");
+  assert.deepEqual(fixed.args, ["mcpd", "--transport", "stdio"]);
+});
+
 // ---------------------------------------------------------------------------
 // End-to-end install (no network): download injected, checksum verified.
 // ---------------------------------------------------------------------------

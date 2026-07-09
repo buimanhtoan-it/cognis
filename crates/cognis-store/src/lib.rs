@@ -301,6 +301,27 @@ impl Database {
         .map_err(store_err)?;
 
         run_migrations(&conn)?;
+        // Self-heal a legacy `vec0` `symbol_vec` on the shared open path so every
+        // surface (health/cli/indexd) applies the same outcome. Detection is
+        // schema-only and the heal is a guarded no-op on non-legacy DBs, so this
+        // is safe and idempotent for all inputs.
+        //
+        // Graceful-ignore fallback (indexd-vec0-legacy-crash Req 2.1, 2.5): the
+        // heal writes to the DB, so it can fail when the DB is read-only
+        // (`attempt to write a readonly database`) or the write lock can't be
+        // taken. In that case the open path MUST still succeed — we log and
+        // ignore the heal error and return `Ok(conn)`. Downstream reads that
+        // touch `symbol_vec` rows degrade to empty (see `vec_search`,
+        // `vec_symbol_ids`, `vec_row_count`) rather than propagate a fatal
+        // `vec0` error, and a later rebuild on a writable DB repopulates BLOB
+        // vectors.
+        if let Err(e) = heal_legacy_vec0(&conn) {
+            eprintln!(
+                "cognis-store: legacy vec0 self-heal skipped for {} ({e}); \
+                 continuing with graceful degradation",
+                self.path
+            );
+        }
         Ok(conn)
     }
 
@@ -389,11 +410,25 @@ impl Database {
 
     /// Symbol ids present in `symbol_vec`, in `symbol_id` order.
     ///
-    /// Works against the plain-BLOB fallback `symbol_vec` table. A `vec0`
-    /// virtual table created by sqlite-vec requires the extension to be loaded
-    /// to query; that load + KNN + graceful fallback is task 3.3.
+    /// Works against the plain-BLOB fallback `symbol_vec` table, and against a
+    /// `vec0` virtual table when the sqlite-vec extension is loadable.
+    ///
+    /// Graceful degradation (indexd-vec0-legacy-crash Req 2.5): when
+    /// `symbol_vec` is a legacy `vec0` virtual table this build cannot read
+    /// (e.g. the heal-on-open couldn't run because the DB is read-only), any
+    /// live query raises `no such module: vec0`. Rather than propagate that
+    /// fatal error, degrade to an empty result — matching `vec_search`'s
+    /// "degrade to empty" contract so `check_vector`'s warn mapping keeps
+    /// working (a legacy DB reads as "no vectors" ⇒ `warn`, never a crash).
     pub fn vec_symbol_ids(&self) -> Result<Vec<String>> {
         let conn = self.connect()?;
+        // Unreadable legacy `vec0` table → empty. `try_load_vec_extension`
+        // both probes for and (under the `sqlite-vec` feature) loads the
+        // extension, so if it *is* loadable we fall through and the query below
+        // succeeds against the `vec0` table.
+        if vec0_table_present(&conn)? && !try_load_vec_extension(&conn) {
+            return Ok(Vec::new());
+        }
         let mut stmt = conn
             .prepare("SELECT symbol_id FROM symbol_vec ORDER BY symbol_id")
             .map_err(store_err)?;
@@ -411,8 +446,18 @@ impl Database {
     /// populated `symbol_vec` (count > 0) as "semantic index available".
     /// Works against both the plain-BLOB fallback and a `vec0` virtual table.
     /// A missing table degrades to `0` rather than erroring.
+    ///
+    /// Graceful degradation (indexd-vec0-legacy-crash Req 2.5): a legacy `vec0`
+    /// table this build cannot read (e.g. the heal-on-open was skipped on a
+    /// read-only DB) raises `no such module: vec0` on `COUNT(*)`. Degrade that
+    /// to `0` — consistent with `vec_search` / `vec_symbol_ids` — so callers
+    /// treating a populated `symbol_vec` as "semantic available" simply see it
+    /// as empty rather than crashing.
     pub fn vec_row_count(&self) -> Result<usize> {
         let conn = self.connect()?;
+        if vec0_table_present(&conn)? && !try_load_vec_extension(&conn) {
+            return Ok(0);
+        }
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM symbol_vec", [], |r| r.get(0))
             .or_else(|e| match e {
@@ -984,8 +1029,22 @@ fn vec_table_dim(conn: &Connection) -> Result<Option<usize>> {
 /// the plain-BLOB fallback is recreated with migration 001's exact shape so the
 /// `ON DELETE CASCADE` FK and column types stay identical.
 fn recreate_vec_table(conn: &Connection, is_vec0: bool, dim: usize) -> Result<()> {
-    conn.execute("DROP TABLE IF EXISTS symbol_vec", [])
-        .map_err(store_err)?;
+    // Defense-in-depth (indexd-vec0-legacy-crash Property 1, Req 2.2/2.4): if the
+    // existing `symbol_vec` is a legacy sqlite-vec `vec0` *virtual* table this
+    // build can't load, a live `DROP TABLE symbol_vec` forces SQLite to
+    // instantiate the missing `vec0` module and raises `no such module: vec0`.
+    // Route that drop through the same module-free `sqlite_master` deletion that
+    // `heal_legacy_vec0` uses, so no code path ever issues a live `DROP` against
+    // a `vec0` vtable. Detection is schema-only (`vec0_table_present`,
+    // `try_load_vec_extension`), so a plain-BLOB `symbol_vec` (the common
+    // post-heal shape) — and a `vec0` table on a build where the extension loads
+    // — keep the ordinary `DROP TABLE` path, unchanged (Preservation, Property 2).
+    if vec0_table_present(conn)? && !try_load_vec_extension(conn) {
+        drop_symbol_vec_module_free(conn)?;
+    } else {
+        conn.execute("DROP TABLE IF EXISTS symbol_vec", [])
+            .map_err(store_err)?;
+    }
     if is_vec0 {
         // KNN DDL needs the sqlite-vec extension; load best-effort (a no-op in
         // the default build). If it isn't loadable the CREATE errors and the
@@ -1009,6 +1068,118 @@ fn recreate_vec_table(conn: &Connection, is_vec0: bool, dim: usize) -> Result<()
         )
         .map_err(store_err)?;
     }
+    Ok(())
+}
+
+/// Module-free self-heal for a legacy sqlite-vec `vec0` `symbol_vec` table on a
+/// build that cannot load the `vec0` module — the bug condition
+/// `hasVec0VirtualTable(X) AND NOT vec0ModuleLoadable` (indexd-vec0-legacy-crash
+/// Property 1).
+///
+/// A real `DROP TABLE symbol_vec` against a `vec0` *virtual* table forces SQLite
+/// to instantiate the `vec0` module (for `xDisconnect`/`xDestroy`); on a build
+/// without the extension that raises `no such module: vec0` — the exact error
+/// we are curing. So instead of a live `DROP`, this removes the virtual-table
+/// entry directly from `sqlite_master` under `PRAGMA writable_schema` (which
+/// never loads the module), drops the now-orphaned plain shadow tables, then
+/// recreates `symbol_vec` in migration 001's exact plain-BLOB shape. All indexed
+/// UCKG symbol data (`symbol`, `edge`, `symbol_attribute`, `file`, `symbol_fts`,
+/// `meta`) is preserved; BLOB vectors are re-embedded on the next index pass.
+///
+/// Detection uses only the schema-text probes (`vec0_table_present`,
+/// `try_load_vec_extension`), which read `sqlite_master.sql` and never touch the
+/// missing module, so the heal is guarded to fire only for the bug condition and
+/// is a byte-for-byte no-op for every other DB (plain-BLOB `symbol_vec`, a `vec0`
+/// table on a build where the extension loads, no `symbol_vec`, or a fresh DB).
+/// It is idempotent: after one heal the table is plain BLOB (`is_vec0 == false`)
+/// so a second call returns immediately.
+fn heal_legacy_vec0(conn: &Connection) -> Result<()> {
+    let is_vec0 = vec0_table_present(conn)?;
+    let vec_ext_ok = try_load_vec_extension(conn);
+    // Only a legacy vec0 table this build can't read needs healing; every other
+    // shape (Preservation, Property 2) is left untouched.
+    let is_bug_condition = is_vec0 && !vec_ext_ok;
+    if !is_bug_condition {
+        return Ok(());
+    }
+
+    // Preserve the recorded `FLOAT[n]` width for the recreated table's active
+    // dim (the plain-BLOB shape itself carries no width); fall back to the
+    // persisted `meta.embedding_dim`, then the crate default.
+    let dim = vec_table_dim(conn)?
+        .or_else(|| {
+            read_meta(conn, EMBEDDING_DIM_META_KEY)
+                .ok()
+                .flatten()
+                .and_then(|v| v.parse::<usize>().ok())
+        })
+        .unwrap_or(DEFAULT_EMBEDDING_DIM);
+
+    // Recreate `symbol_vec` in migration 001's exact plain-BLOB shape. Because
+    // the existing table is a `vec0` vtable this build can't load,
+    // `recreate_vec_table` routes its drop through the shared module-free
+    // `sqlite_master` deletion (see `drop_symbol_vec_module_free`) instead of a
+    // live `DROP TABLE`, so the missing module is never instantiated.
+    with_write_txn(conn, |conn| recreate_vec_table(conn, false, dim))
+}
+
+/// Remove the `symbol_vec` virtual-table entry and its `symbol_vec_*` shadow
+/// tables directly from `sqlite_master` under `PRAGMA writable_schema`, without
+/// ever instantiating the (possibly missing) `vec0` module.
+///
+/// A live `DROP TABLE symbol_vec` against a `vec0` *virtual* table forces SQLite
+/// to load the module (for `xDisconnect`/`xDestroy`); on a build without the
+/// extension that raises `no such module: vec0`. Deleting the `sqlite_master`
+/// rows under `writable_schema` never loads the module, so this is safe on any
+/// build. Shared by `heal_legacy_vec0` (heal-on-open) and `recreate_vec_table`
+/// (dimension reconcile) so no code path issues a live `DROP` of a legacy `vec0`
+/// vtable (indexd-vec0-legacy-crash Req 2.2/2.4).
+///
+/// Data-safety: matches ONLY the `symbol_vec_` prefix (escaped `_` via
+/// `ESCAPE '\'`) so it never touches `symbol`, `symbol_attribute`, or
+/// `symbol_fts*`. Callers are expected to run this inside a write transaction.
+fn drop_symbol_vec_module_free(conn: &Connection) -> Result<()> {
+    // Shadow tables are the ordinary tables sqlite-vec created to back the
+    // `vec0` virtual table (e.g. `symbol_vec_chunks`, `symbol_vec_rowids`,
+    // `symbol_vec_vector_chunks00`). They are plain tables and drop without the
+    // module. Match ONLY the `symbol_vec_` prefix (escaped `_`).
+    let shadow_tables: Vec<String> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT name FROM sqlite_master \
+                 WHERE type = 'table' AND name LIKE 'symbol_vec\\_%' ESCAPE '\\'",
+            )
+            .map_err(store_err)?;
+        let names = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(store_err)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(store_err)?;
+        names
+    };
+    for name in &shadow_tables {
+        // Data-safety guard: never drop anything outside the `symbol_vec_`
+        // prefix, even though the query already constrained it.
+        debug_assert!(name.starts_with("symbol_vec_"));
+        if name.starts_with("symbol_vec_") {
+            conn.execute_batch(&format!("DROP TABLE IF EXISTS \"{name}\";"))
+                .map_err(store_err)?;
+        }
+    }
+
+    // Remove the `vec0` virtual-table entry (and any leftover `symbol_vec_%`
+    // shadow rows) straight from `sqlite_master` without instantiating the
+    // module, then force the schema to be re-read (`writable_schema = RESET`) so
+    // the just-deleted vtable is no longer in this connection's cached schema.
+    // `ESCAPE '\'` keeps the `_` literal so the LIKE can't match unrelated names.
+    conn.execute_batch(
+        "PRAGMA writable_schema = ON;\n\
+         DELETE FROM sqlite_master \
+            WHERE name = 'symbol_vec' OR name LIKE 'symbol_vec\\_%' ESCAPE '\\';\n\
+         PRAGMA writable_schema = OFF;\n\
+         PRAGMA writable_schema = RESET;",
+    )
+    .map_err(store_err)?;
     Ok(())
 }
 
@@ -1918,5 +2089,409 @@ mod tests {
         assert_eq!(g.indptr, vec![0]);
         assert!(g.indices.is_empty() && g.weights.is_empty() && g.degree.is_empty());
         db.close_thread_connection();
+    }
+
+    // ----- heal_legacy_vec0 (indexd-vec0-legacy-crash task 3.1) -----------
+
+    /// Rewrite the connection's plain-BLOB `symbol_vec` into a legacy `vec0`
+    /// virtual table plus `symbol_vec_*` shadow tables — module-free, exactly
+    /// how an older sqlite-vec engine leaves it on disk. After this, the schema
+    /// probe sees a `vec0` table while any live `symbol_vec` query (or a real
+    /// `DROP`) raises `no such module: vec0`.
+    fn craft_legacy_vec0(conn: &Connection) {
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS symbol_vec;\n\
+             CREATE TABLE IF NOT EXISTS symbol_vec_chunks(chunk_id INTEGER PRIMARY KEY, data BLOB);\n\
+             CREATE TABLE IF NOT EXISTS symbol_vec_rowids(rowid INTEGER PRIMARY KEY, symbol_id TEXT);\n\
+             INSERT INTO symbol_vec_chunks(chunk_id, data) VALUES (1, x'00');\n\
+             INSERT INTO symbol_vec_rowids(rowid, symbol_id) VALUES (1, 's:legacy');\n\
+             PRAGMA writable_schema=ON;\n\
+             INSERT INTO sqlite_master(type,name,tbl_name,rootpage,sql) \
+                 VALUES('table','symbol_vec','symbol_vec',0,\
+                 'CREATE VIRTUAL TABLE symbol_vec USING vec0(symbol_id TEXT PRIMARY KEY, embedding FLOAT[384])');\n\
+             PRAGMA writable_schema=OFF;",
+        )
+        .unwrap();
+    }
+
+    /// `heal_legacy_vec0` on a crafted legacy-`vec0` DB (this build has no
+    /// sqlite-vec module) converts `symbol_vec` back to the plain-BLOB fallback,
+    /// preserves all indexed symbol data, drops only the `symbol_vec_*` shadow
+    /// tables, and is idempotent on a second call.
+    #[test]
+    fn heal_legacy_vec0_converts_to_blob_preserves_data_and_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.path().join("legacy.db")).unwrap();
+        let conn = db.connect().unwrap();
+
+        // Seed real UCKG data that must survive the heal.
+        db_insert_symbols(&conn, &["s:a", "s:b", "s:c"]);
+        insert_edge(&conn, "s:a", "s:b", "calls", 1.0, "{}");
+        // A same-prefix-but-unrelated table must NOT be dropped: `symbol` and
+        // `symbol_attribute` don't match `symbol_vec_%`, but assert the guard
+        // by keeping a `symbol_attribute` row too.
+        conn.execute(
+            "INSERT INTO symbol_attribute(symbol_id, key, value) VALUES('s:a','k','v')",
+            [],
+        )
+        .unwrap();
+
+        // Turn symbol_vec into a legacy vec0 vtable + shadow tables.
+        craft_legacy_vec0(&conn);
+        assert!(
+            vec0_table_present(&conn).unwrap(),
+            "fixture must present as a vec0 table"
+        );
+        // A live query against the vtable really does hit the missing module.
+        assert!(conn
+            .query_row("SELECT COUNT(*) FROM symbol_vec", [], |r| r
+                .get::<_, i64>(0))
+            .is_err());
+
+        // Heal.
+        heal_legacy_vec0(&conn).unwrap();
+
+        // symbol_vec is now the plain-BLOB fallback: queryable, empty, no vec0.
+        assert!(
+            !vec0_table_present(&conn).unwrap(),
+            "symbol_vec must be plain BLOB after heal"
+        );
+        let vec_sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name = 'symbol_vec'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            vec_sql.to_ascii_uppercase().contains("BLOB")
+                && !vec_sql.to_ascii_uppercase().contains("USING VEC0"),
+            "recreated in migration-001 BLOB shape: {vec_sql}"
+        );
+        assert!(
+            db.vec_symbol_ids().unwrap().is_empty(),
+            "BLOB table is empty"
+        );
+
+        // Indexed symbol data preserved; only symbol_vec_* shadow tables gone.
+        assert_eq!(db.count("symbol").unwrap(), 3);
+        assert_eq!(db.count("edge").unwrap(), 1);
+        assert_eq!(db.count("symbol_attribute").unwrap(), 1, "attr preserved");
+        let shadow_left: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type = 'table' AND name LIKE 'symbol_vec\\_%' ESCAPE '\\'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(shadow_left, 0, "symbol_vec_* shadow tables removed");
+
+        // Idempotent: a second heal is a guarded no-op on the plain-BLOB table.
+        heal_legacy_vec0(&conn).unwrap();
+        assert!(!vec0_table_present(&conn).unwrap());
+        assert_eq!(db.count("symbol").unwrap(), 3);
+
+        db.close_thread_connection();
+    }
+
+    /// A non-legacy DB (plain-BLOB `symbol_vec`) is left byte-for-byte
+    /// untouched by `heal_legacy_vec0` (Preservation guard).
+    #[test]
+    fn heal_legacy_vec0_is_noop_on_plain_blob_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.path().join("plain.db")).unwrap();
+        let conn = db.connect().unwrap();
+        db_insert_symbols(&conn, &["s:a"]);
+        conn.execute(
+            "INSERT INTO symbol_vec(symbol_id, embedding) VALUES('s:a', ?1)",
+            rusqlite::params![floats_to_le_bytes(&[1.0, 2.0])],
+        )
+        .unwrap();
+
+        let before: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name = 'symbol_vec'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+
+        heal_legacy_vec0(&conn).unwrap();
+
+        let after: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name = 'symbol_vec'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(before, after, "plain-BLOB symbol_vec unchanged");
+        assert_eq!(db.vec_symbol_ids().unwrap(), vec!["s:a".to_string()]);
+        db.close_thread_connection();
+    }
+
+    /// Graceful-ignore fallback (indexd-vec0-legacy-crash task 3.4, Req 2.1/2.5):
+    /// when the heal-on-open cannot run (e.g. a read-only DB) the `symbol_vec`
+    /// stays a legacy `vec0` virtual table this build can't read. The open path
+    /// must still succeed and every downstream read that touches `symbol_vec`
+    /// rows must degrade to empty rather than propagate the fatal
+    /// `no such module: vec0` error — matching `vec_search`'s degrade-to-empty
+    /// contract and `check_vector`'s warn mapping.
+    ///
+    /// We simulate "heal couldn't run" by crafting the legacy `vec0` shape onto
+    /// a live connection *after* open (so no heal reran over it), then assert
+    /// the reads degrade over the still-unhealed vtable.
+    #[test]
+    fn reads_degrade_to_empty_when_legacy_vec0_cannot_be_healed() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.path().join("unhealed.db")).unwrap();
+        let conn = db.connect().unwrap();
+
+        // Real UCKG data that must remain readable while the vector leg degrades.
+        db_insert_symbols(&conn, &["s:a", "s:b"]);
+        insert_edge(&conn, "s:a", "s:b", "calls", 1.0, "{}");
+
+        // Leave the connection holding a legacy `vec0` `symbol_vec` (as if the
+        // heal was skipped on a read-only DB).
+        craft_legacy_vec0(&conn);
+        assert!(
+            vec0_table_present(&conn).unwrap(),
+            "fixture must present as an unhealed vec0 table"
+        );
+        // A raw live query really does hit the missing module (the crash surface
+        // the graceful reads must absorb).
+        assert!(
+            conn.query_row("SELECT COUNT(*) FROM symbol_vec", [], |r| r
+                .get::<_, i64>(0))
+                .is_err(),
+            "a raw vec0 query must raise `no such module: vec0`"
+        );
+
+        // Downstream reads degrade to empty / zero instead of propagating.
+        assert!(
+            db.vec_symbol_ids().unwrap().is_empty(),
+            "vec_symbol_ids degrades to empty on an unhealed legacy vec0 table"
+        );
+        assert_eq!(
+            db.vec_row_count().unwrap(),
+            0,
+            "vec_row_count degrades to 0 on an unhealed legacy vec0 table"
+        );
+        assert!(
+            db.vec_search(&[1.0, 0.0, 0.0], 5).unwrap().is_empty(),
+            "vec_search degrades to empty on an unhealed legacy vec0 table"
+        );
+
+        // Non-vector symbol data stays fully readable (data preserved).
+        assert_eq!(db.count("symbol").unwrap(), 2);
+        assert_eq!(db.count("edge").unwrap(), 1);
+
+        db.close_thread_connection();
+    }
+
+    /// Craft the legacy `vec0` shape directly on disk via a RAW rusqlite
+    /// connection (never through `Database::open`, so no heal runs over it),
+    /// exactly how an older sqlite-vec engine leaves the file. `path` must be an
+    /// already-migrated DB with real UCKG rows to preserve.
+    fn craft_legacy_vec0_on_disk(path: &std::path::Path) {
+        let raw = Connection::open(path).unwrap();
+        craft_legacy_vec0(&raw);
+        assert!(
+            vec0_table_present(&raw).unwrap(),
+            "on-disk fixture must present as a vec0 table before open-path heal"
+        );
+        // `raw` drops at end of scope, releasing the file handle (Windows) and
+        // checkpointing the crafted schema into the DB file.
+    }
+
+    /// End-to-end open-path heal (Task 4.1, Req 2.1): a legacy-`vec0` fixture
+    /// that exists on disk *before* the store opens it heals through the shared
+    /// `open_new_connection` path (not by calling `heal_legacy_vec0` directly).
+    /// `Database::open` returns `Ok` and leaves a queryable plain-BLOB
+    /// `symbol_vec`, with all indexed symbol data preserved.
+    #[test]
+    fn open_new_connection_heals_legacy_vec0_fixture_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("open_heal.db");
+
+        // 1. Build a real migrated DB file + seed UCKG data, then release it.
+        {
+            let db = Database::open(&path).unwrap();
+            let conn = db.connect().unwrap();
+            db_insert_symbols(&conn, &["s:a", "s:b", "s:c"]);
+            insert_edge(&conn, "s:a", "s:b", "calls", 1.0, "{}");
+            db.close_thread_connection();
+        }
+
+        // 2. Turn the on-disk `symbol_vec` into a legacy `vec0` vtable (no heal).
+        craft_legacy_vec0_on_disk(&path);
+
+        // 3. Open through the shared store path: `open_new_connection` runs
+        //    `run_migrations` then `heal_legacy_vec0`, so the fixture heals
+        //    end-to-end and open returns Ok (no `no such module: vec0`).
+        let db = Database::open(&path).unwrap();
+        let conn = db.connect().unwrap();
+
+        assert!(
+            !vec0_table_present(&conn).unwrap(),
+            "symbol_vec must be plain BLOB after heal-on-open"
+        );
+        // A live query that would have raised on the vtable now succeeds & is empty.
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM symbol_vec", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "healed BLOB symbol_vec is queryable and empty");
+        assert!(db.vec_symbol_ids().unwrap().is_empty());
+
+        // Indexed symbol data preserved across the on-disk heal.
+        assert_eq!(db.count("symbol").unwrap(), 3);
+        assert_eq!(db.count("edge").unwrap(), 1);
+        // Shadow tables removed by the open-path heal.
+        let shadow_left: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type = 'table' AND name LIKE 'symbol_vec\\_%' ESCAPE '\\'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(shadow_left, 0, "symbol_vec_* shadow tables removed on open");
+
+        db.close_thread_connection();
+    }
+
+    /// After the open-path heal (Task 4.1, Req 2.2, 2.4), `reconcile_embedding_dim`
+    /// sees a plain-BLOB `symbol_vec`, so its drop/recreate is an ordinary table
+    /// operation with no `no such module: vec0` error — a dim change works
+    /// cleanly post-heal and the recreated table accepts a new-dim vector.
+    #[test]
+    fn reconcile_embedding_dim_after_heal_on_open_is_plain_blob_drop_recreate() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("reconcile_heal.db");
+
+        {
+            let db = Database::open(&path).unwrap();
+            let conn = db.connect().unwrap();
+            db_insert_symbols(&conn, &["s:a"]);
+            db.close_thread_connection();
+        }
+        craft_legacy_vec0_on_disk(&path);
+
+        // Heal on open: symbol_vec is now plain BLOB.
+        let mut db = Database::open(&path).unwrap();
+        assert!(
+            !vec0_table_present(&db.connect().unwrap()).unwrap(),
+            "heal-on-open leaves a plain-BLOB symbol_vec"
+        );
+
+        // Dim change: ordinary BLOB drop/recreate, no vec0 module ever touched.
+        db.reconcile_embedding_dim(768).unwrap();
+        {
+            let conn = db.connect().unwrap();
+            assert_eq!(
+                read_meta(&conn, EMBEDDING_DIM_META_KEY).unwrap().as_deref(),
+                Some("768"),
+                "reconcile persisted the new dim"
+            );
+            assert!(
+                !vec0_table_present(&conn).unwrap(),
+                "table stays plain BLOB after reconcile"
+            );
+            // The recreated fallback table accepts a new-dim vector.
+            conn.execute(
+                "INSERT INTO symbol_vec(symbol_id, embedding) VALUES('s:a', ?1)",
+                rusqlite::params![floats_to_le_bytes(&[0.0f32; 768])],
+            )
+            .unwrap();
+        }
+        assert_eq!(db.vec_symbol_ids().unwrap(), vec!["s:a".to_string()]);
+
+        db.close_thread_connection();
+    }
+
+    /// Data-safety guard (Task 4.1, Req 2.4): the heal removes ONLY the
+    /// `symbol_vec` vtable and its `symbol_vec_%` shadow tables. Tables whose
+    /// names merely start with `symbol_vec` but are not shadow tables (e.g.
+    /// `symbol_vector`, `symbolic_vec`) and the core UCKG tables (`symbol`,
+    /// `symbol_attribute`, `symbol_fts`) are left fully intact with their rows.
+    #[test]
+    fn heal_legacy_vec0_never_removes_tables_outside_symbol_vec_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.path().join("safety.db")).unwrap();
+        let conn = db.connect().unwrap();
+
+        // Core UCKG data (decoys the heal must never touch).
+        db_insert_symbols(&conn, &["s:a", "s:b"]);
+        conn.execute(
+            "INSERT INTO symbol_attribute(symbol_id, key, value) VALUES('s:a','k','v')",
+            [],
+        )
+        .unwrap();
+
+        // Red-herring tables: names start with `symbol_vec`/`symbol` but do NOT
+        // match the escaped `symbol_vec\_%` prefix, so they MUST survive.
+        conn.execute_batch(
+            "CREATE TABLE symbol_vector(id TEXT PRIMARY KEY, note TEXT);\n\
+             INSERT INTO symbol_vector(id, note) VALUES('keep', 'red-herring');\n\
+             CREATE TABLE symbolic_vec(id TEXT PRIMARY KEY);\n\
+             INSERT INTO symbolic_vec(id) VALUES('keep2');",
+        )
+        .unwrap();
+
+        // Legacy vec0 vtable + real shadow tables (symbol_vec_chunks / _rowids
+        // from craft, plus an extra vector-chunks shadow) that MUST be dropped.
+        craft_legacy_vec0(&conn);
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS symbol_vec_vector_chunks00(rowid INTEGER PRIMARY KEY, vectors BLOB);\n\
+             INSERT INTO symbol_vec_vector_chunks00(rowid, vectors) VALUES(1, x'00');",
+        )
+        .unwrap();
+
+        heal_legacy_vec0(&conn).unwrap();
+
+        // Every `symbol_vec_%` shadow table is gone.
+        let shadow_left: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type = 'table' AND name LIKE 'symbol_vec\\_%' ESCAPE '\\'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(shadow_left, 0, "only symbol_vec_* shadow tables removed");
+
+        // Red-herring same-prefix tables survive with their rows.
+        assert_eq!(db.count("symbol_vector").unwrap(), 1, "symbol_vector kept");
+        assert_eq!(db.count("symbolic_vec").unwrap(), 1, "symbolic_vec kept");
+
+        // Core UCKG tables + rows intact; symbol_fts table still present.
+        assert_eq!(db.count("symbol").unwrap(), 2);
+        assert_eq!(db.count("symbol_attribute").unwrap(), 1);
+        let fts_present: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type = 'table' AND name = 'symbol_fts'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts_present, 1, "symbol_fts preserved");
+
+        db.close_thread_connection();
+    }
+
+    /// Insert minimal valid `symbol` rows for the given ids (satisfies the NOT
+    /// NULL columns so FK-bearing inserts succeed).
+    fn db_insert_symbols(conn: &Connection, ids: &[&str]) {
+        for id in ids {
+            conn.execute(
+                "INSERT INTO symbol(id, kind, name, qualified_name, language, module, \
+                 file_path, line_start, line_end, content_hash, updated_at) \
+                 VALUES(?1,'function',?1,?1,'rust','m','m.rs',1,1,'h',0)",
+                rusqlite::params![id],
+            )
+            .unwrap();
+        }
     }
 }

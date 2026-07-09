@@ -24,6 +24,11 @@ ctrlc.workspace = true
 
 [dev-dependencies]
 cognis-store.workspace = true
+# Legacy-vec0 integration tests (indexd-vec0-legacy-crash task 4.3): temp repo
+# + `.cognis/uckg.db` fixtures, and a raw connection to read the fixture's real
+# row counts before the heal-on-open pass.
+tempfile = "3"
+rusqlite = { workspace = true }
 
 [features]
 # Forward the ONNX embedder backend so the release daemon indexes with real

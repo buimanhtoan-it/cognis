@@ -110,8 +110,17 @@ export function rewriteServerBlockToBinary(
   binaryPath: string
 ): { command: string; args: string[]; env: Record<string, string> } {
   const original = block.args ?? [];
-  // Drop a leading ``-m <module>`` interpreter prefix; keep any extra flags.
-  const rest = original[0] === "-m" ? original.slice(2) : original;
+  // Drop a leading ``-m <module>`` interpreter prefix (legacy Python form); keep
+  // any extra flags.
+  let rest = original[0] === "-m" ? original.slice(2) : original;
+  // Drop any leading ``mcpd`` selector token(s) so re-writing an already-binary
+  // block is idempotent. `buildBinaryStdioServerBlock` prepends exactly one
+  // ``mcpd`` below; without this a repeated rewrite would accumulate
+  // ``["mcpd", "mcpd", …]`` (the surface tolerates the extra positional, but the
+  // config is wrong and grows on every rewrite).
+  while (rest[0] === "mcpd") {
+    rest = rest.slice(1);
+  }
   return buildBinaryStdioServerBlock(binaryPath, block.env ?? {}, rest);
 }
 

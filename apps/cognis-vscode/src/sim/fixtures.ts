@@ -68,7 +68,12 @@ export const FIXTURES: NamedFixture[] = [
   {
     name: "fresh-machine",
     title: "Fresh machine — backend not installed",
-    context: { status: "notInstalled", backendAvailable: false, version: VERSION },
+    context: {
+      status: "notInstalled",
+      backendAvailable: false,
+      advancedMode: true,
+      version: VERSION,
+    },
   },
   {
     name: "prerequisites-missing",
@@ -143,6 +148,7 @@ export const FIXTURES: NamedFixture[] = [
       liveIndexing: true,
       mcpHost: "vscode",
       mcpServerPhase: "stopped",
+      advancedMode: true,
       version: VERSION,
     },
   },
@@ -158,6 +164,7 @@ export const FIXTURES: NamedFixture[] = [
       mcpHost: "vscode",
       mcpServerPhase: "running",
       mcpServerUrl: "http://127.0.0.1:50001/mcp",
+      advancedMode: true,
       version: VERSION,
     },
   },
@@ -170,6 +177,7 @@ export const FIXTURES: NamedFixture[] = [
       liveIndexing: true,
       mcpEnabled: false,
       configured: true,
+      advancedMode: true,
       version: VERSION,
     },
   },
@@ -222,6 +230,7 @@ export const FIXTURES: NamedFixture[] = [
       mcpHost: "vscode",
       mcpServerName: "cognis",
       mcpConfigPath: ".vscode/mcp.json",
+      advancedMode: true,
       version: VERSION,
     },
   },
@@ -234,6 +243,7 @@ export const FIXTURES: NamedFixture[] = [
       liveIndexing: true,
       mcpEnabled: true,
       configured: true,
+      advancedMode: true,
       version: VERSION,
       indexStatus: {
         active: true,
@@ -247,6 +257,98 @@ export const FIXTURES: NamedFixture[] = [
         recentFiles: ["src/done.ts"],
         updatedAt: Date.now(),
       },
+    },
+  },
+  // ---------------------------------------------------------------------------
+  // Minimal_Surface / Advanced_Surface coverage across every Cognis_State.
+  //
+  // Six fixtures below give one advancedMode-OFF and one advancedMode-ON
+  // fixture for each Cognis_State derived by `deriveCognisState`:
+  //   - off:     not provisioned, not indexing, not paused
+  //   - running: configured && mcpEnabled && !syncPaused (provisioned)
+  //   - paused:  syncPaused === true
+  // Names are stable/greppable so the Playwright spec (task 8.2) can consume
+  // them directly: minimal-{off,running,paused} and advanced-{off,running,paused}.
+  // ---------------------------------------------------------------------------
+  {
+    name: "minimal-off",
+    title: "Minimal — Cognis off (setup required)",
+    context: {
+      status: "notInstalled",
+      backendAvailable: true,
+      configured: false,
+      mcpEnabled: false,
+      advancedMode: false,
+      version: VERSION,
+    },
+  },
+  {
+    name: "minimal-running",
+    title: "Minimal — Cognis running (provisioned + connected)",
+    context: {
+      status: "mcpEnabled",
+      health: healthOk,
+      liveIndexing: true,
+      configured: true,
+      mcpEnabled: true,
+      advancedMode: false,
+      version: VERSION,
+    },
+  },
+  {
+    name: "minimal-paused",
+    title: "Minimal — sync paused",
+    context: {
+      status: "ready",
+      health: healthOk,
+      liveIndexing: false,
+      configured: true,
+      mcpEnabled: true,
+      syncPaused: true,
+      advancedMode: false,
+      version: VERSION,
+    },
+  },
+  {
+    name: "advanced-off",
+    title: "Advanced — Cognis off (setup required)",
+    context: {
+      status: "notInstalled",
+      backendAvailable: true,
+      configured: false,
+      mcpEnabled: false,
+      advancedMode: true,
+      version: VERSION,
+    },
+  },
+  {
+    name: "advanced-running",
+    title: "Advanced — Cognis running (provisioned + connected)",
+    context: {
+      status: "mcpEnabled",
+      health: healthOk,
+      liveIndexing: true,
+      configured: true,
+      mcpEnabled: true,
+      mcpHost: "vscode",
+      mcpServerName: "cognis",
+      mcpConfigPath: ".vscode/mcp.json",
+      advancedMode: true,
+      version: VERSION,
+    },
+  },
+  {
+    name: "advanced-paused",
+    title: "Advanced — sync paused",
+    context: {
+      status: "ready",
+      health: healthOk,
+      liveIndexing: false,
+      configured: true,
+      mcpEnabled: true,
+      syncPaused: true,
+      advancedMode: true,
+      version: VERSION,
     },
   },
 ];

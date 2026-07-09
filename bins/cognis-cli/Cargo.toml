@@ -21,8 +21,19 @@ clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
+[dev-dependencies]
+# Temp dirs for the bugfix exploration/fix tests (legacy-vec0 fixture copies).
+tempfile = "3"
+# Property-based preservation tests for the indexd-vec0-legacy-crash bugfix
+# (generate non-legacy DBs and assert open/migrate/rows are unchanged).
+proptest.workspace = true
+
 [features]
 # Forward the ONNX embedder backend so `cognis-cli index` / `bootstrap` build
 # real embeddings in a release build. Off by default (offline workspace build).
 onnx = ["cognis-indexer/onnx"]
 onnx-download = ["cognis-indexer/onnx-download"]
+# Forward the store's sqlite-vec feature. Only when this is enabled does the
+# vec0-with-extension preservation case (Req 3.2) compile/run; the default
+# offline build has no vec0 module, so that case is gated off.
+sqlite-vec = ["cognis-store/sqlite-vec"]

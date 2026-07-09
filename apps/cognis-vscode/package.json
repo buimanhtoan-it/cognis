@@ -2,7 +2,7 @@
   "name": "cognis-vscode",
   "displayName": "Cognis",
   "description": "Managed Cognis setup: semantic code search, MCP wiring, and live indexing across MCP-capable editors.",
-  "version": "0.8.4",
+  "version": "0.8.6",
   "publisher": "ToanBui",
   "license": "SEE LICENSE IN LICENSE.txt",
   "icon": "media/icon.png",
@@ -98,25 +98,25 @@
         "command": "cognis.startMcpServer",
         "title": "Start HTTP MCP Server",
         "category": "Cognis",
-        "icon": "media/command.png"
+        "icon": "$(plug)"
       },
       {
         "command": "cognis.stopMcpServer",
         "title": "Stop HTTP MCP Server",
         "category": "Cognis",
-        "icon": "media/command.png"
+        "icon": "$(debug-disconnect)"
       },
       {
         "command": "cognis.pauseSync",
         "title": "Pause Index Sync",
         "category": "Cognis",
-        "icon": "media/command.png"
+        "icon": "$(debug-pause)"
       },
       {
         "command": "cognis.resumeSync",
         "title": "Resume Index Sync",
         "category": "Cognis",
-        "icon": "media/command.png"
+        "icon": "$(debug-continue)"
       },
       {
         "command": "cognis.cancelIndexing",
@@ -195,28 +195,34 @@
         "title": "Show Diagnostics Log",
         "category": "Cognis",
         "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.startCognis",
+        "title": "Start Cognis",
+        "category": "Cognis",
+        "icon": "media/command.png"
       }
     ],
     "menus": {
       "view/title": [
         {
           "command": "cognis.startMcpServer",
-          "when": "view == cognis.controlPanel && !cognis.mcpServerRunning",
+          "when": "view == cognis.controlPanel && config.cognis.advancedMode && !cognis.mcpServerRunning",
           "group": "navigation@1"
         },
         {
           "command": "cognis.stopMcpServer",
-          "when": "view == cognis.controlPanel && cognis.mcpServerRunning",
+          "when": "view == cognis.controlPanel && config.cognis.advancedMode && cognis.mcpServerRunning",
           "group": "navigation@1"
         },
         {
           "command": "cognis.resumeSync",
-          "when": "view == cognis.controlPanel && cognis.syncPaused",
+          "when": "view == cognis.controlPanel && config.cognis.advancedMode && cognis.syncPaused",
           "group": "navigation@2"
         },
         {
           "command": "cognis.pauseSync",
-          "when": "view == cognis.controlPanel && !cognis.syncPaused",
+          "when": "view == cognis.controlPanel && config.cognis.advancedMode && !cognis.syncPaused",
           "group": "navigation@2"
         },
         {
@@ -351,6 +357,11 @@
           ],
           "default": "info",
           "description": "Verbosity of the Cognis diagnostics log (Cognis: Show Diagnostics Log). Use debug to capture every CLI call and command with timings when reporting an issue."
+        },
+        "cognis.advancedMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Advanced/Debug mode — for developers only. When on, the Cognis panel reveals the full set of detailed controls, diagnostics, and logs. This only changes what the panel shows; it does not affect which commands are available in the Command Palette."
         }
       }
     }
@@ -374,8 +385,8 @@
     "@types/vscode": "^1.85.0",
     "@vscode/test-electron": "^2.4.1",
     "@vscode/vsce": "^3.9.1",
+    "fast-check": "^3.23.2",
     "mocha": "^10.8.2",
     "typescript": "^5.7.0"
   }
 }
-

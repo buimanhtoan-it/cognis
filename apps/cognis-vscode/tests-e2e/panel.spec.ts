@@ -275,3 +275,144 @@ test.describe("panel round-trip command pairs", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Minimal / Advanced surfaces by name (Requirements R8.2, R8.3, R8.4, R8.5, R8.9).
+//
+// The generic per-fixture loop above already enforces the UI_Contract_Invariant
+// (no dead buttons) for *every* fixture — including the six minimal/advanced
+// fixtures added in task 8.1. This block adds the explicit, by-name assertions
+// the requirements call out: the single Unified_Control + correct label + no
+// Advanced_Only_Action leak on Minimal_Surface (R8.2/R8.4), the presence of the
+// Advanced_Only_Action buttons on Advanced_Surface (R8.3), and a direct
+// re-verification of the UI_Contract_Invariant for both surfaces (R8.5/R8.9).
+// ---------------------------------------------------------------------------
+
+// Advanced_Only_Action set — Requirement R8.2. None of these may appear on a
+// Minimal_Surface; a leak fails the UI_Contract_Invariant (R8.9).
+const ADVANCED_ONLY_ACTIONS = new Set<string>([
+  "clearReindex",
+  "reinstallEngine",
+  "coldRestart",
+  "remove",
+  "prepareUninstall",
+  "startMcp",
+  "stopMcp",
+  "connectMcp",
+  "disconnectMcp",
+  "cancelIndexing",
+  "refreshPrerequisites",
+  "installAllPrerequisites",
+  "health",
+  "output",
+]);
+
+// Minimal fixtures (advancedMode OFF) and the Unified_Control label their
+// Cognis_State must produce — R8.4.
+const MINIMAL_LABEL_BY_NAME: Record<string, string> = {
+  "minimal-off": "Start Cognis",
+  "minimal-running": "Pause",
+  "minimal-paused": "Resume",
+};
+
+// Advanced fixtures (advancedMode ON). Every advanced surface renders the
+// danger-zone Advanced_Only_Action buttons regardless of Cognis_State, so this
+// representative subset is present on all three (verified against the rendered
+// output) — R8.3.
+const ADVANCED_FIXTURE_NAMES = ["advanced-off", "advanced-running", "advanced-paused"];
+const ADVANCED_EXPECTED_ACTIONS = [
+  "clearReindex",
+  "reinstallEngine",
+  "coldRestart",
+  "remove",
+  "prepareUninstall",
+];
+
+// Collect every rendered data-action on the page (with its itemId, if any).
+async function readRenderedActions(
+  page: import("@playwright/test").Page,
+): Promise<Array<{ id: string; itemId: string | null }>> {
+  return page.$$eval("[data-action]", (els) =>
+    els.map((e) => ({
+      id: e.getAttribute("data-action") ?? "",
+      itemId: e.getAttribute("data-item"),
+    })),
+  );
+}
+
+// Direct re-verification of the UI_Contract_Invariant: every rendered
+// data-action must resolve to a registered command (or be installPrerequisite
+// carrying an itemId). Any unresolved id fails (R8.5/R8.9).
+function assertNoDeadButtons(
+  actions: Array<{ id: string; itemId: string | null }>,
+  where: string,
+): void {
+  for (const a of actions) {
+    if (a.id === "installPrerequisite") {
+      expect(a.itemId, `${where}: installPrerequisite must carry an itemId`).toBeTruthy();
+    } else {
+      expect(
+        manifest.commandMap[a.id],
+        `${where}: action "${a.id}" must resolve to a registered command`,
+      ).toBeTruthy();
+    }
+  }
+}
+
+test.describe("panel minimal vs advanced surfaces", () => {
+  for (const [name, expectedLabel] of Object.entries(MINIMAL_LABEL_BY_NAME)) {
+    test(`${name}: exactly one Unified_Control, correct label, no Advanced_Only_Action leak`, async ({
+      page,
+    }) => {
+      const fx = fixtureByName(name);
+      await page.goto(pageUrl(fx.file));
+      await expandAll(page);
+
+      // R8.2 / R1.1: exactly one Unified_Control on the Minimal_Surface.
+      expect(
+        await page.locator("[data-unified]").count(),
+        `${name} must render exactly one Unified_Control`,
+      ).toBe(1);
+
+      // R8.4: the Unified_Control label matches the Cognis_State.
+      const label = ((await page.locator("[data-unified]").textContent()) ?? "").trim();
+      expect(label, `${name} Unified_Control label`).toBe(expectedLabel);
+
+      const actions = await readRenderedActions(page);
+
+      // R8.2 / R8.9: no data-action in the Advanced_Only_Action set may leak
+      // onto the Minimal_Surface.
+      const leaked = actions.map((a) => a.id).filter((id) => ADVANCED_ONLY_ACTIONS.has(id));
+      expect(leaked, `${name} must not leak Advanced_Only_Action(s): ${leaked.join(", ")}`).toEqual(
+        [],
+      );
+
+      // R8.5: UI_Contract_Invariant — 100% of data-action resolve (no dead buttons).
+      assertNoDeadButtons(actions, name);
+    });
+  }
+
+  for (const name of ADVANCED_FIXTURE_NAMES) {
+    test(`${name}: renders the Advanced_Only_Action buttons and has no dead buttons`, async ({
+      page,
+    }) => {
+      const fx = fixtureByName(name);
+      await page.goto(pageUrl(fx.file));
+      await expandAll(page);
+
+      const actions = await readRenderedActions(page);
+      const ids = new Set(actions.map((a) => a.id));
+
+      // R8.3: the Advanced_Surface exposes the Advanced_Only_Action buttons.
+      for (const expected of ADVANCED_EXPECTED_ACTIONS) {
+        expect(
+          ids.has(expected),
+          `${name} (advancedMode on) must render Advanced_Only_Action "${expected}"`,
+        ).toBe(true);
+      }
+
+      // R8.5: UI_Contract_Invariant re-verified on the Advanced_Surface too.
+      assertNoDeadButtons(actions, name);
+    });
+  }
+});

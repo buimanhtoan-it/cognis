@@ -13,6 +13,7 @@ import { isIndexStatusBusy } from "./state";
  * button posts an action that resolves to a real command (the UI contract).
  */
 export const ACTION_COMMANDS: Record<string, string> = {
+  startCognis: "cognis.startCognis",
   setup: "cognis.setupWorkspace",
   repair: "cognis.repairSetup",
   clearReindex: "cognis.clearAndReindex",
@@ -76,6 +77,204 @@ export interface PanelContext {
   syncPaused?: boolean;
   /** Extension version string, rendered in the panel header (e.g. "0.4.0"). */
   version?: string;
+  /**
+   * Advanced/Debug mode. Mirrors the `cognis.advancedMode` setting. When on,
+   * the panel reveals the full detailed control surface; when off (the
+   * default), it renders the minimal surface. Optional so existing
+   * callers/fixtures keep working — a missing value is treated as `false`.
+   */
+  advancedMode?: boolean;
+}
+
+/**
+ * Unified user-facing state the single primary control represents. Collapses
+ * the separate indexing + MCP concepts into one on/off/paused model:
+ *  - `off`     : Cognis is not set up / not running for this workspace.
+ *  - `running` : Cognis is on and actively syncing.
+ *  - `paused`  : Cognis is on but index sync is paused.
+ */
+export type CognisState = "off" | "running" | "paused";
+
+/**
+ * The unified primary control. Its `data-action` id always maps to a
+ * Non_Destructive_Action (`startCognis` | `pauseSync` | `resumeSync`) and its
+ * label changes with the {@link CognisState}.
+ */
+export interface UnifiedControl {
+  /** data-action id; always in ACTION_COMMANDS and always Non_Destructive. */
+  id: "startCognis" | "pauseSync" | "resumeSync";
+  /** "Start Cognis" | "Pause" | "Resume". */
+  label: string;
+}
+
+/**
+ * Render the single unified primary control as exactly one `<button>` carrying
+ * the stable `data-unified="true"` marker (the invariant that identifies *the*
+ * one primary control, R1.1) plus a `data-action` that resolves through
+ * {@link ACTION_COMMANDS} to a Non_Destructive command (R1.2–R1.4). The label
+ * is HTML-escaped like every other rendered label; the button reuses the shared
+ * `primary` button style. Exactly one element in the returned string carries
+ * `data-unified`.
+ */
+export function renderUnifiedControl(unified: UnifiedControl): string {
+  return `<button class="primary" data-unified="true" data-action="${escapeHtml(
+    unified.id
+  )}">${escapeHtml(unified.label)}</button>`;
+}
+
+/**
+ * Closed vocabulary for the minimal-surface status line. Never contains raw
+ * technical values.
+ */
+export type StatusLineText =
+  | "Ready"
+  | "Working"
+  | "Paused"
+  | "Off"
+  | "Needs attention";
+
+/**
+ * Collapse the separate indexing + MCP concepts into the single on/off/paused
+ * model the unified primary control represents. The three states are mutually
+ * exclusive and checked in order:
+ *  1. `paused`  — the user has explicitly paused index sync (`syncPaused`).
+ *  2. `running` — Cognis is provisioned and active for this workspace
+ *     (`configured && mcpEnabled && !syncPaused`), or indexing work is actively
+ *     in flight.
+ *  3. `off`     — anything else (fresh machine, not set up, MCP not connected).
+ */
+export function deriveCognisState(ctx: PanelContext): CognisState {
+  if (ctx.syncPaused === true) {
+    return "paused";
+  }
+  const provisioned = Boolean(
+    ctx.configured && ctx.mcpEnabled && !ctx.syncPaused
+  );
+  const activelyIndexing =
+    ctx.status === "indexing" || isIndexStatusBusy(ctx.indexStatus);
+  if (provisioned || activelyIndexing) {
+    return "running";
+  }
+  return "off";
+}
+
+/**
+ * Derive the single unified primary control from the current context. The
+ * mapping is fixed on {@link deriveCognisState}:
+ *  - `off`     → `{ id: "startCognis", label: "Start Cognis" }`
+ *  - `running` → `{ id: "pauseSync",   label: "Pause" }`
+ *  - `paused`  → `{ id: "resumeSync",  label: "Resume" }`
+ *
+ * The `id` is therefore always in the Non_Destructive_Action set
+ * `{startCognis, pauseSync, resumeSync}` and never resolves to a
+ * Destructive_Action.
+ */
+export function deriveUnifiedControl(ctx: PanelContext): UnifiedControl {
+  switch (deriveCognisState(ctx)) {
+    case "running":
+      return { id: "pauseSync", label: "Pause" };
+    case "paused":
+      return { id: "resumeSync", label: "Resume" };
+    case "off":
+    default:
+      return { id: "startCognis", label: "Start Cognis" };
+  }
+}
+
+/**
+ * Derive the single minimal-surface status line. Reuses the same internal
+ * verdict logic as {@link derivePanelView} (via its `statusClass`) but collapses
+ * it to the closed vocabulary {@link StatusLineText}, checked in order:
+ *  - `Working`         — indexing work is in flight (or setup is finishing).
+ *  - `Paused`          — the user has explicitly paused index sync.
+ *  - `Needs attention` — the view reports a warning (`status-warn`), or a
+ *    setup-required / unknown state that needs the user to act.
+ *  - `Ready`           — the index is healthy and connected (`status-ok`).
+ *
+ * The returned value is always one of the four closed-vocabulary strings and
+ * never embeds a raw technical value from the context.
+ */
+export function deriveStatusLine(ctx: PanelContext): StatusLineText {
+  const view = derivePanelView(ctx);
+
+  // Active indexing work (and the transient "finishing setup" phase, which
+  // derivePanelView also reports as `status-active`) reads as "Working" — this
+  // takes priority over the sync/health verdicts below, mirroring
+  // derivePanelView which returns `status-active` while work is in flight.
+  if (
+    ctx.status === "indexing" ||
+    isIndexStatusBusy(ctx.indexStatus) ||
+    view.statusClass === "status-active"
+  ) {
+    return "Working";
+  }
+  // The user explicitly paused index sync.
+  if (ctx.syncPaused === true) {
+    return "Paused";
+  }
+  // Not started / not set up for this workspace yet. This is a normal resting
+  // state (the Unified_Control shows "Start Cognis"), NOT a problem — so it
+  // reads as "Off" rather than the alarming "Needs attention".
+  if (deriveCognisState(ctx) === "off") {
+    return "Off";
+  }
+  // Healthy index, connected, idle.
+  if (view.statusClass === "status-ok") {
+    return "Ready";
+  }
+  // A workspace that IS provisioned but has a health/prerequisite/version
+  // problem — the only case that genuinely needs the user to look.
+  return "Needs attention";
+}
+
+/**
+ * A short, plain-language caption that tells the user what the current status
+ * means and what to do next. Paired with the {@link StatusLineText} word so the
+ * Minimal_Surface is self-explanatory (a single word like "Off" or "Needs
+ * attention" is not actionable on its own). Constant per state — never embeds a
+ * raw technical value.
+ */
+export function deriveStatusHint(ctx: PanelContext): string {
+  switch (deriveStatusLine(ctx)) {
+    case "Off":
+      return "Not running yet. Click Start Cognis to set up and index this workspace.";
+    case "Working":
+      return "Indexing your workspace — this runs in the background, no need to wait.";
+    case "Paused":
+      return "Index sync is paused. Click Resume to keep the index up to date.";
+    case "Ready":
+      return "Running and up to date. Your editor’s AI can search this workspace.";
+    case "Needs attention":
+      return "Something needs a look. Turn on Advanced mode (setting: cognis.advancedMode) to see details.";
+  }
+}
+
+/**
+ * Render the single minimal-surface status line as one `<div>` carrying the
+ * stable `data-status-line="true"` marker (the invariant that identifies *the*
+ * one status line, R2.7). The element contains exactly the fixed-vocabulary
+ * {@link StatusLineText} string (HTML-escaped like every other rendered label),
+ * and never embeds a raw technical value (R2.2). Exactly one element in the
+ * returned string carries `data-status-line`.
+ */
+export function renderStatusLine(text: StatusLineText, hint?: string): string {
+  // Tone drives a small colored dot so the status reads at a glance:
+  // ok=green, working=busy blue, attention=amber, off/paused=muted.
+  const tone =
+    text === "Ready"
+      ? "status-ok"
+      : text === "Working"
+        ? "status-active"
+        : text === "Needs attention"
+          ? "status-warn"
+          : "status-muted";
+  const hintHtml = hint
+    ? `<div class="status-hint">${escapeHtml(hint)}</div>`
+    : "";
+  return `<div class="status-line ${tone}" data-status-line="true">
+    <div class="status-word"><span class="status-dot"></span>${escapeHtml(text)}</div>
+    ${hintHtml}
+  </div>`;
 }
 
 export interface PanelPrimaryAction {
@@ -887,6 +1086,175 @@ function panelHtml(
       }>${escapeHtml(view.primary.label)}</button>`
     : "";
 
+  // The unified primary control + single status line — the two elements the
+  // Minimal_Surface consists of. Task 3.2 will also prepend these to the
+  // Advanced_Surface and enforce the single-unified-control invariant.
+  const unified = deriveUnifiedControl(context);
+  const statusLine = deriveStatusLine(context);
+  const unifiedBlock = renderUnifiedControl(unified);
+  const statusBlock = renderStatusLine(statusLine, deriveStatusHint(context));
+
+  // Shared hero header, reused by both the minimal and advanced bodies.
+  const hero = `<div class="hero">
+    <img src="${logoSrc}" alt="Cognis logo" />
+    <div class="hero-copy">
+      <div class="title">Cognis${
+        context.version
+          ? ` <span class="version-badge">v${escapeHtml(context.version)}</span>`
+          : ""
+      }</div>
+      <div class="subtitle">Semantic index and MCP setup for your editor.</div>
+    </div>
+  </div>`;
+
+  // Minimal_Surface: hero + exactly one surface wrapping ONLY the unified
+  // control and the status line. No stepper, MCP, prerequisites, Index Status
+  // file lists, footer log links, or danger zone are rendered here — those
+  // simply aren't emitted, so R2.1/R2.4–R2.7/R5.1/R6.1 hold by construction.
+  if (!context.advancedMode) {
+    const minimalBody = `${hero}
+
+  <div class="surface">
+    ${unifiedBlock}
+    ${statusBlock}
+  </div>`;
+    return htmlDocument(cspSource, nonce, minimalBody);
+  }
+
+  // Advanced_Surface is a strict SUPERSET of the Minimal_Surface: the unified
+  // control (data-unified) and the single status line (data-status-line) are
+  // prepended at the top, then the entire existing detail surface follows
+  // (stepper, MCP, prerequisites, Index Status, danger zone, log links).
+  //
+  // Invariants preserved here:
+  //  - Exactly one [data-unified] in the whole document: only `unifiedBlock`
+  //    carries it. The Index Status pause/resume buttons below use
+  //    data-action="pauseSync"/"resumeSync" WITHOUT data-unified.
+  //  - Exactly one [data-status-line]: only `statusBlock` carries it. The
+  //    status-pill (view.headline) is a separate, unlabelled marker.
+  //  - Raw technical values stay inside the labelled detail surfaces below
+  //    (MCP/prerequisites/Index Status), never in the unified control or
+  //    status line.
+  const advancedBody = `${hero}
+
+  <div class="surface">
+    <div class="primary-action">${unifiedBlock}</div>
+    ${statusBlock}
+    <div class="status-overview">
+      <div class="status-pill ${view.statusClass}">
+        <span class="status-dot"></span>
+        <span class="headline">${escapeHtml(view.headline)}</span>
+      </div>
+      <div class="status-copy">
+        ${
+          view.detail
+            ? `<div class="detail detail-${view.statusClass}">${escapeHtml(view.detail)}</div>`
+            : ""
+        }
+      </div>
+    </div>
+    ${
+      primaryBlock
+        ? `<div class="primary-action">${primaryBlock}</div>`
+        : ""
+    }
+  </div>
+
+  ${renderStepperSection(context)}
+
+  ${renderMcpSection(context)}
+
+  ${renderPrerequisitesSection(context)}
+
+  <div class="surface">
+    <div class="surface-header">
+      <div>
+        <div class="surface-title">Index Status</div>
+        <div class="surface-detail">
+          Track what Cognis is indexing now. Setup and repair manage live indexing automatically when the workspace needs it.
+        </div>
+      </div>
+      <div class="surface-actions">
+        ${
+          context.syncPaused
+            ? `<button data-action="resumeSync" title="Resume automatic indexing of file changes in this workspace.">${RESUME_SYNC_LABEL}</button>`
+            : `<button data-action="pauseSync" title="Pause automatic indexing. Cognis keeps answering from the current index but stops tracking new changes.">Pause sync</button>`
+        }
+        <button data-action="clearReindex" title="Delete the stored index and rebuild from scratch. Keeps your config and MCP wiring.">Rebuild index</button>
+        ${
+          indexView.busy
+            ? `<button data-action="cancelIndexing" title="Stop the running index build. Keeps the partial index; you can rebuild later.">Cancel indexing</button>`
+            : ""
+        }
+      </div>
+    </div>
+    <div class="progress-summary">
+      <span>${escapeHtml(indexView.title)}</span>
+      <span class="progress-value">${escapeHtml(progressLabel)}</span>
+    </div>
+    <div class="progress-track">
+      <div
+        class="progress-fill ${indexView.busy ? "busy" : "idle"}"
+        style="width: ${progressWidth}%"
+      ></div>
+    </div>
+    <div class="index-message">${escapeHtml(indexView.summary)}</div>
+    <div class="file-sections">
+      ${renderFileGroup(
+        "Queued files",
+        indexView.pendingFiles,
+        "No files are waiting to be indexed."
+      )}
+      ${renderFileGroup(
+        "Indexing now",
+        indexView.inflightFiles,
+        "No files are being indexed right now."
+      )}
+      ${renderFileGroup(
+        "Recently indexed",
+        indexView.recentFiles,
+        "Recent indexing activity will appear here."
+      )}
+    </div>
+  </div>
+
+  <div class="footer-links">
+    <button class="link" data-action="health">Health report</button>
+    <button class="link" data-action="output">Output log</button>
+  </div>
+
+  <details class="advanced">
+    <summary>Danger zone</summary>
+    <div class="advanced-group">
+      <div class="advanced-label">Reset &amp; recover</div>
+      <div class="link-actions">
+        <button class="link link-danger" data-action="reinstallEngine" title="Delete the downloaded engine binary + semantic model and fetch fresh, checksum-verified copies. Keeps your index and MCP wiring.">Reinstall engine</button>
+        <button class="link link-danger" data-action="coldRestart" title="Full clean slate: wipe this workspace's .cognis index, remove ALL cognis MCP entries, uninstall the engine + model, then re-download everything and re-index from scratch. Your source code is untouched.">Cold restart (wipe &amp; rebuild)</button>
+      </div>
+      <div class="surface-detail">Cold restart fixes a corrupted or stale state — a legacy vector index, a locked binary, or a half-finished setup.</div>
+    </div>
+    <div class="advanced-group">
+      <div class="advanced-label">Remove Cognis</div>
+      <div class="link-actions">
+        <button class="link link-danger" data-action="remove" title="Stop indexing, disconnect MCP for this repo, and delete the local .cognis index for this workspace.">Remove from this workspace</button>
+        <button class="link link-danger" data-action="prepareUninstall" title="Stop indexing, delete this workspace's .cognis index, remove ALL cognis MCP entries from your editor, and uninstall the Cognis engine Cognis installed. Run this before uninstalling the extension.">Remove everything (prepare to uninstall)</button>
+      </div>
+      <div class="surface-detail">Your source code is never touched. "Remove everything" also uninstalls the engine Cognis installed for you.</div>
+    </div>
+  </details>`;
+  return htmlDocument(cspSource, nonce, advancedBody);
+}
+
+/**
+ * Shared HTML document scaffold. Wraps a body fragment in the exact same
+ * `<head>`/`<style>`/CSP/nonce and action-dispatch `<script>` used by both the
+ * minimal and advanced surfaces, so the large style block is written once.
+ */
+function htmlDocument(
+  cspSource: string,
+  nonce: string,
+  bodyInner: string
+): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1018,6 +1386,22 @@ function panelHtml(
     }
     .primary-action button {
       width: 100%;
+    }
+    .status-line {
+      margin-top: 12px;
+    }
+    .status-word {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .status-hint {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.45;
     }
     .surface-header {
       display: flex;
@@ -1410,121 +1794,7 @@ function panelHtml(
   </style>
 </head>
 <body>
-  <div class="hero">
-    <img src="${logoSrc}" alt="Cognis logo" />
-    <div class="hero-copy">
-      <div class="title">Cognis${
-        context.version
-          ? ` <span class="version-badge">v${escapeHtml(context.version)}</span>`
-          : ""
-      }</div>
-      <div class="subtitle">Semantic index and MCP setup for your editor.</div>
-    </div>
-  </div>
-
-  <div class="surface">
-    <div class="status-overview">
-      <div class="status-pill ${view.statusClass}">
-        <span class="status-dot"></span>
-        <span class="headline">${escapeHtml(view.headline)}</span>
-      </div>
-      <div class="status-copy">
-        ${
-          view.detail
-            ? `<div class="detail detail-${view.statusClass}">${escapeHtml(view.detail)}</div>`
-            : ""
-        }
-      </div>
-    </div>
-    ${
-      primaryBlock
-        ? `<div class="primary-action">${primaryBlock}</div>`
-        : ""
-    }
-  </div>
-
-  ${renderStepperSection(context)}
-
-  ${renderMcpSection(context)}
-
-  ${renderPrerequisitesSection(context)}
-
-  <div class="surface">
-    <div class="surface-header">
-      <div>
-        <div class="surface-title">Index Status</div>
-        <div class="surface-detail">
-          Track what Cognis is indexing now. Setup and repair manage live indexing automatically when the workspace needs it.
-        </div>
-      </div>
-      <div class="surface-actions">
-        ${
-          context.syncPaused
-            ? `<button data-action="resumeSync" title="Resume automatic indexing of file changes in this workspace.">${RESUME_SYNC_LABEL}</button>`
-            : `<button data-action="pauseSync" title="Pause automatic indexing. Cognis keeps answering from the current index but stops tracking new changes.">Pause sync</button>`
-        }
-        <button data-action="clearReindex" title="Delete the stored index and rebuild from scratch. Keeps your config and MCP wiring.">Rebuild index</button>
-        ${
-          indexView.busy
-            ? `<button data-action="cancelIndexing" title="Stop the running index build. Keeps the partial index; you can rebuild later.">Cancel indexing</button>`
-            : ""
-        }
-      </div>
-    </div>
-    <div class="progress-summary">
-      <span>${escapeHtml(indexView.title)}</span>
-      <span class="progress-value">${escapeHtml(progressLabel)}</span>
-    </div>
-    <div class="progress-track">
-      <div
-        class="progress-fill ${indexView.busy ? "busy" : "idle"}"
-        style="width: ${progressWidth}%"
-      ></div>
-    </div>
-    <div class="index-message">${escapeHtml(indexView.summary)}</div>
-    <div class="file-sections">
-      ${renderFileGroup(
-        "Queued files",
-        indexView.pendingFiles,
-        "No files are waiting to be indexed."
-      )}
-      ${renderFileGroup(
-        "Indexing now",
-        indexView.inflightFiles,
-        "No files are being indexed right now."
-      )}
-      ${renderFileGroup(
-        "Recently indexed",
-        indexView.recentFiles,
-        "Recent indexing activity will appear here."
-      )}
-    </div>
-  </div>
-
-  <div class="footer-links">
-    <button class="link" data-action="health">Health report</button>
-    <button class="link" data-action="output">Output log</button>
-  </div>
-
-  <details class="advanced">
-    <summary>Danger zone</summary>
-    <div class="advanced-group">
-      <div class="advanced-label">Reset &amp; recover</div>
-      <div class="link-actions">
-        <button class="link link-danger" data-action="reinstallEngine" title="Delete the downloaded engine binary + semantic model and fetch fresh, checksum-verified copies. Keeps your index and MCP wiring.">Reinstall engine</button>
-        <button class="link link-danger" data-action="coldRestart" title="Full clean slate: wipe this workspace's .cognis index, remove ALL cognis MCP entries, uninstall the engine + model, then re-download everything and re-index from scratch. Your source code is untouched.">Cold restart (wipe &amp; rebuild)</button>
-      </div>
-      <div class="surface-detail">Cold restart fixes a corrupted or stale state — a legacy vector index, a locked binary, or a half-finished setup.</div>
-    </div>
-    <div class="advanced-group">
-      <div class="advanced-label">Remove Cognis</div>
-      <div class="link-actions">
-        <button class="link link-danger" data-action="remove" title="Stop indexing, disconnect MCP for this repo, and delete the local .cognis index for this workspace.">Remove from this workspace</button>
-        <button class="link link-danger" data-action="prepareUninstall" title="Stop indexing, delete this workspace's .cognis index, remove ALL cognis MCP entries from your editor, and uninstall the Cognis engine Cognis installed. Run this before uninstalling the extension.">Remove everything (prepare to uninstall)</button>
-      </div>
-      <div class="surface-detail">Your source code is never touched. "Remove everything" also uninstalls the engine Cognis installed for you.</div>
-    </div>
-  </details>
+  ${bodyInner}
 
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();

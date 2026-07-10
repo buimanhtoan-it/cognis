@@ -672,7 +672,7 @@ namespace M {
     /// precision + fan-out tests.
     fn callable(name: &str, file: &str, body: &str) -> Symbol {
         Symbol {
-            id: format!("py:{file}:{name}@{}", &name),
+            id: format!("py:{file}:{name}@{name}"),
             kind: SymbolKind::Function,
             name: name.to_string(),
             qualified_name: format!("py:{file}:{name}"),

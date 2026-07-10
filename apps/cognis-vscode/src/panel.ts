@@ -182,6 +182,52 @@ export function deriveUnifiedControl(ctx: PanelContext): UnifiedControl {
 }
 
 /**
+ * True when the workspace's ONLY health problem is a degraded (rebuilding)
+ * semantic/vector layer — the core lexical + structural index is healthy and
+ * search works right now, so this is not a dead-end the user must act on.
+ *
+ * Precisely: health is present, `overall !== "ok"`, the core checks `config`,
+ * `db` and `index` are all `ok`, and the `vector` check is the *only* non-ok
+ * check and is specifically `warn` (rebuilding), not `fail`.
+ *
+ * Tolerant of absent checks — a missing `config`/`db`/`vector` (or any other
+ * optional check) is treated as `ok` — but `index` MUST be present and `ok`,
+ * since it is the core the tool depends on. Any other non-ok check (e.g.
+ * `db`/`version` fail) makes this false, so genuine problems still surface as
+ * "Needs attention".
+ */
+export function isSemanticOnlyDegraded(ctx: PanelContext): boolean {
+  const health = ctx.health;
+  if (!health || health.overall === "ok") {
+    return false;
+  }
+  const checks = health.checks ?? {};
+
+  // The core index MUST be present and healthy (absent index is NOT tolerated).
+  const index = checks.index;
+  if (!index || index.status !== "ok") {
+    return false;
+  }
+  // The vector layer must be the degraded one, and only *warn* (rebuilding) —
+  // a hard `fail` is a genuine problem, not a background rebuild.
+  const vector = checks.vector;
+  if (!vector || vector.status !== "warn") {
+    return false;
+  }
+  // Every other present check must be ok — vector is the ONLY non-ok check.
+  // Absent checks are tolerated (treated as ok) by simply not appearing here.
+  for (const [name, check] of Object.entries(checks)) {
+    if (name === "vector") {
+      continue;
+    }
+    if (check.status !== "ok") {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Derive the single minimal-surface status line. Reuses the same internal
  * verdict logic as {@link derivePanelView} (via its `statusClass`) but collapses
  * it to the closed vocabulary {@link StatusLineText}, checked in order:
@@ -222,6 +268,13 @@ export function deriveStatusLine(ctx: PanelContext): StatusLineText {
   if (view.statusClass === "status-ok") {
     return "Ready";
   }
+  // The tool IS usable — only the semantic/vector layer is rebuilding (lexical
+  // + structural search work now). Don't dead-end the user with "Needs
+  // attention"; read as "Ready" (the tailored hint explains semantic is still
+  // building). Only genuine config/db/index problems fall through below.
+  if (isSemanticOnlyDegraded(ctx)) {
+    return "Ready";
+  }
   // A workspace that IS provisioned but has a health/prerequisite/version
   // problem — the only case that genuinely needs the user to look.
   return "Needs attention";
@@ -235,7 +288,14 @@ export function deriveStatusLine(ctx: PanelContext): StatusLineText {
  * raw technical value.
  */
 export function deriveStatusHint(ctx: PanelContext): string {
-  switch (deriveStatusLine(ctx)) {
+  const line = deriveStatusLine(ctx);
+  // The status word is "Ready" but the semantic layer is still building — give
+  // a tailored caption instead of the generic "up to date" one, so the user
+  // knows lexical + structural search already work.
+  if (line === "Ready" && isSemanticOnlyDegraded(ctx)) {
+    return "Ready — semantic search is still building in the background; lexical and structural search work now.";
+  }
+  switch (line) {
     case "Off":
       return "Not running yet. Click Start Cognis to set up and index this workspace.";
     case "Working":

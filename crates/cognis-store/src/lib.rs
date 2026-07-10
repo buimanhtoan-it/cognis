@@ -322,6 +322,20 @@ impl Database {
                 self.path
             );
         }
+        // Reconcile-on-open (safe index self-recovery): stamp the engine build
+        // and, ONLY when the DB was written by a strictly-newer engine
+        // (`schema_version > LATEST_SCHEMA_VERSION`), perform a SAFE in-place
+        // index reset so the extension never dead-ends on a genuinely
+        // incompatible DB. Like the heal above it is best-effort: on a
+        // read-only DB / lock it logs and returns Ok so open still succeeds
+        // (a normal DB at schema <= LATEST is never reset).
+        if let Err(e) = reconcile_on_open(&conn) {
+            eprintln!(
+                "cognis-store: reconcile-on-open skipped for {} ({e}); \
+                 continuing with graceful degradation",
+                self.path
+            );
+        }
         Ok(conn)
     }
 
@@ -1181,6 +1195,103 @@ fn drop_symbol_vec_module_free(conn: &Connection) -> Result<()> {
     )
     .map_err(store_err)?;
     Ok(())
+}
+
+/// Reconcile-on-open: safe index self-recovery run on every `open_new_connection`
+/// immediately after the legacy-`vec0` heal.
+///
+/// Two layered, safety-first responsibilities:
+///
+/// 1. **Stamp the engine build.** Upsert `meta.index_version =
+///    env!("CARGO_PKG_VERSION")` (idempotent) so `.cognis` always records the
+///    engine that last opened/reconciled it. Best-effort — a read-only DB
+///    silently keeps its old stamp (the write error is ignored).
+/// 2. **Genuine-incompatibility safe reset.** Read the on-disk
+///    `meta.schema_version`; only when it is **strictly greater** than
+///    [`LATEST_SCHEMA_VERSION`] — i.e. the DB was written by a NEWER engine whose
+///    schema this build's migrations cannot downgrade — perform a SAFE in-place
+///    index reset ([`safe_index_reset`]). Normal opens (schema <= LATEST) never
+///    reset.
+///
+/// Safety invariants: this never touches any file other than the DB and never
+/// deletes source; a normal / plain-BLOB DB at schema <= LATEST is byte-identical
+/// after open aside from the idempotent `index_version` stamp. The whole routine
+/// is best-effort — its caller logs and ignores any error so open still succeeds.
+fn reconcile_on_open(conn: &Connection) -> Result<()> {
+    // (1) Stamp the engine build on every open. Best-effort: a read-only DB
+    // (or a lost write lock) can't take the write, and that must not fail open.
+    let _ = write_meta(conn, "index_version", env!("CARGO_PKG_VERSION"));
+
+    // (2) Safe reset ONLY for a genuinely-incompatible future DB. Reading the
+    // stamped schema version is a plain read (works read-only); an absent /
+    // unparsable value reads as 0, which is never `> LATEST_SCHEMA_VERSION`.
+    let on_disk_schema = read_meta(conn, "schema_version")?
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(0);
+    if on_disk_schema > LATEST_SCHEMA_VERSION {
+        safe_index_reset(conn)?;
+    }
+    Ok(())
+}
+
+/// SAFE in-place index reset for a DB written by a strictly-newer engine
+/// (`schema_version > LATEST_SCHEMA_VERSION`), gated by [`reconcile_on_open`].
+///
+/// Migrations only move forward, so a future schema cannot be downgraded in
+/// place; rather than dead-end the user (health `warn` → panel "Needs
+/// attention"), reset the index tables to the current empty schema and let a
+/// later index pass repopulate. Runs inside a single [`with_write_txn`] so a
+/// failure (read-only DB / lock) rolls back atomically — the DB is never left
+/// half-reset — and the caller degrades gracefully.
+///
+/// What is dropped: `symbol_vec` (module-free when it's a legacy `vec0` vtable
+/// this build can't load — reusing [`drop_symbol_vec_module_free`] so the
+/// missing module is never instantiated — else a plain `DROP`), then the other
+/// index tables the schema owns: `symbol_fts` (its FTS5 shadow tables drop with
+/// it), `symbol_attribute`, `edge`, `file`, `symbol`, and finally `meta`.
+/// Child tables (`symbol_vec`, `symbol_attribute`) drop before their `symbol`
+/// parent so the `ON DELETE CASCADE` FKs never raise. Re-running migration 001
+/// (via [`run_migrations`], now that `meta` — and thus `schema_version` — is
+/// gone) recreates the current empty schema and stamps
+/// `schema_version = LATEST_SCHEMA_VERSION` + `index_version`.
+///
+/// The `.cognis` FILE and everything outside the DB (config, audit, caches) are
+/// preserved; only DB tables reset. No source is ever touched.
+fn safe_index_reset(conn: &Connection) -> Result<()> {
+    // Decide the symbol_vec drop strategy with schema-only probes BEFORE the
+    // write txn (they read `sqlite_master` and never instantiate the vec0
+    // module): a legacy `vec0` vtable this build can't load needs the
+    // module-free deletion; anything else takes a plain `DROP`.
+    let vec_module_free = vec0_table_present(conn)? && !try_load_vec_extension(conn);
+
+    with_write_txn(conn, |conn| {
+        // Drop `symbol_vec` first (a child of `symbol` via its cascade FK).
+        if vec_module_free {
+            drop_symbol_vec_module_free(conn)?;
+        } else {
+            conn.execute("DROP TABLE IF EXISTS symbol_vec", [])
+                .map_err(store_err)?;
+        }
+        // Remaining index tables. `symbol_fts` is an FTS5 virtual table whose
+        // shadow tables drop with it (the fts5 module is always available).
+        // Order matters with `foreign_keys = ON`: drop `symbol_attribute`
+        // (child of `symbol`) before `symbol`.
+        for ddl in [
+            "DROP TABLE IF EXISTS symbol_fts",
+            "DROP TABLE IF EXISTS symbol_attribute",
+            "DROP TABLE IF EXISTS edge",
+            "DROP TABLE IF EXISTS file",
+            "DROP TABLE IF EXISTS symbol",
+            "DROP TABLE IF EXISTS meta",
+        ] {
+            conn.execute_batch(ddl).map_err(store_err)?;
+        }
+        // Recreate the current empty schema. With `meta` gone, `run_migrations`
+        // sees `schema_version = 0`, applies migration 001, and stamps
+        // `schema_version = LATEST_SCHEMA_VERSION` + `index_version`.
+        run_migrations(conn)?;
+        Ok(())
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -2493,5 +2604,134 @@ mod tests {
             )
             .unwrap();
         }
+    }
+
+    // ------------------------------------------------------------------
+    // reconcile-on-open — safe index self-recovery
+    // ------------------------------------------------------------------
+
+    /// (a) A DB stamped by a strictly-newer engine (`schema_version = 999`,
+    /// with seeded rows) is SAFELY reset on re-open: `Database::open` returns
+    /// `Ok`, the schema is downgraded to `LATEST_SCHEMA_VERSION`, and every
+    /// schema table exists, is queryable, and is empty (a later index pass
+    /// repopulates). The `.cognis` DB file itself is preserved.
+    #[test]
+    fn reconcile_on_open_resets_future_schema_db_safely() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("future.db");
+
+        // Build a normal DB, seed data, then stamp a FUTURE schema version.
+        {
+            let db = Database::open(&path).unwrap();
+            let conn = db.connect().unwrap();
+            db_insert_symbols(&conn, &["s:a", "s:b"]);
+            insert_edge(&conn, "s:a", "s:b", "calls", 1.0, "{}");
+            conn.execute(
+                "INSERT INTO symbol_vec(symbol_id, embedding) VALUES('s:a', ?1)",
+                rusqlite::params![floats_to_le_bytes(&[1.0, 2.0])],
+            )
+            .unwrap();
+            write_meta(&conn, "schema_version", "999").unwrap();
+            db.close_thread_connection();
+        }
+
+        // Re-open: reconcile-on-open sees schema_version > LATEST and resets.
+        let db = Database::open(&path).unwrap();
+        assert_eq!(
+            db.schema_version().unwrap(),
+            LATEST_SCHEMA_VERSION,
+            "future schema is safely downgraded to the current schema"
+        );
+
+        // Every schema table exists, is queryable, and is empty.
+        for table in ["symbol", "edge", "symbol_attribute", "file", "symbol_vec"] {
+            assert_eq!(
+                db.count(table).unwrap(),
+                0,
+                "table {table} exists and is empty after safe reset"
+            );
+        }
+        // FTS + vector legs are queryable (empty) too.
+        assert!(db.fts_match_ids("anything", 5).unwrap().is_empty());
+        assert!(db.vec_symbol_ids().unwrap().is_empty());
+        // symbol_vec was recreated in the plain-BLOB shape (not a vec0 vtable).
+        assert!(!vec0_table_present(&db.connect().unwrap()).unwrap());
+
+        db.close_thread_connection();
+    }
+
+    /// (b) A normal DB at `LATEST_SCHEMA_VERSION` with seeded symbols is NOT
+    /// reset by reconcile-on-open — the symbol count is preserved — and a
+    /// second open is idempotent (still preserved, still at LATEST).
+    #[test]
+    fn reconcile_on_open_does_not_reset_current_schema_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("current.db");
+
+        {
+            let db = Database::open(&path).unwrap();
+            let conn = db.connect().unwrap();
+            db_insert_symbols(&conn, &["s:a", "s:b", "s:c"]);
+            assert_eq!(db.schema_version().unwrap(), LATEST_SCHEMA_VERSION);
+            db.close_thread_connection();
+        }
+
+        // First re-open: no reset, rows preserved.
+        {
+            let db = Database::open(&path).unwrap();
+            assert_eq!(db.schema_version().unwrap(), LATEST_SCHEMA_VERSION);
+            assert_eq!(
+                db.count("symbol").unwrap(),
+                3,
+                "no reset at schema <= LATEST"
+            );
+            db.close_thread_connection();
+        }
+
+        // Second re-open: idempotent — still preserved.
+        {
+            let db = Database::open(&path).unwrap();
+            assert_eq!(db.schema_version().unwrap(), LATEST_SCHEMA_VERSION);
+            assert_eq!(
+                db.count("symbol").unwrap(),
+                3,
+                "idempotent — still preserved"
+            );
+            db.close_thread_connection();
+        }
+    }
+
+    /// (c) `meta.index_version` equals `env!("CARGO_PKG_VERSION")` after any
+    /// open — reconcile-on-open stamps the engine build idempotently, including
+    /// on a plain DB that is otherwise untouched.
+    #[test]
+    fn reconcile_on_open_stamps_index_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("stamp.db");
+
+        let db = Database::open(&path).unwrap();
+        let conn = db.connect().unwrap();
+        assert_eq!(
+            read_meta(&conn, "index_version").unwrap().as_deref(),
+            Some(env!("CARGO_PKG_VERSION")),
+            "engine build stamped on open"
+        );
+        db.close_thread_connection();
+
+        // Stamp an arbitrary stale value, then re-open: the stamp is refreshed.
+        {
+            let db = Database::open(&path).unwrap();
+            let conn = db.connect().unwrap();
+            write_meta(&conn, "index_version", "0.0.0-stale").unwrap();
+            db.close_thread_connection();
+        }
+        let db = Database::open(&path).unwrap();
+        let conn = db.connect().unwrap();
+        assert_eq!(
+            read_meta(&conn, "index_version").unwrap().as_deref(),
+            Some(env!("CARGO_PKG_VERSION")),
+            "re-open refreshes the engine build stamp"
+        );
+        db.close_thread_connection();
     }
 }

@@ -44,10 +44,24 @@ jobs:
         # adds prebuilts or we vendor an ONNX Runtime build for them.
         include:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, cross: false }
-          - { os: macos-latest, target: aarch64-apple-darwin, cross: false }
+          # Pinned to macos-14 (stable Apple-Silicon image). `macos-latest`
+          # migrated to macOS 26 whose default toolchain left rustc's linker
+          # looking for a clang runtime dir that no longer exists
+          # (`ld: library 'clang_rt.osx' not found`). Pinning to the known-good
+          # arm64 image plus an explicit Xcode select (below) keeps the native
+          # aarch64-apple-darwin link working.
+          - { os: macos-14, target: aarch64-apple-darwin, cross: false }
           - { os: windows-latest, target: x86_64-pc-windows-msvc, cross: false }
     steps:
       - uses: actions/checkout@v4
+
+      # Align the active developer dir with an Xcode actually installed on the
+      # runner so `cc`/rustc resolve the clang compiler-rt (`clang_rt.osx`)
+      # against a path that exists (fixes the link failure seen when the runner
+      # image shipped a different Xcode than rustc assumed).
+      - name: Select Xcode (macOS)
+        if: runner.os == 'macOS'
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

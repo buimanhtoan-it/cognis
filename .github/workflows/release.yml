@@ -72,9 +72,18 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # Cache key includes the runner image + a version suffix. The bare
+      # `${{ matrix.target }}` key was poisoned: the first aarch64-apple-darwin
+      # run happened on macos-latest (Xcode 16.4) and cached the `ort_sys`
+      # build-script output whose `rustc-link-search` hardcodes that Xcode's
+      # clang runtime dir (`.../Xcode_16.4.app/.../clang/17/lib/darwin`).
+      # Restoring it on macos-14 (where that path doesn't exist) reproduced the
+      # `ld: library 'clang_rt.osx' not found` link failure regardless of the
+      # active Xcode. Scoping the key to the OS + bumping the version forces a
+      # fresh build under the pinned Xcode 15.4.
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: ${{ matrix.target }}-${{ matrix.os }}-v2
 
       - name: Install cross
         if: ${{ matrix.cross }}

@@ -10,6 +10,7 @@ cognis-core.workspace = true
 cognis-store.workspace = true
 cognis-retrieval.workspace = true
 cognis-csar.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]

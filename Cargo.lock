@@ -336,6 +336,7 @@ dependencies = [
  "cognis-store",
  "criterion",
  "proptest",
+ "serde",
  "serde_json",
  "tempfile",
 ]

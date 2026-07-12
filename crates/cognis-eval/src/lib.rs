@@ -19,3 +19,4 @@ pub use cognis_core::Result;
 
 pub mod bench;
 pub mod parity;
+pub mod structure;

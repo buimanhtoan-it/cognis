@@ -54,7 +54,7 @@ use cognis_embed::Embedder;
 use cognis_store::{Database, SymbolWriter};
 
 use crate::enricher::Enricher;
-use crate::parser::parse_source;
+use crate::parser::{artifact::extract_artifact, parse_source};
 use crate::resolver::{resolve_edges, to_edges};
 use crate::writer::{FileWritePayload, IndexWriter};
 
@@ -83,6 +83,35 @@ const LANG_BY_EXT: &[(&str, &str)] = &[
     ("rb", "ruby"),
     ("php", "php"),
     ("phtml", "php"),
+];
+
+/// Recognized non-code artifact kinds admitted by the second admission path.
+///
+/// This is a **population-only** feature: no new `SymbolKind`/`EdgeKind` and no
+/// DB column. The kind only steers which artifact extractor a file is routed to
+/// downstream (Task 2.x); the walker uses it purely as a presence signal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtifactKind {
+    Yaml,
+    Toml,
+    Sql,
+    Html,
+    Markdown,
+}
+
+/// Extension → [`ArtifactKind`] table the **artifact admission path** uses,
+/// consulted only when [`detect_language`] misses. Matched case-insensitively
+/// via `to_ascii_lowercase`, exactly as [`detect_language`] lowercases the
+/// extension. No extension here appears in [`LANG_BY_EXT`], so the two tables
+/// are disjoint and at most one path admits any file (Req 1.4).
+const ARTIFACT_BY_EXT: &[(&str, ArtifactKind)] = &[
+    ("md", ArtifactKind::Markdown),
+    ("yaml", ArtifactKind::Yaml),
+    ("yml", ArtifactKind::Yaml),
+    ("toml", ArtifactKind::Toml),
+    ("html", ArtifactKind::Html),
+    ("htm", ArtifactKind::Html),
+    ("sql", ArtifactKind::Sql),
 ];
 
 /// Per-run counters (mirror `cognis_indexer.pipeline.IndexerStats`).
@@ -250,7 +279,17 @@ impl IndexerPipeline {
             let Some(rel) = relativize(&abs, &repo_root) else {
                 continue;
             };
-            if detect_language(&abs, &self.config).is_none() {
+            // Admit the same two disjoint sets the cold walk admits (design
+            // §"Data flow"): Code_Files (unchanged) plus, when the artifact gate
+            // is open, Artifact_Files — so incremental re-index routes artifact
+            // symbols through the identical parse→enrich→write path as a full
+            // index (Req 10.1). Code admission is untouched: a Code_File is still
+            // admitted whenever `detect_language` hits, regardless of the
+            // artifact gate.
+            let is_code = detect_language(&abs, &self.config).is_some();
+            let is_artifact =
+                artifacts_enabled(&self.config) && detect_artifact(&abs, &self.config).is_some();
+            if !is_code && !is_artifact {
                 continue;
             }
             match self.parse_and_enrich(&abs, &rel) {
@@ -344,17 +383,39 @@ impl IndexerPipeline {
 
     /// Parse + enrich one file. Returns `Ok(None)` when the file produced no
     /// symbols (empty file), `Err` on read/decode failure.
+    ///
+    /// After decoding UTF-8, the file is routed to one of two stages, mirroring
+    /// the walker's fixed-order two-path admission (design §"Data flow"): a
+    /// Code_File (`detect_language` hits) goes to [`parse_source`]; an
+    /// Artifact_File (`detect_artifact` hits, artifact gate open) goes to
+    /// [`extract_artifact`] with its resolved [`ArtifactKind`]. Both return the
+    /// same [`ParseOutput`] shape, so enrich/embed/write below stay identical
+    /// regardless of file type (Req 10.1). The existing non-UTF-8 skip
+    /// (`String::from_utf8` → `Ok(None)`) covers both paths (Req 1.7).
     fn parse_and_enrich(&self, abs: &Path, rel: &str) -> Result<Option<FileResult>> {
         let bytes = std::fs::read(abs)
             .map_err(|e| cognis_core::CognisError::Store(format!("read {}: {e}", abs.display())))?;
         // Non-UTF-8 files are treated as having no indexable symbols (the Python
         // pipeline records a `failed` parse_status for them); we skip rather
-        // than abort the batch (Requirement 9.4).
+        // than abort the batch (Requirement 1.7 / legacy 9.4). This single skip
+        // guards both the code and artifact routes below.
         let Ok(source) = String::from_utf8(bytes) else {
             return Ok(None);
         };
 
-        let parsed = parse_source(rel, &source);
+        // Dispatch on the same predicates the walker admits with, in the same
+        // fixed order (code first, then artifact) so the routing is exclusive
+        // and code files are always parsed exactly as before. A file that is
+        // neither (only reachable if a caller hands `parse_and_enrich` an
+        // unadmitted path directly) degrades to the textual `parse_source`
+        // fallback, preserving pre-feature behavior.
+        let parsed = if detect_language(abs, &self.config).is_some() {
+            parse_source(rel, &source)
+        } else if let Some(kind) = detect_artifact(abs, &self.config) {
+            extract_artifact(kind, rel, &source)
+        } else {
+            parse_source(rel, &source)
+        };
         if parsed.symbols.is_empty() {
             return Ok(None);
         }
@@ -445,7 +506,7 @@ impl IndexerPipeline {
     /// honouring `config.repo.ignore` (+ always `.git` / `.cognis`). Mirrors the
     /// Python walker's directory pruning; `.gitignore` patterns are not
     /// replicated (covered by the documented parity tolerance).
-    fn walk_repo(&self, repo_root: &Path) -> Vec<PathBuf> {
+    pub fn walk_repo(&self, repo_root: &Path) -> Vec<PathBuf> {
         let mut out = Vec::new();
         let mut ignored: BTreeSet<String> = self.config.repo.ignore.iter().cloned().collect();
         ignored.insert(cognis_core::config::CONFIG_DIR_NAME.to_string());
@@ -470,10 +531,48 @@ fn walk_dir(dir: &Path, ignored: &BTreeSet<String>, config: &Config, out: &mut V
                 continue;
             }
             walk_dir(&path, ignored, config, out);
-        } else if ft.is_file() && detect_language(&path, config).is_some() {
-            out.push(path);
+        } else if ft.is_file() {
+            // Two disjoint admission paths, resolved in a fixed order so at most
+            // one admits any file (Req 1.4): the Code_File path first, then the
+            // artifact path only when a code language misses. When artifacts are
+            // disabled this degenerates to the pre-feature Code_File-only
+            // admission (Req 1.8), leaving the Code_File set byte-identical
+            // whether or not artifacts are enabled (Req 1.5). Short-circuit `||`
+            // preserves that ordering; the two arms admit identically so a
+            // single push covers both.
+            let admitted = detect_language(&path, config).is_some()
+                || (artifacts_enabled(config) && detect_artifact(&path, config).is_some());
+            if admitted {
+                out.push(path);
+            }
         }
     }
+}
+
+/// Test/introspection accessor (Property 1, non-code-artifact-coverage): the
+/// repo-relative, forward-slash paths the walker admits for indexing under
+/// `config`, produced by the **real** [`walk_dir`] admission logic (both
+/// disjoint arms) and the same `relativize` the pipeline uses — but without the
+/// parse/enrich/write stages or a database.
+///
+/// Exposed so the admission-exclusivity property test can observe routing
+/// directly (which files are admitted, and — by extension — through which
+/// path) instead of inferring it from persisted symbols, which the still-in-
+/// progress artifact extractors would confound. Only the ignore-set assembly is
+/// repeated from [`IndexerPipeline::walk_repo`]; the admission decision itself
+/// ([`detect_language`] / [`artifacts_enabled`] / [`detect_artifact`]) is fully
+/// reused, so this never duplicates the routing logic under test.
+#[doc(hidden)]
+pub fn admitted_rel_paths(repo_root: &Path, config: &Config) -> Vec<String> {
+    let root = canonical(repo_root);
+    let mut ignored: BTreeSet<String> = config.repo.ignore.iter().cloned().collect();
+    ignored.insert(cognis_core::config::CONFIG_DIR_NAME.to_string());
+    ignored.insert(".git".to_string());
+    let mut out = Vec::new();
+    walk_dir(&root, &ignored, config, &mut out);
+    out.into_iter()
+        .filter_map(|abs| relativize(&abs, &root))
+        .collect()
 }
 
 /// Resolve the language label for a path via [`LANG_BY_EXT`], gated by
@@ -492,6 +591,52 @@ fn detect_language(path: &Path, config: &Config) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+/// Whether the artifact admission gate is open, resolved **independently** of
+/// `config.languages.enabled` (Req 1.6): toggling a code language never changes
+/// this, and toggling this never changes [`detect_language`].
+fn artifacts_enabled(config: &Config) -> bool {
+    config.artifact.enabled
+}
+
+/// Resolve the [`ArtifactKind`] for a path, or `None`.
+///
+/// A file is an artifact when either (a) its extension (matched
+/// case-insensitively via `to_ascii_lowercase`, mirroring [`detect_language`])
+/// is in [`ARTIFACT_BY_EXT`] (Req 1.1), or (b) its file name matches a
+/// configured deploy/CI descriptor pattern (Req 1.2). Descriptor-only matches
+/// (a name with no recognized artifact extension, e.g. `Dockerfile`) are
+/// classified [`ArtifactKind::Yaml`], the common deploy/CI descriptor shape.
+///
+/// This never consults `config.languages` and never overlaps [`LANG_BY_EXT`],
+/// so the artifact path and the Code_File path stay mutually exclusive (Req
+/// 1.4). The caller gates the whole path behind [`artifacts_enabled`].
+fn detect_artifact(path: &Path, config: &Config) -> Option<ArtifactKind> {
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        let ext = ext.to_ascii_lowercase();
+        if let Some((_, kind)) = ARTIFACT_BY_EXT.iter().find(|(e, _)| *e == ext) {
+            return Some(*kind);
+        }
+    }
+
+    // Deploy/CI descriptor name match (Req 1.2): case-insensitive substring
+    // match against each configured pattern, so a pattern like `dockerfile`
+    // admits `Dockerfile` / `service.dockerfile`.
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())?
+        .to_ascii_lowercase();
+    if config
+        .artifact
+        .ci_descriptors
+        .iter()
+        .any(|pat| !pat.is_empty() && name.contains(&pat.to_ascii_lowercase()))
+    {
+        return Some(ArtifactKind::Yaml);
+    }
+
+    None
 }
 
 /// Run the global resolver over `symbols` and group the resulting edges by the
@@ -858,6 +1003,9 @@ mod tests {
         std::fs::write(repo.join("node_modules").join("x.py"), "def x(): pass\n").unwrap();
         std::fs::write(repo.join(".git").join("y.py"), "def y(): pass\n").unwrap();
         std::fs::write(repo.join("keep.py"), "def keep(): pass\n").unwrap();
+        // `.png` is neither a code language nor an artifact extension: always skipped.
+        std::fs::write(repo.join("logo.png"), "not text\n").unwrap();
+        // `readme.md` is admitted through the artifact path (enabled by default).
         std::fs::write(repo.join("readme.md"), "# not code\n").unwrap();
 
         let pipe = IndexerPipeline::new(mem_db(), Config::default());
@@ -866,8 +1014,85 @@ mod tests {
             .iter()
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
+        // Sorted by `walk_repo`: the code file plus the artifact, ignored dirs
+        // pruned and the truly-unsupported `.png` dropped.
+        assert_eq!(names, vec!["keep.py".to_string(), "readme.md".to_string()]);
+
+        std::fs::remove_dir_all(&repo).ok();
+    }
+
+    #[test]
+    fn artifact_admission_disabled_degenerates_to_code_only() {
+        let repo = unique_dir("walk-artifacts-off");
+        std::fs::write(repo.join("keep.py"), "def keep(): pass\n").unwrap();
+        std::fs::write(repo.join("readme.md"), "# not code\n").unwrap();
+        std::fs::write(repo.join("conf.yaml"), "a: 1\n").unwrap();
+
+        let mut config = Config::default();
+        config.artifact.enabled = false;
+        let pipe = IndexerPipeline::new(mem_db(), config);
+        let walked = pipe.walk_repo(&canonical(&repo));
+        let names: Vec<String> = walked
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        // Artifacts disabled: pre-feature admission, exactly the Code_File set (Req 1.8).
         assert_eq!(names, vec!["keep.py".to_string()]);
 
         std::fs::remove_dir_all(&repo).ok();
+    }
+
+    #[test]
+    fn detect_artifact_matches_extensions_case_insensitively() {
+        let config = Config::default();
+        assert_eq!(
+            detect_artifact(Path::new("Notes.MD"), &config),
+            Some(ArtifactKind::Markdown)
+        );
+        assert_eq!(
+            detect_artifact(Path::new("app.YAML"), &config),
+            Some(ArtifactKind::Yaml)
+        );
+        assert_eq!(
+            detect_artifact(Path::new("app.yml"), &config),
+            Some(ArtifactKind::Yaml)
+        );
+        assert_eq!(
+            detect_artifact(Path::new("Cargo.toml"), &config),
+            Some(ArtifactKind::Toml)
+        );
+        assert_eq!(
+            detect_artifact(Path::new("index.HTM"), &config),
+            Some(ArtifactKind::Html)
+        );
+        assert_eq!(
+            detect_artifact(Path::new("page.html"), &config),
+            Some(ArtifactKind::Html)
+        );
+        assert_eq!(
+            detect_artifact(Path::new("schema.sql"), &config),
+            Some(ArtifactKind::Sql)
+        );
+        // A code extension is never an artifact (disjoint tables, Req 1.4).
+        assert_eq!(detect_artifact(Path::new("main.py"), &config), None);
+        assert_eq!(detect_artifact(Path::new("logo.png"), &config), None);
+    }
+
+    #[test]
+    fn detect_artifact_matches_ci_descriptor_names() {
+        let mut config = Config::default();
+        config.artifact.ci_descriptors = vec!["Dockerfile".to_string()];
+        // Descriptor-only name (no artifact extension) → classified Yaml (Req 1.2).
+        assert_eq!(
+            detect_artifact(Path::new("Dockerfile"), &config),
+            Some(ArtifactKind::Yaml)
+        );
+        assert_eq!(
+            detect_artifact(Path::new("service.dockerfile"), &config),
+            Some(ArtifactKind::Yaml)
+        );
+        // No descriptor configured → plain unknown name is not an artifact.
+        let bare = Config::default();
+        assert_eq!(detect_artifact(Path::new("Dockerfile"), &bare), None);
     }
 }

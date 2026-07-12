@@ -194,6 +194,27 @@ impl Default for EvalConfig {
     }
 }
 
+/// Non-code artifact coverage. Additive, defaulted section that gates artifact
+/// admission (`enabled`), lists deploy/CI descriptor filename patterns
+/// (`ci_descriptors`), and toggles integration-edge capsule context
+/// (`integration_edge_context`). Population-only feature — no schema migration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ArtifactConfig {
+    pub enabled: bool,
+    pub ci_descriptors: Vec<String>,
+    pub integration_edge_context: bool,
+}
+impl Default for ArtifactConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ci_descriptors: Vec::new(),
+            integration_edge_context: false,
+        }
+    }
+}
+
 /// Top-level config. Every section has defaults; an empty document is valid.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -207,6 +228,7 @@ pub struct Config {
     pub planner: PlannerConfig,
     pub security: SecurityConfig,
     pub eval: EvalConfig,
+    pub artifact: ArtifactConfig,
 }
 
 impl Config {
@@ -254,6 +276,34 @@ mod tests {
         assert_eq!(c.mcp.sse_port, 7464);
         assert_eq!(c.mcp.allow_tools.len(), 8);
         assert!(c.security.redact_secrets);
+    }
+
+    #[test]
+    fn artifact_defaults() {
+        let c = Config::default();
+        assert!(c.artifact.enabled);
+        assert!(c.artifact.ci_descriptors.is_empty());
+        assert!(!c.artifact.integration_edge_context);
+    }
+
+    #[test]
+    fn empty_yaml_yields_artifact_default() {
+        let c = Config::from_yaml_str("").unwrap();
+        assert_eq!(c.artifact, ArtifactConfig::default());
+    }
+
+    #[test]
+    fn partial_artifact_yaml_fills_defaults() {
+        let c = Config::from_yaml_str("artifact:\n  enabled: false\n").unwrap();
+        assert!(!c.artifact.enabled);
+        // unspecified keys keep defaults
+        assert!(c.artifact.ci_descriptors.is_empty());
+        assert!(!c.artifact.integration_edge_context);
+    }
+
+    #[test]
+    fn artifact_unknown_key_is_rejected() {
+        assert!(Config::from_yaml_str("artifact:\n  bogus: 1\n").is_err());
     }
 
     #[test]

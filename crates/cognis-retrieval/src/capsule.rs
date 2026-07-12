@@ -99,6 +99,67 @@ pub fn compose_capsule(
     composed
 }
 
+/// Compose a capsule and, behind a flag, append integration-edge context
+/// (`RoutesTo` / `Reads` / `Writes`-derived hits) *strictly after* the
+/// directly-retrieved results.
+///
+/// This is the additive-only integration-edge surface (design §Requirement 11).
+/// The directly-retrieved core is exactly what [`compose_capsule`] produces:
+/// the confident RRF-direct prefix followed by additive CSAR on-path context.
+/// Integration edges are **never** a fused ranking signal — `edge_context` is
+/// not passed through [`rrf_fuse`], and `rrf_k` is threaded untouched to
+/// [`compose_capsule`] (Requirements 10.6, 11.3).
+///
+/// * `flag == false` (or unset): returns **byte-for-byte** the same `Vec<Hit>`
+///   as [`compose_capsule`] for the same `direct_layers` / `csar_hits` / `k` /
+///   `rrf_k`, with **no** edge-derived entry — the pre-feature capsule
+///   (Requirement 11.5). `edge_context` is ignored entirely in this path.
+/// * `flag == true`: composes that same directly-retrieved core first, then
+///   appends `edge_context` entries **only after** all directly-retrieved
+///   (confident + CSAR) results, deduped against them by `symbol_id`, never
+///   removing, replacing, or reordering any prior entry, filling only the
+///   budget remaining up to `k` (Requirements 11.1, 11.2, 11.4). Because the
+///   core is a strict prefix and edges only append, the directly-retrieved set
+///   and order is identical to the `flag == false` capsule.
+pub fn compose_capsule_with_edges(
+    direct_layers: &[Vec<Hit>],
+    csar_hits: &[Hit],
+    edge_context: &[Hit],
+    k: usize,
+    rrf_k: f64,
+    flag: bool,
+) -> Vec<Hit> {
+    // Directly-retrieved core: confident RRF prefix + additive CSAR context.
+    // Identical to the pre-feature capsule regardless of the flag — the
+    // immutable, never-reordered prefix.
+    let mut composed = compose_capsule(direct_layers, csar_hits, k, rrf_k);
+
+    // Flag disabled/unset ⇒ byte-for-byte identical to `compose_capsule`, with
+    // no edge-derived entry appended (Requirement 11.5).
+    if !flag {
+        return composed;
+    }
+
+    // Additive-only: append edge context strictly after every directly-retrieved
+    // result, deduped by `symbol_id` against the core (an edge referencing an
+    // already-present symbol is omitted, the directly-retrieved result kept —
+    // Requirement 11.4), never reordering/removing the prefix, and filling only
+    // the budget remaining up to `k` (Requirements 11.1, 11.2).
+    let mut seen: HashSet<&str> = composed.iter().map(|h| h.symbol_id.as_str()).collect();
+    let mut to_add: Vec<&Hit> = Vec::new();
+    for hit in edge_context {
+        if composed.len() + to_add.len() >= k {
+            break;
+        }
+        if seen.insert(hit.symbol_id.as_str()) {
+            to_add.push(hit);
+        }
+    }
+    composed.extend(to_add.into_iter().cloned());
+
+    composed
+}
+
 /// Return only the composed capsule's `symbol_id`s, best-first.
 ///
 /// Thin convenience wrapper over [`compose_capsule`] for callers that only need
@@ -218,6 +279,127 @@ mod tests {
             unique.len(),
             composed.len(),
             "composed {composed:?} has dups"
+        );
+    }
+
+    fn edge_hit(sid: &str, score: f64) -> Hit {
+        Hit::new(sid, score, "integration", "edge")
+    }
+
+    /// `flag == false` is byte-for-byte identical to `compose_capsule`, and
+    /// includes NO edge-derived entry even when `edge_context` is non-empty
+    /// (Requirement 11.5).
+    #[test]
+    fn flag_false_is_byte_identical_to_compose_capsule() {
+        let lexical = vec![hit("a", 0.9, "lexical"), hit("b", 0.5, "lexical")];
+        let semantic = vec![hit("b", 0.95, "semantic"), hit("c", 0.8, "semantic")];
+        let csar = vec![csar_hit("d", 0.7, true)];
+        // Non-empty edge context must be ignored entirely when the flag is off.
+        let edges = vec![edge_hit("e", 0.99), edge_hit("f", 0.88)];
+
+        let baseline = compose_capsule(
+            &[lexical.clone(), semantic.clone()],
+            &csar,
+            10,
+            DEFAULT_RRF_K,
+        );
+        let with_edges = compose_capsule_with_edges(
+            &[lexical, semantic],
+            &csar,
+            &edges,
+            10,
+            DEFAULT_RRF_K,
+            false,
+        );
+        assert_eq!(
+            with_edges, baseline,
+            "flag==false must be byte-identical to compose_capsule"
+        );
+        // No edge-derived entry leaked in.
+        assert!(!with_edges
+            .iter()
+            .any(|h| h.symbol_id == "e" || h.symbol_id == "f"));
+    }
+
+    /// `flag == true` appends edge context strictly after the confident + CSAR
+    /// prefix, in edge order, deduped, never reordering the prefix
+    /// (Requirements 11.1, 11.2).
+    #[test]
+    fn flag_true_appends_edges_after_prefix() {
+        let lexical = vec![hit("a", 0.9, "lexical")];
+        let csar = vec![csar_hit("x", 0.8, true)];
+        let edges = vec![edge_hit("e1", 0.99), edge_hit("e2", 0.7)];
+
+        // The directly-retrieved core is unchanged from the flag-off capsule.
+        let core = compose_capsule_ids(std::slice::from_ref(&lexical), &csar, 10, DEFAULT_RRF_K);
+        assert_eq!(core, vec!["a", "x"]);
+
+        let composed =
+            compose_capsule_with_edges(&[lexical], &csar, &edges, 10, DEFAULT_RRF_K, true);
+        let ids: Vec<&str> = composed.iter().map(|h| h.symbol_id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "x", "e1", "e2"]);
+        // Prefix (confident + CSAR) preserved verbatim as a prefix.
+        assert!(ids.starts_with(&["a", "x"]));
+    }
+
+    /// An edge referencing a symbol already directly-retrieved is omitted; the
+    /// directly-retrieved result is retained unchanged (Requirement 11.4).
+    #[test]
+    fn flag_true_dedups_edges_against_directly_retrieved() {
+        let lexical = vec![hit("a", 0.9, "lexical")];
+        let csar = vec![csar_hit("x", 0.8, true)];
+        // "a" and "x" are already directly-retrieved; only "e1" is new.
+        let edges = vec![
+            edge_hit("a", 0.99),
+            edge_hit("x", 0.95),
+            edge_hit("e1", 0.5),
+        ];
+
+        let composed =
+            compose_capsule_with_edges(&[lexical], &csar, &edges, 10, DEFAULT_RRF_K, true);
+        let ids: Vec<&str> = composed.iter().map(|h| h.symbol_id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "x", "e1"]);
+        // The surviving "a"/"x" are the directly-retrieved hits, not edge dups.
+        assert_eq!(composed[0].layer, "fused");
+        assert_eq!(composed[1].layer, "csar");
+    }
+
+    /// Edge context never displaces a confident hit: with the budget full of
+    /// directly-retrieved results, no edge entry is admitted (Requirement 11.1).
+    #[test]
+    fn flag_true_edges_never_displace_confident_hits() {
+        let lexical = vec![hit("a", 0.9, "lexical"), hit("b", 0.5, "lexical")];
+        let core = compose_capsule_ids(std::slice::from_ref(&lexical), &[], 2, DEFAULT_RRF_K);
+        // High-scoring edge context, but k == 2 is fully consumed by confident hits.
+        let edges = vec![edge_hit("z", 9999.0)];
+        let composed = compose_capsule_with_edges(&[lexical], &[], &edges, 2, DEFAULT_RRF_K, true);
+        let ids: Vec<String> = composed.iter().map(|h| h.symbol_id.clone()).collect();
+        assert_eq!(ids, core, "confident hits must not be displaced by edges");
+        assert!(!ids.contains(&"z".to_string()));
+    }
+
+    /// Edge context fills only the budget remaining after the directly-retrieved
+    /// core; the total never exceeds `k` (Requirement 11.1 budget clause).
+    #[test]
+    fn flag_true_respects_budget_k() {
+        let lexical = vec![hit("a", 0.9, "lexical"), hit("b", 0.5, "lexical")];
+        let csar = vec![csar_hit("x", 0.8, true)];
+        // Core would be [a, b, x] (3); k == 4 leaves room for exactly one edge.
+        let edges = vec![edge_hit("e1", 0.9), edge_hit("e2", 0.8)];
+        let composed =
+            compose_capsule_with_edges(&[lexical], &csar, &edges, 4, DEFAULT_RRF_K, true);
+        let ids: Vec<&str> = composed.iter().map(|h| h.symbol_id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "b", "x", "e1"]);
+        assert!(composed.len() <= 4);
+    }
+
+    /// `k == 0` composes to nothing even with edges enabled.
+    #[test]
+    fn flag_true_k_zero_is_empty() {
+        let lexical = vec![hit("a", 1.0, "lexical")];
+        let edges = vec![edge_hit("e", 0.5)];
+        assert!(
+            compose_capsule_with_edges(&[lexical], &[], &edges, 0, DEFAULT_RRF_K, true).is_empty()
         );
     }
 }

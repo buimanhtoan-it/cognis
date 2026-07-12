@@ -18,6 +18,6 @@ pub use cognis_core::{Hit, Result};
 pub mod capsule;
 pub mod fusion;
 pub mod layer;
-pub use capsule::{compose_capsule, compose_capsule_ids};
+pub use capsule::{compose_capsule, compose_capsule_ids, compose_capsule_with_edges};
 pub use fusion::{rrf_fuse, rrf_fuse_ids, DEFAULT_RRF_K};
 pub use layer::{LexicalLayer, RetrievalLayer, SemanticLayer};

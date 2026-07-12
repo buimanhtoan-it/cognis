@@ -39,19 +39,32 @@ pub struct StoreEngine {
     /// The configured embedder, when one could be built for this process. When
     /// `None` the semantic leg degrades to empty (lexical/structural only).
     embedder: Option<Box<dyn Embedder>>,
+    /// Whether additive integration-edge capsule context is enabled
+    /// (`config.artifact.integration_edge_context`, default `false`). Threaded
+    /// from the loaded config in [`open`](StoreEngine::open); `false` for the
+    /// no-config constructors so their capsules stay pre-feature identical.
+    integration_edge_context: bool,
 }
 
 impl StoreEngine {
     /// Build an engine over an already-open [`Database`] with no embedder
     /// (lexical + structural + CSAR only). Used by the contract fixture.
     pub fn new(db: Database) -> Self {
-        StoreEngine { db, embedder: None }
+        StoreEngine {
+            db,
+            embedder: None,
+            integration_edge_context: false,
+        }
     }
 
     /// Build an engine over `db` with an explicit embedder (dependency-injected
     /// in tests; also the shape [`open`](StoreEngine::open) constructs).
     pub fn with_embedder(db: Database, embedder: Option<Box<dyn Embedder>>) -> Self {
-        StoreEngine { db, embedder }
+        StoreEngine {
+            db,
+            embedder,
+            integration_edge_context: false,
+        }
     }
 
     /// Open the UCKG at `path` (runs migrations) and build an engine over it,
@@ -61,12 +74,18 @@ impl StoreEngine {
     /// DB path (`<repo>/.cognis/uckg.db`), falling back to defaults when it
     /// can't be located. The embedder is built best-effort: an unavailable
     /// backend (e.g. `onnx` not compiled in, or model assets missing) degrades
-    /// to no embedder rather than failing the server to start.
+    /// to no embedder rather than failing the server to start. The
+    /// `artifact.integration_edge_context` flag is threaded from the same
+    /// config to gate additive integration-edge capsule context (default off).
     pub fn open(path: &str) -> Result<Self> {
         let db = Database::open(path)?;
         let config = config_for_db(path);
         let embedder = cognis_embed::build_embedder(&config).ok();
-        Ok(StoreEngine::with_embedder(db, embedder))
+        Ok(StoreEngine {
+            db,
+            embedder,
+            integration_edge_context: config.artifact.integration_edge_context,
+        })
     }
 
     /// Seed a `:memory:` UCKG with a deterministic fixture call graph and build
@@ -228,6 +247,10 @@ impl RetrievalEngine for StoreEngine {
         // Semantic is usable only when both halves of the pipeline are present:
         // an embedder to embed the query, and a populated `symbol_vec` to search.
         self.embedder.is_some() && self.db.vec_row_count().map(|n| n > 0).unwrap_or(false)
+    }
+
+    fn integration_edge_context(&self) -> bool {
+        self.integration_edge_context
     }
 }
 

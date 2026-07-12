@@ -440,11 +440,28 @@ pub fn retrieve_context_capsule(
 
     // Budget the capsule to ~50 tokens/symbol (mirror the Python estimate).
     let symbol_budget = (max_tokens as usize / 50).max(1);
-    let composed = cognis_retrieval::compose_capsule(
+    // Additive-only integration-edge context (Requirement 11): the
+    // directly-retrieved core (confident RRF prefix + additive CSAR context) is
+    // composed exactly as before; when `artifact.integration_edge_context` is
+    // enabled, edge-derived entries are appended strictly after it, deduped,
+    // never reordering the confident prefix. Edges are never a fused ranking
+    // signal — they are not passed through `rrf_fuse`, and `rrf_k` is untouched.
+    //
+    // The `RoutesTo`/`Reads`/`Writes` edge-context derivation from the resident
+    // graph is not yet exposed on the read-only `RetrievalEngine` seam, so the
+    // edge-context slice is empty for now; with the flag defaulting to `false`
+    // this path is byte-for-byte identical to the pre-feature capsule
+    // (Requirement 11.5). Follow-up: extend the engine seam to surface the
+    // integration-edge neighbours of the directly-retrieved symbols and pass
+    // them here as `edge_context` when the flag is enabled.
+    let edge_context: Vec<Hit> = Vec::new();
+    let composed = cognis_retrieval::compose_capsule_with_edges(
         &[lexical, semantic],
         &csar,
+        &edge_context,
         symbol_budget,
         cognis_retrieval::DEFAULT_RRF_K,
+        engine.integration_edge_context(),
     );
     let by_id = hydrate_map(engine, &hit_ids(&[&composed]))?;
 

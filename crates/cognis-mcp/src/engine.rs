@@ -74,4 +74,16 @@ pub trait RetrievalEngine {
     fn semantic_available(&self) -> bool {
         false
     }
+
+    /// Whether the additive integration-edge capsule context is enabled
+    /// (`config.artifact.integration_edge_context`, default `false`).
+    ///
+    /// When `false` (the default for every implementation, including test
+    /// fakes) the capsule composer emits a capsule byte-for-byte identical to
+    /// the pre-feature output — integration edges contribute no context entry
+    /// (Requirement 11.5). The concrete [`StoreEngine`](crate::store_engine::StoreEngine)
+    /// threads the loaded config flag; edges are never a fused ranking signal.
+    fn integration_edge_context(&self) -> bool {
+        false
+    }
 }

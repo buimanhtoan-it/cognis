@@ -950,6 +950,279 @@ impl RegressionGate {
     }
 }
 
+// ===========================================================================
+// The non-code-artifact-coverage non-regression gate (Requirements 14/15/16).
+//
+// This is a SECOND, distinct decision layer, additive to the Property-5
+// `RegressionGate` above. Where `RegressionGate` compares a Rust method to a
+// captured Python oracle within a symmetric noise band, this layer decides
+// ship/no-ship for the *artifact-coverage* feature: it blocks any candidate
+// that regresses code MRR / Contamination@k beyond a pre-declared tolerance ε,
+// or that fails to strictly improve the non-code Coverage and Recall@10, and
+// permits only when code is preserved AND non-code strictly improves.
+// ===========================================================================
+
+/// The fixed, pre-declared non-regression tolerance ε for the coverage gate
+/// (Requirement 14.1 / 16.4).
+///
+/// ε is expressed in the **same absolute units** as code MRR and code
+/// Contamination@k (both fractions in `[0, 1]`), declared here as a compile-time
+/// constant *before any measurement is taken* and never tuned to a benchmark
+/// sample. A candidate is blocked when `ΔMRR < −ε` or `ΔContam > +ε`.
+pub const DEFAULT_COVERAGE_EPSILON: f64 = 0.01;
+
+/// The evidence tier recorded for the coverage-improvement claim
+/// (Requirements 16.1 / 16.3).
+///
+/// The claim ships **conjectured** until a passing before/after measurement is
+/// produced under the gate; a permit records it **verified**.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClaimStatus {
+    /// The improvement claim is backed by a passing before/after measurement
+    /// under the gate (recorded on a permit — Requirement 16.3).
+    Verified,
+    /// The improvement claim is not (yet) backed by a passing measurement
+    /// (the default / recorded on any block — Requirement 16.1).
+    Conjectured,
+}
+
+/// Code-retrieval metrics measured on the Code_Golden_Sets at the gate's fixed
+/// cutoff `k` (= [`DEFAULT_K`], 10), for one build (Requirement 14.2).
+///
+/// Both `mrr` and `contamination` are the code MRR and code Contamination@k
+/// measured with identical golden sets, benchmark repos, and `k` for the
+/// baseline and the candidate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CodeMetrics {
+    /// Code MRR on the Code_Golden_Sets.
+    pub mrr: f64,
+    /// Code Contamination@k on the Code_Golden_Sets.
+    pub contamination: f64,
+}
+
+impl CodeMetrics {
+    /// Convenience constructor.
+    pub const fn new(mrr: f64, contamination: f64) -> Self {
+        CodeMetrics { mrr, contamination }
+    }
+}
+
+/// Mean non-code metrics across the md/yaml/html/sql file types for one build
+/// (Requirement 14.4 / 14.5).
+///
+/// `coverage` is the mean non-code Coverage_Metric and `recall` the mean
+/// non-code Recall@k, each averaged across the four non-code file types.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NonCodeMetrics {
+    /// Mean non-code Coverage_Metric across md/yaml/html/sql.
+    pub coverage: f64,
+    /// Mean non-code Recall@k across md/yaml/html/sql.
+    pub recall: f64,
+}
+
+impl NonCodeMetrics {
+    /// Convenience constructor.
+    pub const fn new(coverage: f64, recall: f64) -> Self {
+        NonCodeMetrics { coverage, recall }
+    }
+}
+
+/// A complete measurement of one build: its code metrics on the Code_Golden_Sets
+/// and its mean non-code metrics across md/yaml/html/sql.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CoverageMeasurement {
+    /// Code MRR + Contamination@k on the Code_Golden_Sets.
+    pub code: CodeMetrics,
+    /// Mean non-code Coverage + Recall@k across md/yaml/html/sql.
+    pub non_code: NonCodeMetrics,
+}
+
+impl CoverageMeasurement {
+    /// Convenience constructor.
+    pub const fn new(code: CodeMetrics, non_code: NonCodeMetrics) -> Self {
+        CoverageMeasurement { code, non_code }
+    }
+}
+
+/// The gate's inputs: the baseline and candidate measurements.
+///
+/// Each side is an [`Option`] so that an **unmeasured** build is represented
+/// explicitly; the gate blocks when either side is unmeasured (Requirement
+/// 16.2). Both measurements must have been taken with identical golden sets,
+/// repos, and `k` (Requirement 14.2) — a precondition the caller establishes.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct CoverageGateInput {
+    /// The pre-change baseline measurement, or `None` if unmeasured.
+    pub baseline: Option<CoverageMeasurement>,
+    /// The candidate build measurement, or `None` if unmeasured.
+    pub candidate: Option<CoverageMeasurement>,
+}
+
+impl CoverageGateInput {
+    /// A fully-measured input (both baseline and candidate present).
+    pub const fn measured(baseline: CoverageMeasurement, candidate: CoverageMeasurement) -> Self {
+        CoverageGateInput {
+            baseline: Some(baseline),
+            candidate: Some(candidate),
+        }
+    }
+}
+
+/// The coverage gate's verdict.
+///
+/// `Permit` records the improvement claim as [`ClaimStatus::Verified`];
+/// `Block` (carrying the human-readable reasons, each naming the failed axis)
+/// leaves the claim [`ClaimStatus::Conjectured`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum CoverageGateVerdict {
+    /// Code preserved within ε AND both non-code metrics strictly improved
+    /// (Requirement 14.5). The improvement claim is recorded verified.
+    Permit,
+    /// At least one gate condition failed; carries reasons naming each failed
+    /// axis. The improvement claim stays conjectured; the baseline is left
+    /// unchanged (this decision function is side-effect-free).
+    Block(Vec<String>),
+}
+
+impl CoverageGateVerdict {
+    /// `true` when the release is permitted.
+    pub fn is_permit(&self) -> bool {
+        matches!(self, CoverageGateVerdict::Permit)
+    }
+
+    /// The block reasons (empty on permit).
+    pub fn reasons(&self) -> &[String] {
+        match self {
+            CoverageGateVerdict::Block(r) => r,
+            CoverageGateVerdict::Permit => &[],
+        }
+    }
+
+    /// The evidence tier this verdict records for the improvement claim:
+    /// verified on permit (Requirement 16.3), conjectured on block
+    /// (Requirement 16.1).
+    pub fn claim_status(&self) -> ClaimStatus {
+        match self {
+            CoverageGateVerdict::Permit => ClaimStatus::Verified,
+            CoverageGateVerdict::Block(_) => ClaimStatus::Conjectured,
+        }
+    }
+}
+
+/// The hard non-regression gate for the non-code-artifact-coverage feature
+/// (Requirements 14, 15, 16).
+///
+/// A pure, side-effect-free decision function comparing a baseline and a
+/// candidate measurement. It **blocks** when:
+///
+/// * either build is unmeasured (Requirement 16.2), or
+/// * `ΔMRR < −ε` (code MRR regressed beyond ε) — naming the MRR axis
+///   (Requirements 14.3 / 15.3), or
+/// * `ΔContam > +ε` (code Contamination@k rose beyond ε) — naming the
+///   Contamination axis (Requirements 14.3 / 15.3 / 15.4), or
+/// * candidate mean non-code Coverage does not **strictly** exceed baseline, or
+/// * candidate mean non-code Recall@k does not **strictly** exceed baseline
+///   (Requirement 14.4).
+///
+/// It **permits** only when both non-code metrics strictly improve AND
+/// `ΔMRR ≥ −ε` AND `ΔContam ≤ +ε` (Requirement 14.5). Because the function is
+/// pure it never mutates or persists the baseline; on a block the caller simply
+/// leaves the recorded baseline unchanged (Requirements 15.4 / 16).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CoverageRegressionGate {
+    /// The fixed, pre-declared non-negative tolerance ε (Requirement 14.1),
+    /// expressed in the same absolute units as code MRR and Contamination@k.
+    pub epsilon: f64,
+}
+
+impl Default for CoverageRegressionGate {
+    /// The default gate uses the pre-declared [`DEFAULT_COVERAGE_EPSILON`]
+    /// (0.01), never tuned to a sample.
+    fn default() -> Self {
+        CoverageRegressionGate {
+            epsilon: DEFAULT_COVERAGE_EPSILON,
+        }
+    }
+}
+
+impl CoverageRegressionGate {
+    /// Decide ship/no-ship for a candidate against a baseline.
+    ///
+    /// Pure and side-effect-free: on a block the baseline is left untouched
+    /// (the caller must not persist anything — Requirements 15.4 / 16). The
+    /// returned verdict's [`CoverageGateVerdict::claim_status`] records the
+    /// improvement claim as verified on permit and conjectured on block.
+    pub fn decide(&self, input: &CoverageGateInput) -> CoverageGateVerdict {
+        // Block when unmeasured (Requirement 16.2): a missing baseline or
+        // candidate measurement cannot support a verified claim.
+        let (base, cand) = match (input.baseline, input.candidate) {
+            (Some(b), Some(c)) => (b, c),
+            (None, None) => {
+                return CoverageGateVerdict::Block(vec![
+                    "unmeasured: neither baseline nor candidate metrics were measured".to_string(),
+                ]);
+            }
+            (None, Some(_)) => {
+                return CoverageGateVerdict::Block(vec![
+                    "unmeasured: baseline metrics were not measured".to_string(),
+                ]);
+            }
+            (Some(_), None) => {
+                return CoverageGateVerdict::Block(vec![
+                    "unmeasured: candidate metrics were not measured".to_string(),
+                ]);
+            }
+        };
+
+        let mut reasons = Vec::new();
+
+        // Code non-regression on the Code_Golden_Sets (Requirements 14.3 /
+        // 15.3 / 15.4), each reason naming the failed axis.
+        let d_mrr = cand.code.mrr - base.code.mrr;
+        let d_contam = cand.code.contamination - base.code.contamination;
+        if d_mrr < -self.epsilon {
+            reasons.push(format!(
+                "code MRR regressed: ΔMRR {d_mrr:.4} < −ε ({:.4}) \
+                 (candidate {:.4} vs baseline {:.4})",
+                self.epsilon, cand.code.mrr, base.code.mrr
+            ));
+        }
+        if d_contam > self.epsilon {
+            reasons.push(format!(
+                "code Contamination@k regressed: ΔContam {d_contam:.4} > +ε ({:.4}) \
+                 (candidate {:.4} vs baseline {:.4})",
+                self.epsilon, cand.code.contamination, base.code.contamination
+            ));
+        }
+
+        // Non-code metrics must STRICTLY improve (Requirement 14.4). Using `<=`
+        // means "does not strictly exceed" → block.
+        if cand.non_code.coverage <= base.non_code.coverage {
+            reasons.push(format!(
+                "non-code Coverage did not strictly improve: \
+                 candidate {:.4} <= baseline {:.4}",
+                cand.non_code.coverage, base.non_code.coverage
+            ));
+        }
+        if cand.non_code.recall <= base.non_code.recall {
+            reasons.push(format!(
+                "non-code Recall@k did not strictly improve: \
+                 candidate {:.4} <= baseline {:.4}",
+                cand.non_code.recall, base.non_code.recall
+            ));
+        }
+
+        if reasons.is_empty() {
+            // Both non-code strictly improve AND ΔMRR ≥ −ε AND ΔContam ≤ +ε
+            // (Requirement 14.5): permit, recording the claim verified.
+            CoverageGateVerdict::Permit
+        } else {
+            // Block, leaving the baseline unchanged; claim stays conjectured.
+            CoverageGateVerdict::Block(reasons)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1263,5 +1536,123 @@ mod tests {
                 }
             }
         }
+    }
+
+    // ---- coverage / non-regression gate (Req 14/15/16) ------------------
+
+    /// Build a measurement from `(code_mrr, code_contam, nc_coverage, nc_recall)`.
+    fn meas(mrr: f64, contam: f64, cov: f64, rec: f64) -> CoverageMeasurement {
+        CoverageMeasurement::new(CodeMetrics::new(mrr, contam), NonCodeMetrics::new(cov, rec))
+    }
+
+    #[test]
+    fn coverage_gate_permits_when_noncode_improves_and_code_within_epsilon() {
+        let gate = CoverageRegressionGate::default();
+        // Baseline: no non-code coverage/recall. Candidate: both strictly up,
+        // code MRR down by 0.005 (within ε, ΔMRR ≥ −ε) and contam up by 0.005
+        // (within ε, ΔContam ≤ +ε).
+        let base = meas(0.45, 0.07, 0.00, 0.00);
+        let cand = meas(0.445, 0.075, 0.30, 0.25);
+        let input = CoverageGateInput::measured(base, cand);
+        let v = gate.decide(&input);
+        assert_eq!(v, CoverageGateVerdict::Permit);
+        // On permit the claim is recorded verified (Req 16.3).
+        assert_eq!(v.claim_status(), ClaimStatus::Verified);
+    }
+
+    #[test]
+    fn coverage_gate_blocks_on_mrr_regression_naming_axis() {
+        let gate = CoverageRegressionGate::default(); // ε = 0.01
+                                                      // ΔMRR = 0.40 − 0.45 = −0.05 < −ε → block naming MRR. Non-code improves.
+        let base = meas(0.45, 0.07, 0.00, 0.00);
+        let cand = meas(0.40, 0.07, 0.30, 0.25);
+        let v = gate.decide(&CoverageGateInput::measured(base, cand));
+        assert!(!v.is_permit());
+        assert!(v.reasons().iter().any(|r| r.contains("MRR")));
+        assert!(v.reasons().iter().any(|r| r.contains("ΔMRR")));
+        assert_eq!(v.claim_status(), ClaimStatus::Conjectured);
+    }
+
+    #[test]
+    fn coverage_gate_blocks_on_contamination_regression_naming_axis() {
+        let gate = CoverageRegressionGate::default();
+        // ΔContam = 0.20 − 0.07 = 0.13 > +ε → block naming Contamination.
+        let base = meas(0.45, 0.07, 0.00, 0.00);
+        let cand = meas(0.45, 0.20, 0.30, 0.25);
+        let v = gate.decide(&CoverageGateInput::measured(base, cand));
+        assert!(!v.is_permit());
+        assert!(v.reasons().iter().any(|r| r.contains("Contamination")));
+        assert!(v.reasons().iter().any(|r| r.contains("ΔContam")));
+    }
+
+    #[test]
+    fn coverage_gate_blocks_when_coverage_not_strictly_improved() {
+        let gate = CoverageRegressionGate::default();
+        // Coverage equal to baseline (not strictly greater) → block. Recall up,
+        // code preserved.
+        let base = meas(0.45, 0.07, 0.30, 0.20);
+        let cand = meas(0.45, 0.07, 0.30, 0.25);
+        let v = gate.decide(&CoverageGateInput::measured(base, cand));
+        assert!(!v.is_permit());
+        assert!(v.reasons().iter().any(|r| r.contains("Coverage")));
+    }
+
+    #[test]
+    fn coverage_gate_blocks_when_recall_not_strictly_improved() {
+        let gate = CoverageRegressionGate::default();
+        // Recall equal to baseline (not strictly greater) → block. Coverage up.
+        let base = meas(0.45, 0.07, 0.20, 0.25);
+        let cand = meas(0.45, 0.07, 0.30, 0.25);
+        let v = gate.decide(&CoverageGateInput::measured(base, cand));
+        assert!(!v.is_permit());
+        assert!(v.reasons().iter().any(|r| r.contains("Recall")));
+    }
+
+    #[test]
+    fn coverage_gate_blocks_when_unmeasured() {
+        let gate = CoverageRegressionGate::default();
+        let good = meas(0.45, 0.07, 0.30, 0.25);
+
+        // Neither side measured.
+        let v = gate.decide(&CoverageGateInput::default());
+        assert!(!v.is_permit());
+        assert!(v.reasons().iter().any(|r| r.contains("unmeasured")));
+        assert_eq!(v.claim_status(), ClaimStatus::Conjectured);
+
+        // Baseline missing.
+        let v = gate.decide(&CoverageGateInput {
+            baseline: None,
+            candidate: Some(good),
+        });
+        assert!(v.reasons().iter().any(|r| r.contains("baseline")));
+
+        // Candidate missing.
+        let v = gate.decide(&CoverageGateInput {
+            baseline: Some(good),
+            candidate: None,
+        });
+        assert!(v.reasons().iter().any(|r| r.contains("candidate")));
+    }
+
+    #[test]
+    fn coverage_gate_reports_every_failed_axis_at_once() {
+        let gate = CoverageRegressionGate::default();
+        // Code MRR down > ε, contam up > ε, and neither non-code metric improves.
+        let base = meas(0.50, 0.07, 0.30, 0.25);
+        let cand = meas(0.40, 0.20, 0.30, 0.25);
+        let v = gate.decide(&CoverageGateInput::measured(base, cand));
+        assert!(!v.is_permit());
+        // MRR + Contamination + Coverage + Recall = 4 reasons.
+        assert_eq!(v.reasons().len(), 4);
+    }
+
+    #[test]
+    fn coverage_epsilon_is_the_fixed_pre_declared_constant() {
+        // ε is the pre-declared default, not sample-derived (Req 14.1 / 16.4).
+        assert_eq!(DEFAULT_COVERAGE_EPSILON, 0.01);
+        assert_eq!(
+            CoverageRegressionGate::default().epsilon,
+            DEFAULT_COVERAGE_EPSILON
+        );
     }
 }

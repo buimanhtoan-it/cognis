@@ -11,6 +11,7 @@
 //! field shapes mirror the Python parsers so the Rust indexer round-trips the
 //! same UCKG rows (Requirement 9.2 parity).
 
+pub mod artifact;
 mod csharp;
 mod generic;
 mod go;

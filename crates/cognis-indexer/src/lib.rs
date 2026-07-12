@@ -30,6 +30,6 @@ pub mod writer;
 
 pub use enricher::{EnrichedSymbol, Enricher};
 pub use parser::{language_for_path, parse_source, Language, ParseOutput};
-pub use pipeline::{IndexStats, IndexerPipeline};
-pub use resolver::{resolve_edges, to_edge, to_edges, ResolvedEdge};
+pub use pipeline::{admitted_rel_paths, ArtifactKind, IndexStats, IndexerPipeline};
+pub use resolver::{normalize_ident, resolve_edges, to_edge, to_edges, ResolvedEdge};
 pub use writer::{FileWritePayload, IndexWriter};

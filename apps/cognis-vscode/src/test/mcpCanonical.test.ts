@@ -38,12 +38,18 @@ test("canonicalizePath is slash- and case-insensitive for the same location", ()
   const repo = mkTempRepo("case");
   try {
     const a = canonicalizePath(repo);
-    const b = canonicalizePath(repo.replace(/\//g, "\\"));
     const c = canonicalizePath(repo.toUpperCase());
-    // Slash style must not change the key; case must not either (the extension
-    // lowercases everywhere for path equality).
-    assert.equal(a, b);
+    // Case must not change the key: the extension lowercases everywhere for
+    // path equality, so an upper-cased spelling collapses to the same key on
+    // every platform.
     assert.equal(a, c);
+    // Backslash is a path separator only on Windows; on POSIX it is a literal
+    // filename character, so a backslash-spelled path is a genuinely different
+    // location there. Only assert slash-insensitivity where it is meaningful.
+    if (process.platform === "win32") {
+      const b = canonicalizePath(repo.replace(/\//g, "\\"));
+      assert.equal(a, b);
+    }
     // Result is lowercased, forward-slashed, and trailing-slash trimmed.
     assert.equal(a, a.toLowerCase());
     assert.ok(!a.endsWith("/"));
@@ -143,7 +149,13 @@ test("sameCanonicalDb treats aliases of one DB as equal and distinct DBs as uneq
   const repo = mkTempRepo("samedb");
   try {
     const db = path.join(repo, ".cognis", "uckg.db");
-    assert.equal(sameCanonicalDb(db, db.replace(/\//g, "\\")), true);
+    // The same DB path (however spelled) is always the same canonical DB.
+    assert.equal(sameCanonicalDb(db, db), true);
+    // Backslash is a separator only on Windows; a backslash-spelled alias is a
+    // genuine alias there but a different filename on POSIX.
+    if (process.platform === "win32") {
+      assert.equal(sameCanonicalDb(db, db.replace(/\//g, "\\")), true);
+    }
     assert.equal(
       sameCanonicalDb(db, path.join(repo, ".cognis", "other.db")),
       false
@@ -159,12 +171,17 @@ test("dedupeCognisOwnersByIdentity removes duplicate owners for one repo, keeps 
     const identity = canonicalRepoIdentity(repo);
     const db = defaultDbPathForRepo(repo);
     const keep = deriveMcpServerName(repo);
+    // A differently-spelled alias of the SAME canonical DB. `.` segments and a
+    // redundant `dir/..` round-trip are separator-neutral, so this aliases the
+    // same location on every platform (Windows adds case/backslash aliasing on
+    // top, but this stays correct on POSIX where backslash is a real char).
+    const dbAlias = path.join(repo, ".", ".cognis", "x", "..", "uckg.db");
     const servers: Record<string, unknown> = {
       // The kept entry (canonical server name).
       [keep]: dbBlock(db),
-      // A stale duplicate written through an aliased path (backslashes / case)
-      // — same canonical DB, so it must be removed.
-      "cognis-alias-000000": dbBlock(db.replace(/\//g, "\\").toUpperCase()),
+      // A stale duplicate written through an aliased path — same canonical DB,
+      // so it must be removed.
+      "cognis-alias-000000": dbBlock(dbAlias),
       // A different repo's Cognis entry — must be preserved (isolation 3.6).
       "cognis-other-111111": dbBlock(
         path.join(mkTempRepoInline(), ".cognis", "uckg.db")

@@ -1,5 +1,9 @@
 # Release Notes — cognis v0.3.0
 
+> **Historical Python-era release.** The managed-Python instructions below are
+> archival. Follow [install.md](install.md) for the current pure-Rust product and
+> Polar ZIP/source-build distribution.
+>
 > **Zero-friction onboarding release.** First-time setup in the VS Code / Cursor
 > extension is now one click end to end: Cognis installs and manages its own
 > Python backend, guides you through a fixed setup path, keeps `.cognis/` out of

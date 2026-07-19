@@ -196,15 +196,14 @@
         keyword search leave out.
       </p>
       <p class="callout">
-        <strong>Everything here is open source.</strong> You can build and run all of Cognis
-        from source for free. The paid build is not a different product â€” it's the same engine
-        with no extra features, just packaged ahead of time so it installs and sets up once,
-        then runs. <strong>Buying it directly funds the continued development and research
-        behind Cognis.</strong>
+        <strong>Everything here is Apache-2.0 open source.</strong> Build the same software
+        from this repository for free, or buy one ready-to-install ZIP from Polar. The ZIP
+        has no license key, activation, or extra feature gate. <strong>Your purchase pays for
+        prebuilding, packaging, delivery, and continued development.</strong>
       </p>
       <div class="cta-row">
-        <a class="btn btn-primary js-buy" href="https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW" target="_blank" rel="noopener">Buy the <span class="js-product">Cognis Pro</span> build â€” <span class="js-price">$9.90</span></a>
-        <a class="btn btn-outline js-gh" href="https://github.com/buimanhtoan-it/cognis" target="_blank" rel="noopener">Read the source</a>
+        <a class="btn btn-primary js-buy" href="https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW" target="_blank" rel="noopener">Buy the <span class="js-product">Cognis Prebuilt ZIP</span> â€” <span class="js-price">$9.90</span></a>
+        <a class="btn btn-outline js-gh" href="https://github.com/buimanhtoan-it/cognis" target="_blank" rel="noopener">Build free from source</a>
       </div>
       <p class="meta">
         <strong>Local-first</strong> â€” your code never leaves the machine Â· works offline Â·
@@ -337,8 +336,8 @@
           <p>Indexing and retrieval run locally; nothing is sent to a server. Secrets are scrubbed during enrichment, MCP tools are read-only, and every call is recorded in a hashed audit log.</p>
         </div>
         <div class="feature">
-          <h3>No custom crypto</h3>
-          <p>Security uses standard SHA-256 hashing only. Offline license verification uses Ed25519 â€” a vetted standard, never a home-rolled cipher.</p>
+          <h3>Verified downloads</h3>
+          <p>Managed engine and model downloads are verified with standard SHA-256 checksums. There is no license key or activation service.</p>
         </div>
         <div class="feature">
           <h3>Bounded and observable</h3>
@@ -364,26 +363,25 @@
   <section id="pricing" class="soft">
     <div class="wrap">
       <div class="kicker">Pricing</div>
-      <h2>One prebuilt client. One-time price.</h2>
+      <h2>One prebuilt ZIP. One-time price.</h2>
       <p class="section-lede">
-        Everything in Cognis is open source â€” you can build the whole thing from source for
-        free. The paid build is the same engine, packaged ahead of time so it installs and
-        sets up once, then runs immediately. No code is held back â€” buying the build is how
-        you support the ongoing development and research. Polar is the merchant of record and
-        handles tax and VAT.
+        Build Cognis from source for free, or pay once for the ready-to-install package.
+        Polar delivers exactly one versioned ZIP; there is no separate VSIX benefit, license
+        key, activation, subscription, or feature difference. Polar is the merchant of record
+        and handles checkout, tax, and VAT.
       </p>
       <div class="price-card">
-        <div class="pname"><span class="js-product-upper">COGNIS PRO</span> Â· <span class="js-version">v0.7</span></div>
+        <div class="pname"><span class="js-product-upper">COGNIS PREBUILT ZIP</span> Â· <span class="js-version">v0.8.9</span></div>
         <div class="price"><span class="js-price">$9.90</span> <small>one-time</small></div>
         <ul>
-          <li>Prebuilt one-click VS Code / Cursor extension</li>
+          <li>One ZIP with the VS Code / Cursor extension and install guide</li>
           <li>Full CSAR engine + all 8 MCP retrieval tools</li>
           <li>Local semantic and structural search</li>
-          <li>Every <span class="js-patch">0.7.x</span> patch update included</li>
-          <li>Works offline Â· email support</li>
+          <li>No license key, activation, or held-back features</li>
+          <li>Apache-2.0 Â· build the same software from source free</li>
         </ul>
-        <a class="btn btn-primary js-buy" href="https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW" target="_blank" rel="noopener" style="display:block;text-align:center">Buy now â€” <span class="js-price">$9.90</span></a>
-        <p class="note">Secure checkout via Polar Â· one-time charge. A <span class="js-version">v0.7</span> license unlocks every <span class="js-patch">0.7.x</span> patch.</p>
+        <a class="btn btn-primary js-buy" href="https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW" target="_blank" rel="noopener" style="display:block;text-align:center">Buy the ZIP â€” <span class="js-price">$9.90</span></a>
+        <p class="note">Secure checkout via Polar Â· one-time charge. The download is a prebuilt convenience package, not a feature license.</p>
       </div>
     </div>
   </section>
@@ -397,25 +395,24 @@
         <a class="js-support" href="mailto:buimanhtoan.it@gmail.com">Support</a>
       </div>
     </div>
-    <div class="wrap" style="margin-top:10px; font-size:13px;">Engine is open source (Apache-2.0). The Pro client is commercial.</div>
+    <div class="wrap" style="margin-top:10px; font-size:13px;">Cognis source and distributed builds are Apache-2.0. Polar sells one ready-to-install ZIP.</div>
   </footer>
 
   <script>
     // ------------------------------------------------------------------
-    // Single source of truth: site/config.json (release-specific values)
-    // + the live version from the GitHub Releases API. The page markup is
-    // version-agnostic â€” bumping the core never requires editing this file.
-    // Baked defaults keep the page working offline / opened via file://.
+    // Single source of truth for storefront values: site/config.json.
+    // The displayed version is the exact ZIP uploaded to Polar; it does not
+    // auto-follow GitHub tags because source and paid package readiness differ.
     // ------------------------------------------------------------------
     (function () {
       "use strict";
       var DEFAULTS = {
-        productName: "Cognis Pro",
+        productName: "Cognis Prebuilt ZIP",
         repo: "buimanhtoan-it/cognis",
         buyUrl: "https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW",
         price: "$9.90",
         supportEmail: "buimanhtoan.it@gmail.com",
-        fallbackVersion: "0.8.8"
+        version: "0.8.9"
       };
 
       function setText(selector, value) {
@@ -424,11 +421,6 @@
       function setHref(selector, value) {
         document.querySelectorAll(selector).forEach(function (el) { el.setAttribute("href", value); });
       }
-      function minorBand(version) {
-        var m = String(version).replace(/^v/, "").match(/^(\d+)\.(\d+)/);
-        return m ? m[1] + "." + m[2] : null;
-      }
-
       function applyConfig(cfg) {
         setText(".js-product", cfg.productName);
         setText(".js-product-upper", cfg.productName.toUpperCase());
@@ -437,24 +429,7 @@
         setHref(".js-gh", "https://github.com/" + cfg.repo);
         setHref(".js-changelog", "https://github.com/" + cfg.repo + "/blob/main/CHANGELOG.md");
         setHref(".js-support", "mailto:" + cfg.supportEmail);
-      }
-      function applyVersion(minor) {
-        if (!minor) return;
-        setText(".js-version", "v" + minor);
-        setText(".js-patch", minor + ".x");
-      }
-
-      function fetchLatestVersion(repo) {
-        return fetch("https://api.github.com/repos/" + repo + "/releases/latest", {
-          headers: { Accept: "application/vnd.github+json" }
-        })
-          .then(function (r) { if (!r.ok) throw new Error("no release"); return r.json(); })
-          .then(function (j) { return j.tag_name; })
-          .catch(function () {
-            return fetch("https://api.github.com/repos/" + repo + "/tags")
-              .then(function (r) { if (!r.ok) throw new Error("no tags"); return r.json(); })
-              .then(function (tags) { return tags && tags.length ? tags[0].name : null; });
-          });
+        setText(".js-version", "v" + cfg.version);
       }
 
       fetch("config.json", { cache: "no-cache" })
@@ -463,10 +438,6 @@
         .then(function (loaded) {
           var cfg = Object.assign({}, DEFAULTS, loaded || {});
           applyConfig(cfg);
-          applyVersion(minorBand(cfg.fallbackVersion));
-          fetchLatestVersion(cfg.repo)
-            .then(function (tag) { var mb = minorBand(tag); if (mb) applyVersion(mb); })
-            .catch(function () { /* keep fallback band */ });
         });
     })();
   </script>

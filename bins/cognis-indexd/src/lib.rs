@@ -30,7 +30,8 @@ use clap::Parser;
 use notify::{EventKind, RecursiveMode, Watcher};
 use serde::Serialize;
 
-use cognis_core::Config;
+use cognis_core::lease::{acquire_or_attach, AcquireOutcome, LeaseGuard, LeaseRole};
+use cognis_core::{Config, SemanticWarmPolicy};
 use cognis_indexer::IndexerPipeline;
 
 /// How long to collect more events before dispatching a batch (matches the
@@ -107,6 +108,37 @@ fn run_args(args: DaemonArgs) -> ExitCode {
     let config = Config::load(&repo_root).unwrap_or_default();
     let db_path = resolve_db_path(args.db_path.as_deref(), &repo_root);
 
+    // Acquire-or-attach the repository-scoped lease BEFORE opening the DB /
+    // spawning any watch work (Task 6.1; Requirements 2.7, 2.13). If a live,
+    // non-expired `indexd.lease` already records another owner, this repository
+    // already has a live indexing daemon — attach/reuse instead of starting a
+    // duplicate heavy process (bug facet `repoHasDuplicateHeavyDaemonOrOrphan`).
+    // The guard heartbeats on a background thread and releases on drop; hold it
+    // for the whole daemon lifetime by binding it to `_lease_guard`, which lives
+    // to the end of `run_args`. A lease I/O failure must not take down indexing,
+    // so we log and continue lease-free (degrades to the prior behavior).
+    let _lease_guard: Option<LeaseGuard> =
+        match acquire_or_attach(&repo_root, LeaseRole::Indexd, None) {
+            Ok(AcquireOutcome::Acquired(guard)) => Some(guard),
+            Ok(AcquireOutcome::Attached { lease, path }) => {
+                eprintln!(
+                    "cognis-indexd: a live indexing daemon already owns this \
+                     repository (pid {}, lease {}); attaching instead of starting \
+                     a duplicate",
+                    lease.pid,
+                    path.display()
+                );
+                return ExitCode::SUCCESS;
+            }
+            Err(err) => {
+                eprintln!(
+                    "cognis-indexd: warning: could not acquire repository lease: {err}; \
+                     continuing without cross-process ownership"
+                );
+                None
+            }
+        };
+
     // Ctrl-C / SIGTERM → flip the run flag so the loop exits and publishes a
     // final "stopped" snapshot. `set_handler` may already be installed (e.g.
     // when embedded); treat that as non-fatal.
@@ -118,16 +150,26 @@ fn run_args(args: DaemonArgs) -> ExitCode {
 
     // Open the native indexer pipeline (Task 8.3). Opening the DB eagerly here
     // surfaces a bad path / unreadable DB immediately rather than on first edit.
-    let mut pipeline = match IndexerPipeline::open(&db_path, config.clone()) {
-        Ok(p) => p,
-        Err(err) => {
-            eprintln!(
-                "cognis-indexd: cannot open index database {}: {err}",
-                db_path.display()
-            );
-            return ExitCode::FAILURE;
-        }
-    };
+    //
+    // Resolve the semantic warm policy at the daemon entry point so the
+    // extension's `COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP` signal is actually
+    // consumed (Requirement 2.4; bug facet
+    // `semanticWarmPolicyIsIgnoredOrInconsistent`). Eager builds the embedder
+    // up front (legacy behavior / direct launch); Lazy defers it to first
+    // demand so zero ONNX is resident at startup — non-semantic indexing does
+    // not wait on the model (preservation 3.3/3.4).
+    let warm_policy = SemanticWarmPolicy::from_env();
+    let mut pipeline =
+        match IndexerPipeline::open_with_policy(&db_path, config.clone(), warm_policy) {
+            Ok(p) => p,
+            Err(err) => {
+                eprintln!(
+                    "cognis-indexd: cannot open index database {}: {err}",
+                    db_path.display()
+                );
+                return ExitCode::FAILURE;
+            }
+        };
 
     // Optional cold/full rebuild before watching (mirrors the Python daemon's
     // `--full-rebuild`): index the whole repo once so the watcher only has to
@@ -301,33 +343,65 @@ fn index_batch_into_status(
         .collect();
     status.phase = "incremental".to_string();
     status.pending_count = paths.len();
+    status.pending_files = rel.clone();
+    status.inflight_count = paths.len();
+    status.inflight_files = rel.clone();
     status.recent_files = rel;
     status.progress_percent = Some(65.0);
+    status.touch();
 
     match pipeline.index_batch(repo_root, paths) {
         Ok(stats) => {
+            let pending_note = if stats.vectors_pending > 0 {
+                format!(
+                    "; {} vector group{} pending retry",
+                    stats.vectors_pending,
+                    if stats.vectors_pending == 1 { "" } else { "s" }
+                )
+            } else {
+                String::new()
+            };
             status.message = format!(
-                "Indexed {} file{} ({} symbols, {} edges); removed {} file{}",
+                "Indexed {} file{} ({} symbols, {} edges); removed {} file{}{}",
                 stats.files_processed,
                 if stats.files_processed == 1 { "" } else { "s" },
                 stats.symbols_indexed,
                 stats.edges_resolved,
                 stats.files_removed,
                 if stats.files_removed == 1 { "" } else { "s" },
+                pending_note,
             );
             status.last_error = if stats.errors.is_empty() {
                 None
             } else {
                 Some(stats.errors.join("; "))
             };
+            // Never claim semantic completion while vectors are still pending
+            // (Requirement 2.6; preservation 3.5).
+            if stats.vectors_pending > 0 {
+                status.progress_percent = Some(90.0);
+            } else {
+                status.progress_percent = Some(100.0);
+            }
         }
         Err(err) => {
             status.message = format!("Indexing failed: {err}");
             status.last_error = Some(err.to_string());
+            status.progress_percent = Some(100.0);
         }
     }
-    status.progress_percent = Some(100.0);
+    // Overlay retained / in-flight work so completeness is observable.
+    status.apply_pipeline_work(&pipeline.work_snapshot());
+    // After a successful batch with no pending work, clear inflight.
+    if status.inflight_count == 0 && status.pending_count == 0 {
+        status.inflight_files.clear();
+        status.pending_files.clear();
+    }
     status.touch();
+
+    // Idle eviction: only after a measured idle interval with no pending /
+    // in-flight work. Best-effort; reload re-initializes via single-flight.
+    let _ = pipeline.try_idle_evict_model();
 }
 
 /// Fold one watcher event into the pending-change set, filtering ignored paths.
@@ -418,6 +492,10 @@ pub fn resolve_status_path(repo_root: &Path) -> PathBuf {
 
 /// Daemon status snapshot polled by IDE integrations. Field set mirrors the
 /// Python `_compose_status_payload` so the existing extension reader is happy.
+///
+/// Task 5.2 adds `pending_files` / `inflight_count` / `inflight_files` so the
+/// extension (`apps/cognis-vscode/src/indexd.ts`) can observe retained work and
+/// never treat omitted vectors as complete (Requirement 2.6).
 #[derive(Debug, Clone, Serialize)]
 pub struct DaemonStatus {
     pub pid: u32,
@@ -426,6 +504,14 @@ pub struct DaemonStatus {
     pub message: String,
     pub progress_percent: Option<f64>,
     pub pending_count: usize,
+    /// Repo-relative paths still waiting to be processed / whose vectors are
+    /// explicitly pending retry (capped for the status surface).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_files: Vec<String>,
+    /// Files currently mid index (in-flight work).
+    pub inflight_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inflight_files: Vec<String>,
     pub recent_files: Vec<String>,
     pub last_error: Option<String>,
     pub updated_at: f64,
@@ -440,6 +526,9 @@ impl DaemonStatus {
             message: message.to_string(),
             progress_percent: progress,
             pending_count: 0,
+            pending_files: Vec::new(),
+            inflight_count: 0,
+            inflight_files: Vec::new(),
             recent_files: Vec::new(),
             last_error: None,
             updated_at: 0.0,
@@ -468,6 +557,19 @@ impl DaemonStatus {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs_f64())
             .unwrap_or(0.0);
+    }
+
+    /// Overlay retained / in-flight work from the pipeline onto this snapshot
+    /// so completeness is observable (Requirement 2.6).
+    pub fn apply_pipeline_work(&mut self, work: &cognis_indexer::PipelineWorkSnapshot) {
+        // Prefer the pipeline's retained pending over a stale pre-batch count
+        // when the pipeline reports pending vector work.
+        if work.pending_count > 0 {
+            self.pending_count = work.pending_count;
+            self.pending_files = work.pending_files.clone();
+        }
+        self.inflight_count = work.inflight_count;
+        self.inflight_files = work.inflight_files.clone();
     }
 }
 
@@ -530,6 +632,7 @@ mod tests {
             "message",
             "progress_percent",
             "pending_count",
+            "inflight_count",
             "recent_files",
             "last_error",
             "updated_at",
@@ -538,6 +641,7 @@ mod tests {
         }
         assert_eq!(v["phase"], "watching");
         assert_eq!(v["active"], true);
+        assert_eq!(v["inflight_count"], 0);
     }
 
     #[test]

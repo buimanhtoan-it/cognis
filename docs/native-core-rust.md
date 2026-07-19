@@ -1,6 +1,11 @@
-# Native hot-path core — design (Rust)
+# Native hot-path core — archived migration design (Rust)
 
-> **Status:** decided — **Rust** is the native core language (§1.2). Slice A
+> **Historical document.** The migration is complete: the shipped engine is now
+> pure Rust. References below to Python, ctypes, wheels, or staged migration
+> surfaces describe the old transition and are not current install guidance.
+> Use [install.md](install.md) and [distribution.md](distribution.md).
+>
+> **Original status:** decided — **Rust** is the native core language (§1.2). Slice A
 > landed and is **measured**: Rust CSAR kernel + ctypes bridge + parity test
 > (6/6 pass) + benchmark showing **15–123× solver speedup at L1 = 0** vs the
 > Python push (§12). **Evidence discipline applies** (per

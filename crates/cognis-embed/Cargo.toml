@@ -7,6 +7,7 @@ description = "cognis embeddings: swappable Embedder/Reranker registry + ONNX ba
 
 [dependencies]
 cognis-core.workspace = true
+sha2.workspace = true
 
 # `onnx-local` backend (Task 6.2) — gated behind the `onnx` feature so the
 # default workspace build/test stays green with no ONNX Runtime native lib.

@@ -1,5 +1,9 @@
 # Release Notes — cognis v0.2.1
 
+> **Historical Python-era release.** The pip/prerequisite instructions below
+> are archival. Follow [install.md](install.md) for the current pure-Rust product
+> and Polar ZIP/source-build distribution.
+>
 > **Onboarding release.** Makes first-time setup in the VS Code / Cursor
 > extension safe and self-guiding: a prerequisite checklist with one-click
 > installs, no surprise `.cognis/` creation, and a `.gitignore` reminder.

@@ -8,7 +8,8 @@
 
 services:
   mcpd:
-    image: ghcr.io/buimanhtoan-it/cognis-engine:${COGNIS_VERSION:-0.4.0}
+    # Source-build only. Supply a root Dockerfile before using this design;
+    # Cognis does not publish a separate public prebuilt container channel.
     build:
       context: ..
       dockerfile: Dockerfile
@@ -37,7 +38,6 @@ services:
       retries: 3
 
   indexd:
-    image: ghcr.io/buimanhtoan-it/cognis-engine:${COGNIS_VERSION:-0.4.0}
     build:
       context: ..
       dockerfile: Dockerfile

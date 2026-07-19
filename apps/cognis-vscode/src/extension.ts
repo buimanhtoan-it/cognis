@@ -39,7 +39,6 @@ import {
 import { reconcileWorkspaceOnActivate } from "./reconcile";
 import { performHandshake } from "./handshake";
 import { handshakeWarning } from "./contract";
-import { enterLicenseKey, requireLicense } from "./license";
 import {
   addCognisToGitignore,
   shouldRemindGitignore,
@@ -59,7 +58,11 @@ import {
   setMcpEnabled,
 } from "./state";
 import type { PrerequisiteReport, SetupResult } from "./types";
-import { enableMcpForWorkspace, writeHttpMcpConfig } from "./mcpConfig";
+import {
+  enableMcpForWorkspace,
+  resolveSharingGate,
+  writeHttpMcpConfig,
+} from "./mcpConfig";
 import {
   getWorkspaceFolder,
   isWorkspaceConfigured,
@@ -312,12 +315,6 @@ async function reportSetupResult(result: SetupResult): Promise<void> {
 }
 
 async function runSetupWorkspace(): Promise<void> {
-  // Paid-feature gate. No-op (returns true) in the open-source/source build,
-  // which ships without an embedded license public key; only the prebuilt
-  // commercial build enforces this.
-  if (extensionContext && !(await requireLicense(extensionContext, "Set Up Workspace"))) {
-    return;
-  }
   try {
     const result = await withProgress("Cognis: Set Up Workspace", (p, t) =>
       setupWorkspace(p, t)
@@ -472,6 +469,12 @@ async function runCancelIndexing(): Promise<void> {
  * pre-flight the workspace, start the server, write the url-form mcp.json so the
  * editor connects to it, then tell the user exactly which file changed and that
  * a window reload is needed (offering the Reload button).
+ *
+ * Shared HTTP is gated (Requirement 2.9 / Property 10): the reversible
+ * sharing flag defaults OFF, and even when ON every required evidence check
+ * must pass. A closed/failed gate retains the compatible thin-proxy /
+ * per-repository-daemon stdio path with no data loss (preservation 3.8) —
+ * we never rewrite mcp.json to a dead or unapproved HTTP URL.
  */
 async function runStartMcpServer(): Promise<void> {
   const folder = getWorkspaceFolder();
@@ -493,9 +496,54 @@ async function runStartMcpServer(): Promise<void> {
     return;
   }
 
+  // Reversible sharing gate (default OFF). Keep sharing disabled until the
+  // flag is on *and* all evidence checks pass; fall back to the compatible
+  // stdio path with no data loss (Requirements 2.9, 3.8).
+  const gate = resolveSharingGate(repoRoot);
+  if (!gate.sharingEnabled) {
+    getOutputChannel().appendLine(
+      `[mcp-http] sharing gate closed — ${gate.summary}` +
+        (gate.fallbackReason ? ` (${gate.fallbackReason})` : "")
+    );
+    try {
+      // Ensure the editor-managed stdio (thin-proxy / heavy) path is present
+      // so MCP access is never disabled by a closed gate (preservation 3.8).
+      const { configPath } = await enableMcpForWorkspace(repoRoot);
+      setMcpEnabled(repoRoot, true);
+      await pollHealth();
+      const reason = gate.flagEnabled
+        ? "Shared HTTP gate checks have not all passed yet; Cognis kept the compatible stdio path (no data loss)."
+        : "Shared HTTP is disabled by default (cognis.mcpSharedHttpEnabled). Cognis kept the compatible thin-proxy / per-repository-daemon stdio path.";
+      await vscode.window.showInformationMessage(
+        `${reason} MCP config: ${configPath}.`
+      );
+    } catch (err) {
+      await showErrorGuidance(err, "Retain stdio MCP path");
+    }
+    return;
+  }
+
   try {
     const state = await startMcpServer(repoRoot);
     if (state.phase === "error" || !state.url) {
+      // Failed start must not leave the editor on a dead URL — fall back to
+      // the compatible stdio path with no data loss (preservation 3.8).
+      getOutputChannel().appendLine(
+        `[mcp-http] shared HTTP start failed; falling back to stdio: ${
+          state.lastError ?? "no URL"
+        }`
+      );
+      try {
+        await enableMcpForWorkspace(repoRoot);
+      } catch (fallbackErr) {
+        getOutputChannel().appendLine(
+          `[mcp-http] stdio fallback failed: ${
+            fallbackErr instanceof Error
+              ? fallbackErr.message
+              : String(fallbackErr)
+          }`
+        );
+      }
       await showErrorGuidance(
         new Error(state.lastError ?? "the server did not report a URL"),
         "Start MCP server"
@@ -503,7 +551,34 @@ async function runStartMcpServer(): Promise<void> {
       return;
     }
     // Make it usable: point the editor's mcp.json at the running server.
-    const { configPath } = writeHttpMcpConfig(repoRoot, state.url);
+    // writeHttpMcpConfig re-checks the gate (fail-closed).
+    const { configPath, written, gate: writeGate } = writeHttpMcpConfig(
+      repoRoot,
+      state.url
+    );
+    if (!written) {
+      // Gate flipped closed between resolve and write, or evidence vanished —
+      // stop the just-started server and retain stdio (no data loss).
+      getOutputChannel().appendLine(
+        `[mcp-http] gate refused HTTP config write — ${writeGate.summary}; reverting to stdio`
+      );
+      await stopMcpServer(repoRoot, { force: true });
+      try {
+        await enableMcpForWorkspace(repoRoot);
+      } catch (fallbackErr) {
+        getOutputChannel().appendLine(
+          `[mcp-http] stdio fallback failed: ${
+            fallbackErr instanceof Error
+              ? fallbackErr.message
+              : String(fallbackErr)
+          }`
+        );
+      }
+      await vscode.window.showWarningMessage(
+        "Shared HTTP gate closed during start; Cognis retained the compatible stdio path (no data loss)."
+      );
+      return;
+    }
     setMcpEnabled(repoRoot, true);
     trace.info("flow", "MCP server running", { url: state.url, configPath });
     await pollHealth();
@@ -516,6 +591,13 @@ async function runStartMcpServer(): Promise<void> {
       void vscode.commands.executeCommand("workbench.action.reloadWindow");
     }
   } catch (err) {
+    // Any unexpected failure: best-effort retain the stdio path so MCP stays
+    // available (preservation 3.8).
+    try {
+      await enableMcpForWorkspace(repoRoot);
+    } catch {
+      // already reporting the primary error below
+    }
     await showErrorGuidance(err, "Start MCP server");
   }
 }
@@ -532,7 +614,8 @@ async function runStopMcpServer(): Promise<void> {
   }
   const repoRoot = folder.uri.fsPath;
   trace.info("flow", "Stop MCP server requested", { repoRoot });
-  await stopMcpServer(repoRoot);
+  // Explicit user Stop — terminate regardless of the reference count.
+  await stopMcpServer(repoRoot, { force: true });
   let reverted = false;
   try {
     await enableMcpForWorkspace(repoRoot);
@@ -1219,8 +1302,6 @@ export function activate(context: vscode.ExtensionContext): void {
   safeRegister("cognis.pauseSync", () => runPauseSync());
 
   safeRegister("cognis.resumeSync", () => runResumeSync());
-
-  safeRegister("cognis.enterLicense", () => enterLicenseKey(context));
 
   safeRegister("cognis.installBackend", () => runInstallBackend());
 

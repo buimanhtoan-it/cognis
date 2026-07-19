@@ -1,55 +1,26 @@
-Cognis VS Code / Cursor Extension — Commercial License Agreement
-Copyright (c) 2026 ToanBui. All rights reserved.
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
 
-This software (the "Cognis extension", including its source code, compiled
-artifacts, and the generated .vsix package) is proprietary and commercial.
-It is licensed, not sold. By installing, copying, or using the extension you
-agree to the terms below.
+The Cognis VS Code / Cursor extension is part of the Cognis work and is
+licensed under the Apache License, Version 2.0. The complete license text is
+available in the repository root LICENSE file and at:
 
-1. Grant of license
-   Subject to payment of the applicable fee (where required) and to these
-   terms, the Licensor grants you a personal, non-exclusive, non-transferable,
-   revocable license to install and use the extension on devices you own or
-   control, for the number of seats covered by your purchase. A free or trial
-   tier, where offered, is licensed under these same terms for evaluation use.
+    https://www.apache.org/licenses/LICENSE-2.0
 
-2. Restrictions
-   Except to the extent permitted by mandatory applicable law, you may NOT:
-   (a) copy, redistribute, resell, sublicense, rent, lease, or lend the
-       extension or any license key;
-   (b) modify, adapt, translate, or create derivative works of the extension;
-   (c) reverse engineer, decompile, or disassemble the extension, or attempt to
-       derive its source code;
-   (d) remove or alter any proprietary notices, license keys, or licensing
-       checks; or
-   (e) use the extension to build a competing product.
+Copyright 2026 cognis maintainers
 
-3. Relationship to the open-source engine
-   The Cognis indexing/retrieval engine (the Python backend distributed
-   separately) is licensed under its own terms. THIS license governs only the
-   VS Code / Cursor extension in this directory and its packaged artifacts. The
-   open-source license of the engine does not grant any rights to this
-   extension.
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-4. Ownership
-   The extension is and remains the exclusive property of the Licensor. All
-   intellectual property rights, including the "Cognis" name and marks, are
-   reserved. No rights are granted except as expressly stated here.
+    http://www.apache.org/licenses/LICENSE-2.0
 
-5. Termination
-   This license terminates automatically if you breach any term. On termination
-   you must stop using and delete all copies of the extension.
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 
-6. Disclaimer of warranty
-   THE EXTENSION IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
-
-7. Limitation of liability
-   TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT SHALL THE LICENSOR BE
-   LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES, OR
-   FOR LOSS OF PROFITS, DATA, OR USE, ARISING OUT OF OR RELATED TO THE
-   EXTENSION, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
-
-8. Contact
-   Licensing inquiries: buimanhtoan.it@gmail.com
+A Polar purchase pays for the ready-to-install ZIP, packaging, delivery, and
+support. It does not grant a separate software license or unlock features.

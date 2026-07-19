@@ -1,5 +1,9 @@
 # Release Notes — cognis v0.2.0
 
+> **Historical Python-era release.** The install commands and runtime details
+> below are archival. Follow [install.md](install.md) for the current pure-Rust
+> product and Polar ZIP/source-build distribution.
+>
 > **Reliability release.** Fixes the cross-app failures that made semantic
 > search and live indexing appear broken in real editor sessions, and adds a
 > cross-app end-to-end test layer so those classes of bug can't regress

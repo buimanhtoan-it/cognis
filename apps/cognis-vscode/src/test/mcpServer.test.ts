@@ -8,13 +8,20 @@ import test from "node:test";
 
 import {
   STOPPED_STATE,
+  THIN_PROXY_ENV,
+  PROXY_TARGET_ENV,
+  buildBinaryThinProxyServerBlock,
   buildHttpMcpServerBlock,
   buildMcpUrl,
   buildMcpdHttpFlags,
+  buildMcpdProxyFlags,
   derivePort,
   getMcpServerState,
+  isHeavyStdioServerBlock,
   isHttpServerBlock,
   isMcpServerRunning,
+  isThinProxyServerBlock,
+  rewriteServerBlockToThinProxy,
   waitForBind,
 } from "../mcpServer";
 
@@ -111,6 +118,84 @@ test("isHttpServerBlock distinguishes url (http) from command (stdio) blocks", (
   assert.equal(isHttpServerBlock(undefined), false);
   assert.equal(isHttpServerBlock(null), false);
   assert.equal(isHttpServerBlock("nope"), false);
+});
+
+// ---------------------------------------------------------------------------
+// Thin stdio proxy mode (Task 7.1 / Requirements 2.8, 2.11).
+// ---------------------------------------------------------------------------
+
+test("buildMcpdProxyFlags emits --proxy and optional --proxy-target", () => {
+  assert.deepEqual(buildMcpdProxyFlags(), ["--proxy"]);
+  assert.deepEqual(buildMcpdProxyFlags("http://127.0.0.1:50123/mcp"), [
+    "--proxy",
+    "--proxy-target",
+    "http://127.0.0.1:50123/mcp",
+  ]);
+});
+
+test("buildBinaryThinProxyServerBlock is model-free (proxy args + env marker)", () => {
+  const env = { COGNIS_DB_PATH: "/repo/.cognis/uckg.db" };
+  const block = buildBinaryThinProxyServerBlock("/bin/cognis", env);
+  assert.equal(block.command, "/bin/cognis");
+  assert.deepEqual(block.args, ["mcpd", "--proxy"]);
+  assert.equal(block.env[THIN_PROXY_ENV], "1");
+  assert.equal(block.env.COGNIS_DB_PATH, "/repo/.cognis/uckg.db");
+  // No ONNX / model path is forced — the proxy inherits env but never loads it.
+  assert.equal(isThinProxyServerBlock(block), true);
+  assert.equal(isHeavyStdioServerBlock(block), false);
+});
+
+test("buildBinaryThinProxyServerBlock pins an explicit heavy target", () => {
+  const block = buildBinaryThinProxyServerBlock(
+    "/bin/cognis",
+    {},
+    "http://127.0.0.1:50123/mcp"
+  );
+  assert.deepEqual(block.args, [
+    "mcpd",
+    "--proxy",
+    "--proxy-target",
+    "http://127.0.0.1:50123/mcp",
+  ]);
+  assert.equal(block.env[PROXY_TARGET_ENV], "http://127.0.0.1:50123/mcp");
+});
+
+test("isThinProxyServerBlock detects args and env forms", () => {
+  assert.equal(isThinProxyServerBlock({ command: "c", args: ["mcpd", "--proxy"] }), true);
+  assert.equal(
+    isThinProxyServerBlock({ command: "c", args: ["mcpd", "--transport", "proxy"] }),
+    true
+  );
+  assert.equal(
+    isThinProxyServerBlock({
+      command: "c",
+      args: ["mcpd"],
+      env: { [THIN_PROXY_ENV]: "1" },
+    }),
+    true
+  );
+  assert.equal(isThinProxyServerBlock({ command: "c", args: ["mcpd"] }), false);
+  assert.equal(isThinProxyServerBlock({ type: "http", url: "http://x" }), false);
+});
+
+test("isHeavyStdioServerBlock excludes thin proxies and http blocks", () => {
+  assert.equal(isHeavyStdioServerBlock({ command: "c", args: ["mcpd"] }), true);
+  assert.equal(
+    isHeavyStdioServerBlock({ command: "c", args: ["mcpd", "--proxy"] }),
+    false
+  );
+  assert.equal(isHeavyStdioServerBlock({ type: "http", url: "http://x" }), false);
+});
+
+test("rewriteServerBlockToThinProxy is idempotent", () => {
+  const once = rewriteServerBlockToThinProxy(
+    { command: "/bin/cognis", args: ["mcpd"], env: { COGNIS_DB_PATH: "/db" } },
+    "/bin/cognis"
+  );
+  const twice = rewriteServerBlockToThinProxy(once, "/bin/cognis");
+  assert.deepEqual(twice.args, ["mcpd", "--proxy"]);
+  assert.equal(twice.env[THIN_PROXY_ENV], "1");
+  assert.equal(twice.env.COGNIS_DB_PATH, "/db");
 });
 
 

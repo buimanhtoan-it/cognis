@@ -513,7 +513,7 @@ export async function clearIndexAndReindex(
   // on Windows, where SQLite holds an exclusive lock while open) and so the
   // synchronous rebuild below owns the database.
   try {
-    await stopLiveIndexing(repoRoot);
+    await stopLiveIndexing(repoRoot, { force: true });
     setLiveIndexing(repoRoot, false);
   } catch (err) {
     output.appendLine(
@@ -643,7 +643,8 @@ export async function startLive(options?: {
 export async function stopLive(): Promise<void> {
   const folder = requireWorkspaceFolder();
   const repoRoot = folder.uri.fsPath;
-  await stopLiveIndexing(repoRoot);
+  // Explicit user Stop — terminate regardless of the reference count.
+  await stopLiveIndexing(repoRoot, { force: true });
   setLiveIndexing(repoRoot, false);
   syncIndexStatusFromDaemon(repoRoot);
 }
@@ -661,7 +662,8 @@ export async function pauseSync(): Promise<void> {
   const folder = requireWorkspaceFolder();
   const repoRoot = folder.uri.fsPath;
   setSyncPaused(repoRoot, true);
-  await stopLiveIndexing(repoRoot);
+  // Explicit user Pause — terminate regardless of the reference count.
+  await stopLiveIndexing(repoRoot, { force: true });
   setLiveIndexing(repoRoot, false);
   syncIndexStatusFromDaemon(repoRoot);
 }
@@ -902,8 +904,10 @@ export async function removeFromWorkspace(options?: {
 
   // 1. Stop the live-indexing daemon so the DB handle is released (Windows
   //    holds an exclusive SQLite lock while open) before we delete the dir.
+  //    Forced: removing the workspace must terminate the daemon regardless of
+  //    the reference count.
   try {
-    await stopLiveIndexing(repoRoot);
+    await stopLiveIndexing(repoRoot, { force: true });
   } catch (err) {
     output.appendLine(
       `[remove] stop indexing warning: ${err instanceof Error ? err.message : String(err)}`

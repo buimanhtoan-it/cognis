@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseEnviron, scopeRuntime } from "../mcpRuntime";
+import { isThinProxyProcess, parseEnviron, scopeRuntime, THIN_PROXY_ENV } from "../mcpRuntime";
 
 test("parseEnviron parses a NUL-separated environ blob", () => {
   const env = parseEnviron("COGNIS_DB_PATH=/repo/.cognis/uckg.db\0FOO=bar\0");
@@ -53,4 +53,60 @@ test("scopeRuntime reports zero scoped matches honestly (still scoped)", () => {
   );
   assert.equal(runtime.repoScoped, true);
   assert.equal(runtime.count, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Thin-proxy vs heavy classification (Task 7.1 / Requirement 2.11).
+// ---------------------------------------------------------------------------
+
+test("isThinProxyProcess detects env and command-line markers", () => {
+  assert.equal(
+    isThinProxyProcess({ pid: 1, env: { [THIN_PROXY_ENV]: "1" } }),
+    true
+  );
+  assert.equal(
+    isThinProxyProcess({
+      pid: 2,
+      commandLine: "cognis mcpd --proxy",
+    }),
+    true
+  );
+  assert.equal(
+    isThinProxyProcess({
+      pid: 3,
+      commandLine: "cognis mcpd --transport proxy",
+    }),
+    true
+  );
+  assert.equal(
+    isThinProxyProcess({ pid: 4, commandLine: "cognis mcpd" }),
+    false
+  );
+});
+
+test("scopeRuntime splits thin proxies from heavy daemons", () => {
+  const runtime = scopeRuntime(
+    [
+      {
+        pid: 10,
+        env: { COGNIS_DB_PATH: "/repo-a/.cognis/uckg.db", [THIN_PROXY_ENV]: "1" },
+      },
+      {
+        pid: 11,
+        env: { COGNIS_DB_PATH: "/repo-a/.cognis/uckg.db" },
+      },
+      {
+        pid: 12,
+        env: { COGNIS_DB_PATH: "/repo-b/.cognis/uckg.db" },
+        commandLine: "cognis mcpd --proxy",
+      },
+    ],
+    "/repo-a"
+  );
+  assert.equal(runtime.repoScoped, true);
+  assert.equal(runtime.count, 2);
+  assert.deepEqual(runtime.thinProxyPids, [10]);
+  assert.deepEqual(runtime.heavyPids, [11]);
+  assert.equal(runtime.thinProxyCount, 1);
+  assert.equal(runtime.heavyCount, 1);
 });

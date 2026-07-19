@@ -2,13 +2,14 @@
 
 Use this guide when semantic indexing or search is not working as expected.
 
-## The default backend does no network download
+## How model assets arrive
 
-The production embedder is `onnx-local`: it loads `bge-small-en-v1.5` from the
-checked-in `assets/models/` directory (or `COGNIS_ONNX_MODEL_DIR`) via the `ort`
-ONNX Runtime crate. There is **no Hugging Face download at runtime** and no
-Python — so the classic 401 / "Repository Not Found" download failures no longer
-apply.
+The production embedder is `onnx-local`. The Polar-bundled extension's managed
+installer downloads version-matched model assets from release infrastructure,
+verifies their SHA-256 sidecars, and sets `COGNIS_ONNX_MODEL_DIR`. Source builds
+must provide the same files locally; the large model binaries are not committed
+to Git. The engine itself does not run Python or import Hugging Face libraries
+at runtime.
 
 Relevant `.cognis/config.yaml`:
 

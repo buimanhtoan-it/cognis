@@ -17,6 +17,7 @@ sha2.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+proptest.workspace = true
 
 [features]
 # Forward the ONNX embedder backend down to cognis-embed so a release build of

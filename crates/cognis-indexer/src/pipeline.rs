@@ -5,7 +5,7 @@
 //! plugs into:
 //!
 //! ```text
-//! walk → parse (8.1) → enrich/scrub (8.2) → resolve edges (8.2) → write (8.2)
+//! walk Ã¢â€ â€™ parse (8.1) Ã¢â€ â€™ enrich/scrub (8.2) Ã¢â€ â€™ resolve edges (8.2) Ã¢â€ â€™ write (8.2)
 //! ```
 //!
 //! Rust mirror of `cognis_indexer.pipeline.IndexerPipeline`, scoped to the
@@ -13,14 +13,14 @@
 //! execution modes the Python pipeline does, plus a batch front-door for the
 //! daemon:
 //!
-//! * [`IndexerPipeline::index_repo`] — cold/full walk of a repository.
-//! * [`IndexerPipeline::index_changed_files`] — re-index a known set of paths,
+//! * [`IndexerPipeline::index_repo`] Ã¢â‚¬â€ cold/full walk of a repository.
+//! * [`IndexerPipeline::index_changed_files`] Ã¢â‚¬â€ re-index a known set of paths,
 //!   resolving cross-file edges against the union of those plus the symbols
 //!   still resident in the DB (so an edited caller still resolves into an
 //!   untouched callee).
-//! * [`IndexerPipeline::remove_file`] — drop a deleted file's symbols through
+//! * [`IndexerPipeline::remove_file`] Ã¢â‚¬â€ drop a deleted file's symbols through
 //!   the writer's cascade (inbound edges kept + flagged `meta.dst_missing`).
-//! * [`IndexerPipeline::index_batch`] — split one watcher batch into the
+//! * [`IndexerPipeline::index_batch`] Ã¢â‚¬â€ split one watcher batch into the
 //!   changed vs. deleted paths and apply the right operation to each.
 //!
 //! ## Edge-resolution scope (the count-parity lever)
@@ -35,7 +35,7 @@
 //!
 //! Symbol ids are content-hash-derived, so editing a symbol's body changes its
 //! id. On re-index of a file the pipeline upserts the new symbol set and then
-//! deletes the file's *stale* ids (old − new) via the writer cascade — the
+//! deletes the file's *stale* ids (old Ã¢Ë†â€™ new) via the writer cascade Ã¢â‚¬â€ the
 //! per-file diff the Python writer's `_write_file_sync` performs.
 //!
 //! ## Embeddings
@@ -46,11 +46,15 @@
 //! absent (the daemon's default until a production backend is wired) lexical +
 //! structural retrieval still work and semantic search is simply degraded.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
-use cognis_core::{Config, Result, Symbol};
-use cognis_embed::Embedder;
+use cognis_core::{Config, Result, SemanticWarmPolicy, Symbol};
+use cognis_embed::{
+    failure_cooldown_from_env, idle_evict_after_from_env, Embedder, EvictOutcome, ModelSlot,
+    DEFAULT_FAILURE_COOLDOWN, DEFAULT_IDLE_EVICT_AFTER,
+};
 use cognis_store::{Database, SymbolWriter};
 
 use crate::enricher::Enricher;
@@ -58,10 +62,10 @@ use crate::parser::{artifact::extract_artifact, parse_source};
 use crate::resolver::{resolve_edges, to_edges};
 use crate::writer::{FileWritePayload, IndexWriter};
 
-/// Extension → language label table the **walker** uses, mirroring the Python
+/// Extension Ã¢â€ â€™ language label table the **walker** uses, mirroring the Python
 /// `_LANG_BY_EXT` map (`pipeline.py`). This is intentionally narrower than the
 /// parser's [`language_for_path`](crate::parser::language_for_path) (which also
-/// accepts `.js`/`.jsx`/`.mjs`/…): the Python indexer only walks these six
+/// accepts `.js`/`.jsx`/`.mjs`/Ã¢â‚¬Â¦): the Python indexer only walks these six
 /// extensions, so for symbol/edge **count** parity the Rust walker must enumerate
 /// the same file set.
 const LANG_BY_EXT: &[(&str, &str)] = &[
@@ -99,7 +103,7 @@ pub enum ArtifactKind {
     Markdown,
 }
 
-/// Extension → [`ArtifactKind`] table the **artifact admission path** uses,
+/// Extension Ã¢â€ â€™ [`ArtifactKind`] table the **artifact admission path** uses,
 /// consulted only when [`detect_language`] misses. Matched case-insensitively
 /// via `to_ascii_lowercase`, exactly as [`detect_language`] lowercases the
 /// extension. No extension here appears in [`LANG_BY_EXT`], so the two tables
@@ -127,6 +131,10 @@ pub struct IndexStats {
     pub edges_resolved: usize,
     /// Symbols whose enricher flagged `secret_redacted`.
     pub secrets_redacted: usize,
+    /// Symbols whose required `symbol_vec` update is explicitly pending retry
+    /// (model unavailable / embed failure / eviction race). Never counted as
+    /// semantically complete (Requirement 2.6; preservation 3.5).
+    pub vectors_pending: usize,
     /// Human-readable, non-fatal per-file error strings.
     pub errors: Vec<String>,
 }
@@ -138,6 +146,7 @@ impl IndexStats {
         self.symbols_indexed += other.symbols_indexed;
         self.edges_resolved += other.edges_resolved;
         self.secrets_redacted += other.secrets_redacted;
+        self.vectors_pending += other.vectors_pending;
         self.errors.extend(other.errors);
     }
 }
@@ -149,33 +158,96 @@ struct FileResult {
     secrets_redacted: usize,
 }
 
+/// A file whose symbols were written lexically but whose vectors still need to
+/// be produced. Retained across load/failure/retry/eviction transitions so a
+/// required `symbol_vec` update is never silently dropped (Requirement 2.6).
+#[derive(Debug, Clone)]
+struct PendingVectorWork {
+    /// Repo-relative path (observability / status).
+    rel_path: String,
+    symbols: Vec<Symbol>,
+}
+
+/// Snapshot of retained / in-flight indexing work for the daemon status file.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PipelineWorkSnapshot {
+    /// Files currently being processed (in-flight).
+    pub inflight_count: usize,
+    pub inflight_files: Vec<String>,
+    /// Files whose vectors are explicitly pending retry.
+    pub pending_count: usize,
+    pub pending_files: Vec<String>,
+    /// Whether an ONNX/session is currently resident in the model slot.
+    pub model_loaded: bool,
+    /// Model-slot in-flight borrower count (0 when not Ready).
+    pub model_in_flight: usize,
+}
+
 /// End-to-end indexer orchestrator over a [`Database`].
 ///
 /// Construction is cheap (no walk, no connection until the first write). Clone
 /// the [`Database`] handle out via [`IndexerPipeline::database`] when a caller
 /// needs to read counts back (the connection is shared per-thread).
+///
+/// ## Embedder lifecycle (Task 5.2)
+///
+/// The embedder lives in a shared [`ModelSlot`]:
+/// * Eager open installs a Ready session up front (legacy / direct launch).
+/// * Lazy open leaves the slot Empty; first embedding demand single-flights a
+///   load; failures cool down before retry.
+/// * Idle eviction releases the session only after a measured idle interval
+///   with no pending/in-flight work; reload re-initializes via the same slot.
+/// * Failed embeds record the symbols as explicitly pending rather than
+///   reporting semantic completion for omitted vectors.
 pub struct IndexerPipeline {
     db: Database,
     config: Config,
     enricher: Enricher,
-    embedder: Option<Box<dyn Embedder>>,
+    /// Lazy single-flight model slot (shared shape with StoreEngine).
+    model: ModelSlot,
+    /// When true, embedding demand may load the configured backend via
+    /// [`cognis_embed::build_embedder`]. False for pure-lexical pipelines
+    /// (`new`) that never intend to embed.
+    allow_demand_load: bool,
+    /// Failure cooldown between load attempts.
+    failure_cooldown: Duration,
+    /// Idle interval before a Ready session may be released.
+    idle_evict_after: Duration,
+    /// Symbols whose vectors still need to be written (explicit pending).
+    pending_vectors: VecDeque<PendingVectorWork>,
+    /// Files currently mid index (for status observability).
+    inflight_files: Vec<String>,
+    /// Last time embedding work completed successfully (or the model was
+    /// touched). Used together with the slot's own last_used for idle checks.
+    last_embed_activity: Instant,
 }
 
 impl IndexerPipeline {
     /// Build a pipeline over an already-open [`Database`] with no embedder
     /// (lexical + structural only). Used by tests and the parity harness.
+    ///
+    /// Demand-load is disabled: this path never builds a production model.
     pub fn new(db: Database, config: Config) -> Self {
         IndexerPipeline {
             db,
             config,
             enricher: Enricher::new(),
-            embedder: None,
+            model: ModelSlot::empty(),
+            allow_demand_load: false,
+            failure_cooldown: DEFAULT_FAILURE_COOLDOWN,
+            idle_evict_after: DEFAULT_IDLE_EVICT_AFTER,
+            pending_vectors: VecDeque::new(),
+            inflight_files: Vec::new(),
+            last_embed_activity: Instant::now(),
         }
     }
 
     /// Build a pipeline with an optional embedder. When an embedder is present
     /// the `symbol_vec` dimension is reconciled to it up front (Requirement
     /// 2.3) so a model swap to a new vector size recreates the table.
+    ///
+    /// Demand-load is disabled: the caller supplied (or omitted) the embedder
+    /// explicitly. Used by tests that inject a deterministic backend.
     pub fn with_embedder(
         db: Database,
         config: Config,
@@ -192,28 +264,166 @@ impl IndexerPipeline {
             db,
             config,
             enricher: Enricher::new(),
-            embedder,
+            model: ModelSlot::from_optional(embedder),
+            allow_demand_load: false,
+            failure_cooldown: DEFAULT_FAILURE_COOLDOWN,
+            idle_evict_after: DEFAULT_IDLE_EVICT_AFTER,
+            pending_vectors: VecDeque::new(),
+            inflight_files: Vec::new(),
+            last_embed_activity: Instant::now(),
         })
     }
 
-    /// Open the database at `db_path` and build a pipeline.
+    /// Open the database at `db_path` and build a pipeline under the process
+    /// warm policy ([`SemanticWarmPolicy::from_env`]).
+    ///
+    /// Delegates to [`open_with_policy`](IndexerPipeline::open_with_policy).
+    /// Prefer that entry point when the caller already resolved the policy
+    /// (daemon entry points) so the resolution site is explicit and testable.
     ///
     /// Convenience for the `cognis-indexd` daemon so it can construct the native
     /// pipeline from a path + config without depending on `cognis-store`
-    /// directly. The embedder is built best-effort from `config.embedder`: a
-    /// backend that is unavailable in this build (e.g. `onnx-local` without the
-    /// feature, or the not-yet-ported `local` backend) degrades to *no
-    /// embedder* rather than failing the daemon — lexical/structural indexing
-    /// proceeds and semantic search is simply degraded.
+    /// directly. Under the Eager policy the embedder is built best-effort from
+    /// `config.embedder`: a backend that is unavailable in this build (e.g.
+    /// `onnx-local` without the feature, or the not-yet-ported `local`
+    /// backend) degrades to *no embedder* rather than failing the daemon Ã¢â‚¬â€
+    /// lexical/structural indexing proceeds and semantic search is simply
+    /// degraded. Under Lazy the embedder is left unbuilt so zero ONNX is
+    /// resident before demand (Requirement 2.4 / 2.6).
     pub fn open(db_path: &Path, config: Config) -> Result<Self> {
+        Self::open_with_policy(db_path, config, SemanticWarmPolicy::from_env())
+    }
+
+    /// Open the database at `db_path` and build a pipeline under an explicit
+    /// warm policy (Requirement 2.4; Correctness Property 5 / 7).
+    ///
+    /// * [`SemanticWarmPolicy::Eager`] Ã¢â‚¬â€ build the configured embedder up front
+    ///   (best-effort; unavailable backends degrade to Empty slot). This is the
+    ///   legacy / direct-launch behavior and the safe fallback for invalid env
+    ///   values.
+    /// * [`SemanticWarmPolicy::Lazy`] Ã¢â‚¬â€ leave the model slot Empty so zero
+    ///   ONNX/session is resident before demand. First embedding demand
+    ///   initializes via the single-flight [`ModelSlot`]; failed embeds are
+    ///   retained as explicitly pending and never reported complete.
+    pub fn open_with_policy(
+        db_path: &Path,
+        config: Config,
+        policy: SemanticWarmPolicy,
+    ) -> Result<Self> {
         let db = Database::open(db_path)?;
-        let embedder = cognis_embed::build_embedder(&config).ok();
-        Self::with_embedder(db, config, embedder)
+        // Eager: honor the historical up-front warm. Lazy: defer construction
+        // so the warm-policy env is actually consumed (bug facet
+        // `semanticWarmPolicyIsIgnoredOrInconsistent` / 2.6).
+        let embedder = if policy.is_eager() {
+            cognis_embed::build_embedder(&config).ok()
+        } else {
+            None
+        };
+        let mut db = db;
+        if let Some(emb) = embedder.as_ref() {
+            let dim = emb.embedding_dim();
+            if dim > 0 {
+                db.reconcile_embedding_dim(dim)?;
+            }
+        }
+        Ok(IndexerPipeline {
+            db,
+            config,
+            enricher: Enricher::new(),
+            model: ModelSlot::from_optional(embedder),
+            // Daemon / open path: demand may load the configured backend.
+            allow_demand_load: true,
+            failure_cooldown: failure_cooldown_from_env(),
+            idle_evict_after: idle_evict_after_from_env(),
+            pending_vectors: VecDeque::new(),
+            inflight_files: Vec::new(),
+            last_embed_activity: Instant::now(),
+        })
     }
 
     /// The underlying database handle (clones share the per-thread connection).
     pub fn database(&self) -> &Database {
         &self.db
+    }
+
+    /// True when a model session is currently resident.
+    pub fn model_loaded(&self) -> bool {
+        self.model.is_loaded()
+    }
+
+    /// Number of symbol groups whose vectors are explicitly pending retry.
+    pub fn pending_vector_groups(&self) -> usize {
+        self.pending_vectors.len()
+    }
+
+    /// Total symbols whose vectors are explicitly pending retry.
+    pub fn pending_vector_symbols(&self) -> usize {
+        self.pending_vectors.iter().map(|p| p.symbols.len()).sum()
+    }
+
+    /// Observability snapshot for the daemon status file (Requirement 2.6).
+    pub fn work_snapshot(&self) -> PipelineWorkSnapshot {
+        let pending_files: Vec<String> = self
+            .pending_vectors
+            .iter()
+            .map(|p| p.rel_path.clone())
+            .take(8)
+            .collect();
+        // Dedupe while preserving order for a stable status surface.
+        let mut seen = BTreeSet::new();
+        let pending_files: Vec<String> = pending_files
+            .into_iter()
+            .filter(|p| seen.insert(p.clone()))
+            .collect();
+        PipelineWorkSnapshot {
+            inflight_count: self.inflight_files.len(),
+            inflight_files: self.inflight_files.iter().take(8).cloned().collect(),
+            pending_count: self.pending_vectors.len(),
+            pending_files,
+            model_loaded: self.model.is_loaded(),
+            model_in_flight: self.model.in_flight_count(),
+        }
+    }
+
+    /// Override the idle-eviction interval (tests / daemon config).
+    pub fn set_idle_evict_after(&mut self, idle: Duration) {
+        self.idle_evict_after = idle;
+    }
+
+    /// Override the failure cooldown (tests / daemon config).
+    pub fn set_failure_cooldown(&mut self, cooldown: Duration) {
+        self.failure_cooldown = cooldown;
+    }
+
+    /// Attempt idle eviction of the resident model session.
+    ///
+    /// Refuses when:
+    /// * any model borrower is in flight,
+    /// * any vector work is still pending,
+    /// * any file is currently in-flight in this pipeline,
+    /// * the idle interval has not elapsed since last embed activity.
+    ///
+    /// Reload after eviction re-initializes via the same single-flight path on
+    /// the next demand.
+    pub fn try_idle_evict_model(&mut self) -> EvictOutcome {
+        if !self.pending_vectors.is_empty() {
+            return EvictOutcome::InFlight {
+                count: self.pending_vectors.len(),
+            };
+        }
+        if !self.inflight_files.is_empty() {
+            return EvictOutcome::InFlight {
+                count: self.inflight_files.len(),
+            };
+        }
+        let idle_for = self.last_embed_activity.elapsed();
+        if idle_for < self.idle_evict_after {
+            return EvictOutcome::NotIdle {
+                idle_for,
+                need: self.idle_evict_after,
+            };
+        }
+        self.model.try_idle_evict(self.idle_evict_after)
     }
 
     // ------------------------------------------------------------------
@@ -251,6 +461,7 @@ impl IndexerPipeline {
 
         // Pass 3: write each file's payload under its own transaction.
         for fr in &results {
+            self.inflight_files = vec![fr.rel_path.clone()];
             let edges = edges_by_file.get(&fr.rel_path).cloned().unwrap_or_default();
             self.write_file_diff(&fr.rel_path, &fr.symbols, edges.clone())?;
             stats.files_processed += 1;
@@ -258,7 +469,10 @@ impl IndexerPipeline {
             stats.edges_resolved += edges.len();
             stats.secrets_redacted += fr.secrets_redacted;
         }
+        self.inflight_files.clear();
 
+        // Drain any retained pending vectors once more after the write pass.
+        stats.vectors_pending = self.retry_pending_vectors();
         Ok(stats)
     }
 
@@ -280,9 +494,9 @@ impl IndexerPipeline {
                 continue;
             };
             // Admit the same two disjoint sets the cold walk admits (design
-            // §"Data flow"): Code_Files (unchanged) plus, when the artifact gate
-            // is open, Artifact_Files — so incremental re-index routes artifact
-            // symbols through the identical parse→enrich→write path as a full
+            // Ã‚Â§"Data flow"): Code_Files (unchanged) plus, when the artifact gate
+            // is open, Artifact_Files Ã¢â‚¬â€ so incremental re-index routes artifact
+            // symbols through the identical parseÃ¢â€ â€™enrichÃ¢â€ â€™write path as a full
             // index (Req 10.1). Code admission is untouched: a Code_File is still
             // admitted whenever `detect_language` hits, regardless of the
             // artifact gate.
@@ -299,6 +513,7 @@ impl IndexerPipeline {
             }
         }
         if results.is_empty() {
+            stats.vectors_pending = self.retry_pending_vectors();
             return Ok(stats);
         }
 
@@ -316,6 +531,7 @@ impl IndexerPipeline {
         let edges_by_file = resolve_grouped(&all_symbols, &owned);
 
         for fr in &results {
+            self.inflight_files = vec![fr.rel_path.clone()];
             let edges = edges_by_file.get(&fr.rel_path).cloned().unwrap_or_default();
             self.write_file_diff(&fr.rel_path, &fr.symbols, edges.clone())?;
             stats.files_processed += 1;
@@ -323,6 +539,8 @@ impl IndexerPipeline {
             stats.edges_resolved += edges.len();
             stats.secrets_redacted += fr.secrets_redacted;
         }
+        self.inflight_files.clear();
+        stats.vectors_pending = self.retry_pending_vectors();
 
         Ok(stats)
     }
@@ -336,6 +554,10 @@ impl IndexerPipeline {
         let Some(rel) = relativize(&abs, &repo_root) else {
             return Ok(stats);
         };
+
+        // Drop any pending vector work for this file so a delete cannot leave
+        // orphaned pending entries after the symbols are gone.
+        self.pending_vectors.retain(|p| p.rel_path != rel);
 
         let ids: Vec<String> = self
             .db
@@ -356,6 +578,11 @@ impl IndexerPipeline {
 
     /// Apply one debounced watcher batch: existing source paths are re-indexed
     /// together (one cross-file resolution pass), missing paths are removed.
+    ///
+    /// Every required `symbol_vec` update is written exactly once or left
+    /// explicitly pending (never reported complete when omitted). After the
+    /// batch, any previously retained pending vectors are retried while the
+    /// model is available.
     pub fn index_batch(&mut self, repo_root: &Path, paths: &[PathBuf]) -> Result<IndexStats> {
         let mut changed: Vec<PathBuf> = Vec::new();
         let mut removed: Vec<PathBuf> = Vec::new();
@@ -367,6 +594,14 @@ impl IndexerPipeline {
             }
         }
 
+        // Record in-flight paths for status observability before work starts.
+        let repo_root_canon = canonical(repo_root);
+        self.inflight_files = paths
+            .iter()
+            .filter_map(|p| relativize(&absolutize(p, &repo_root_canon), &repo_root_canon))
+            .take(8)
+            .collect();
+
         let mut stats = IndexStats::default();
         if !changed.is_empty() {
             stats.merge(self.index_changed_files(&changed, repo_root)?);
@@ -374,6 +609,11 @@ impl IndexerPipeline {
         for path in &removed {
             stats.merge(self.remove_file(path, repo_root)?);
         }
+
+        // Retry any retained pending vectors (from this batch or earlier).
+        stats.vectors_pending = self.retry_pending_vectors();
+        self.inflight_files.clear();
+        self.last_embed_activity = Instant::now();
         Ok(stats)
     }
 
@@ -385,13 +625,13 @@ impl IndexerPipeline {
     /// symbols (empty file), `Err` on read/decode failure.
     ///
     /// After decoding UTF-8, the file is routed to one of two stages, mirroring
-    /// the walker's fixed-order two-path admission (design §"Data flow"): a
+    /// the walker's fixed-order two-path admission (design Ã‚Â§"Data flow"): a
     /// Code_File (`detect_language` hits) goes to [`parse_source`]; an
     /// Artifact_File (`detect_artifact` hits, artifact gate open) goes to
     /// [`extract_artifact`] with its resolved [`ArtifactKind`]. Both return the
     /// same [`ParseOutput`] shape, so enrich/embed/write below stay identical
     /// regardless of file type (Req 10.1). The existing non-UTF-8 skip
-    /// (`String::from_utf8` → `Ok(None)`) covers both paths (Req 1.7).
+    /// (`String::from_utf8` Ã¢â€ â€™ `Ok(None)`) covers both paths (Req 1.7).
     fn parse_and_enrich(&self, abs: &Path, rel: &str) -> Result<Option<FileResult>> {
         let bytes = std::fs::read(abs)
             .map_err(|e| cognis_core::CognisError::Store(format!("read {}: {e}", abs.display())))?;
@@ -442,7 +682,7 @@ impl IndexerPipeline {
     }
 
     /// Write one file's symbols + edges, then delete the file's stale symbol
-    /// ids (old − new) so a removed/edited symbol does not linger.
+    /// ids (old Ã¢Ë†â€™ new) so a removed/edited symbol does not linger.
     fn write_file_diff(
         &mut self,
         rel_path: &str,
@@ -461,45 +701,191 @@ impl IndexerPipeline {
             .map(|s| s.id)
             .collect();
 
+        // Drop any prior pending work for this file Ã¢â‚¬â€ the new symbol set
+        // supersedes it (and stale ids are about to be deleted).
+        self.pending_vectors.retain(|p| p.rel_path != rel_path);
+
         let mut writer = IndexWriter::new(self.db.clone());
         writer.write_file(&FileWritePayload::new(symbols.to_vec(), edges))?;
         if !stale.is_empty() {
             writer.delete_symbols(&stale)?;
         }
-        // Persist embeddings for the file's symbols when an embedder is wired.
-        // Semantic search only returns hits once vectors exist in `symbol_vec`;
-        // this is the index-time half of that pipeline (the query-time half is
-        // the MCP server embedding the query + `vec_search`). Best-effort: an
-        // embedder failure degrades to lexical/structural rather than aborting
-        // the (already-committed) symbol/edge write.
-        self.embed_and_persist(symbols)?;
+        // Persist embeddings for the file's symbols when a model is available
+        // (or can be demand-loaded). Failed / unavailable embeds are retained
+        // as explicitly pending Ã¢â‚¬â€ never reported complete when omitted
+        // (Requirement 2.6; preservation 3.5).
+        self.embed_and_persist(rel_path, symbols)?;
         Ok(())
     }
 
-    /// Embed each symbol's text and upsert the vectors into `symbol_vec`.
-    ///
-    /// No-op when no embedder is configured. The embedding input mirrors the
-    /// lexical/semantic surface — qualified name + signature + docstring + body
-    /// excerpt — so a natural-language query embeds into the same space as the
-    /// indexed symbols. A batch embed failure is swallowed (semantic degrades
-    /// to empty) so indexing never fails on the orthogonal embedding step.
-    fn embed_and_persist(&mut self, symbols: &[Symbol]) -> Result<()> {
-        let Some(embedder) = self.embedder.as_ref() else {
-            return Ok(());
-        };
+    fn embed_and_persist(&mut self, rel_path: &str, symbols: &[Symbol]) -> Result<()> {
         if symbols.is_empty() {
             return Ok(());
         }
-        let texts: Vec<String> = symbols.iter().map(embedding_text).collect();
-        let vectors = match embedder.embed_batch(&texts) {
-            Ok(v) if v.len() == symbols.len() => v,
-            // Length mismatch or backend error: skip embeddings this pass, keep
-            // the lexical/structural index intact (graceful degradation).
-            _ => return Ok(()),
+
+        // Phase 1: obtain a model (or decide there is none / load failed).
+        // The borrow is fully released before we touch pending_vectors.
+        enum ModelOutcome {
+            Vectors(Vec<Vec<f32>>),
+            /// Semantic path is active but the model could not embed â€” pending.
+            NeedPending,
+            /// Pure-lexical pipeline; nothing to do and nothing pending.
+            NoSemantic,
+        }
+
+        let outcome = {
+            // Try a non-loading borrow first (already-Ready / injected).
+            let borrow = self.model.try_borrow().or_else(|| {
+                if !self.allow_demand_load {
+                    return None;
+                }
+                let config = self.config.clone();
+                let cooldown = self.failure_cooldown;
+                self.model
+                    .borrow_or_load(cooldown, || cognis_embed::build_embedder(&config))
+                    .ok()
+            });
+
+            match borrow {
+                None if !self.allow_demand_load => ModelOutcome::NoSemantic,
+                None => ModelOutcome::NeedPending,
+                Some(borrow) => {
+                    // Reconcile dimension on first successful demand load.
+                    let dim = borrow.embedder().embedding_dim();
+                    if dim > 0 {
+                        if let Err(e) = self.db.reconcile_embedding_dim(dim) {
+                            drop(borrow);
+                            return Err(e);
+                        }
+                    }
+                    let texts: Vec<String> = symbols.iter().map(embedding_text).collect();
+                    match borrow.embedder().embed_batch(&texts) {
+                        Ok(v) if v.len() == symbols.len() => {
+                            drop(borrow);
+                            ModelOutcome::Vectors(v)
+                        }
+                        _ => {
+                            // Length mismatch / backend error: keep lexical
+                            // intact and retain required vectors as pending.
+                            drop(borrow);
+                            ModelOutcome::NeedPending
+                        }
+                    }
+                }
+            }
         };
-        let rows: Vec<(String, Vec<f32>)> =
-            symbols.iter().map(|s| s.id.clone()).zip(vectors).collect();
-        self.db.upsert_embeddings(&rows)
+
+        match outcome {
+            ModelOutcome::NoSemantic => Ok(()),
+            ModelOutcome::NeedPending => {
+                self.record_pending(rel_path, symbols);
+                Ok(())
+            }
+            ModelOutcome::Vectors(vectors) => {
+                let rows: Vec<(String, Vec<f32>)> =
+                    symbols.iter().map(|s| s.id.clone()).zip(vectors).collect();
+                self.db.upsert_embeddings(&rows)?;
+                self.last_embed_activity = Instant::now();
+                Ok(())
+            }
+        }
+    }
+
+    /// Record symbols whose vectors still need to be written. Replaces any
+    /// existing pending entry for the same relative path.
+    fn record_pending(&mut self, rel_path: &str, symbols: &[Symbol]) {
+        if symbols.is_empty() {
+            return;
+        }
+        self.pending_vectors.retain(|p| p.rel_path != rel_path);
+        self.pending_vectors.push_back(PendingVectorWork {
+            rel_path: rel_path.to_string(),
+            symbols: symbols.to_vec(),
+        });
+    }
+
+    /// Retry retained pending vector work while a model is available.
+    ///
+    /// Returns the number of symbol groups still pending after the pass.
+    /// Does not invent completion: groups that still cannot embed stay pending.
+    fn retry_pending_vectors(&mut self) -> usize {
+        if self.pending_vectors.is_empty() {
+            return 0;
+        }
+
+        // Drain into a local queue so we can re-queue failures without holding
+        // a ModelBorrow across a mutable self borrow.
+        let mut remaining = VecDeque::new();
+        while let Some(work) = self.pending_vectors.pop_front() {
+            // Skip symbols that no longer exist in the DB (deleted meanwhile).
+            let live: Vec<Symbol> = match self.db.list_symbols() {
+                Ok(all) => {
+                    let ids: BTreeSet<&str> = work.symbols.iter().map(|s| s.id.as_str()).collect();
+                    all.into_iter()
+                        .filter(|s| ids.contains(s.id.as_str()))
+                        .collect()
+                }
+                Err(_) => work.symbols.clone(),
+            };
+            if live.is_empty() {
+                continue;
+            }
+
+            // Obtain vectors under a tight borrow scope, then drop before any
+            // further mutable bookkeeping on self.
+            let vectors: Option<Vec<Vec<f32>>> = {
+                let borrow = self.model.try_borrow().or_else(|| {
+                    if !self.allow_demand_load {
+                        return None;
+                    }
+                    let config = self.config.clone();
+                    let cooldown = self.failure_cooldown;
+                    self.model
+                        .borrow_or_load(cooldown, || cognis_embed::build_embedder(&config))
+                        .ok()
+                });
+                match borrow {
+                    None => None,
+                    Some(borrow) => {
+                        let texts: Vec<String> = live.iter().map(embedding_text).collect();
+                        match borrow.embedder().embed_batch(&texts) {
+                            Ok(v) if v.len() == live.len() => {
+                                drop(borrow);
+                                Some(v)
+                            }
+                            _ => {
+                                drop(borrow);
+                                None
+                            }
+                        }
+                    }
+                }
+            };
+
+            match vectors {
+                Some(v) => {
+                    let rows: Vec<(String, Vec<f32>)> =
+                        live.iter().map(|s| s.id.clone()).zip(v).collect();
+                    if self.db.upsert_embeddings(&rows).is_ok() {
+                        self.last_embed_activity = Instant::now();
+                        // Success â€” do not re-queue.
+                    } else {
+                        remaining.push_back(PendingVectorWork {
+                            rel_path: work.rel_path,
+                            symbols: live,
+                        });
+                    }
+                }
+                None => {
+                    remaining.push_back(PendingVectorWork {
+                        rel_path: work.rel_path,
+                        symbols: live,
+                    });
+                }
+            }
+        }
+        self.pending_vectors = remaining;
+        self.pending_vectors.len()
     }
 
     /// Walk `repo_root` yielding absolute paths of indexable source files,
@@ -552,11 +938,11 @@ fn walk_dir(dir: &Path, ignored: &BTreeSet<String>, config: &Config, out: &mut V
 /// Test/introspection accessor (Property 1, non-code-artifact-coverage): the
 /// repo-relative, forward-slash paths the walker admits for indexing under
 /// `config`, produced by the **real** [`walk_dir`] admission logic (both
-/// disjoint arms) and the same `relativize` the pipeline uses — but without the
+/// disjoint arms) and the same `relativize` the pipeline uses Ã¢â‚¬â€ but without the
 /// parse/enrich/write stages or a database.
 ///
 /// Exposed so the admission-exclusivity property test can observe routing
-/// directly (which files are admitted, and — by extension — through which
+/// directly (which files are admitted, and Ã¢â‚¬â€ by extension Ã¢â‚¬â€ through which
 /// path) instead of inferring it from persisted symbols, which the still-in-
 /// progress artifact extractors would confound. Only the ignore-set assembly is
 /// repeated from [`IndexerPipeline::walk_repo`]; the admission decision itself
@@ -671,7 +1057,7 @@ fn canonical(p: &Path) -> PathBuf {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
 }
 
-/// The text embedded for a symbol — qualified name + signature + docstring +
+/// The text embedded for a symbol Ã¢â‚¬â€ qualified name + signature + docstring +
 /// body excerpt, joined by newlines (empty parts dropped). Mirrors the fields
 /// the lexical FTS row carries, so a natural-language query lands in the same
 /// space as the indexed symbols.
@@ -762,8 +1148,8 @@ mod tests {
 
     /// A tiny deterministic embedder for the wiring tests: a bag-of-letters
     /// vector (26-d, one bucket per ascii letter, L2-normalised). No model, no
-    /// I/O, offline — distinct-enough that cosine ranking is meaningful, so the
-    /// index→persist→vec_search seam can be asserted without the ONNX backend.
+    /// I/O, offline Ã¢â‚¬â€ distinct-enough that cosine ranking is meaningful, so the
+    /// indexÃ¢â€ â€™persistÃ¢â€ â€™vec_search seam can be asserted without the ONNX backend.
     #[derive(Debug)]
     struct BagOfLettersEmbedder;
 
@@ -991,7 +1377,11 @@ mod tests {
         let db = mem_db();
         let mut pipe = IndexerPipeline::new(db.clone(), Config::default());
         pipe.index_repo(&repo, true).unwrap();
-        assert_eq!(db.vec_row_count().unwrap(), 0, "no embedder → no vectors");
+        assert_eq!(
+            db.vec_row_count().unwrap(),
+            0,
+            "no embedder Ã¢â€ â€™ no vectors"
+        );
         std::fs::remove_dir_all(&repo).ok();
     }
 
@@ -1082,7 +1472,7 @@ mod tests {
     fn detect_artifact_matches_ci_descriptor_names() {
         let mut config = Config::default();
         config.artifact.ci_descriptors = vec!["Dockerfile".to_string()];
-        // Descriptor-only name (no artifact extension) → classified Yaml (Req 1.2).
+        // Descriptor-only name (no artifact extension) Ã¢â€ â€™ classified Yaml (Req 1.2).
         assert_eq!(
             detect_artifact(Path::new("Dockerfile"), &config),
             Some(ArtifactKind::Yaml)
@@ -1091,7 +1481,7 @@ mod tests {
             detect_artifact(Path::new("service.dockerfile"), &config),
             Some(ArtifactKind::Yaml)
         );
-        // No descriptor configured → plain unknown name is not an artifact.
+        // No descriptor configured Ã¢â€ â€™ plain unknown name is not an artifact.
         let bare = Config::default();
         assert_eq!(detect_artifact(Path::new("Dockerfile"), &bare), None);
     }

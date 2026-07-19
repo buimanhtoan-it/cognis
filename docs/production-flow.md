@@ -10,12 +10,14 @@ working `cognis` environment.
 Use this path when you want VS Code or Cursor to handle setup and MCP
 configuration.
 
-1. Install and open the editor extension, then click **Install backend** in the
-   Cognis panel — it downloads the prebuilt `cognis` binary for your platform
-   (no terminal, no Python). To build the extension `.vsix` from source:
+1. Extract the single ZIP purchased from Polar and install its bundled `.vsix`,
+   or build the same extension from source for free:
    ```bash
    cd apps/cognis-vscode && npm install && npm run package
    ```
+   The Polar ZIP has no license key or activation. For a source build, run
+   `cargo build --release -p cognis --bin cognis --features onnx-download` and
+   set `cognis.binaryPath` to that local binary.
 2. Open the target repository in VS Code or Cursor.
 3. Run **Cognis: Set Up Workspace**.
 4. If the workspace later drifts, run **Cognis: Troubleshoot & Repair**.
@@ -28,9 +30,10 @@ extension workflow.
 Use this path when you prefer terminal commands or are configuring a tool that
 does not use the extension.
 
-1. Get the `cognis` binary — download a prebuilt release and put it on your
-   `PATH`, or build from source with `cargo build --release` (see
-   [install.md](install.md)).
+1. Build `cognis` from source with
+   `cargo build --release -p cognis --bin cognis --features onnx-download` and
+   put it on your `PATH` (see [install.md](install.md)). Standalone prebuilt binaries are not a
+   supported end-user distribution channel.
 2. Bootstrap the repository you want to index:
    ```bash
    cognis bootstrap .
@@ -44,24 +47,13 @@ does not use the extension.
    cognis indexd --repo-root .
    ```
 
-### Docker Compose workflow
+### Container workflow
 
-Use this path for a persistent self-hosted deployment.
-
-1. Prepare the workspace on the host:
-   ```bash
-   cognis bootstrap .
-   ```
-2. Start the services:
-   ```bash
-   docker compose -f deploy/compose.yaml up -d
-   ```
-3. Confirm health:
-   ```bash
-   cognis health
-   ```
-
-For detailed operational steps, see [operations.md](operations.md).
+Container deployment is source-built and is not another prebuilt distribution
+channel. The checked-in Compose file is a deployment design, but the current
+checkout does not include a root Dockerfile. Use the local CLI workflow unless
+you supply and maintain your own source-build image. See
+[operations.md](operations.md).
 
 ## Optional: skip embeddings on the first run
 

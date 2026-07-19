@@ -4,10 +4,11 @@ This guide gets one repository indexed and ready for use from an MCP client.
 
 ## Before you start
 
-Get the `cognis` binary as described in [install.md](install.md) — download a
-prebuilt release or run `cargo build --release`. Make sure `cognis` is on your
-`PATH` (or invoke it by full path). It is a single static binary with no Python
-runtime; the same binary serves the CLI, the MCP server, and the daemon.
+Build the `cognis` binary from source as described in [install.md](install.md),
+or use the managed engine installed by the `.vsix` inside the Polar ZIP. Polar's
+single ZIP is the only supported end-user prebuilt download; standalone CLI
+users build from source. The binary has no Python runtime and serves the CLI,
+MCP server, and daemon.
 
 ## Fastest path
 
@@ -124,16 +125,18 @@ cognis: retrieve_context_capsule(
 
 ## Optional: use the VS Code / Cursor extension
 
-If you want editor integration, install the extension and let it manage the
-backend binary:
+If you want editor integration, install the Polar-bundled extension or build it
+from source and let it manage the engine binary:
 
-1. build the extension package from `apps/cognis-vscode`:
+1. use the `.vsix` inside the Polar ZIP, or build the extension package from
+   `apps/cognis-vscode`:
    ```bash
    cd apps/cognis-vscode && npm install && npm run package
    ```
-2. install the generated `.vsix`
+2. install the bundled or generated `.vsix`
 3. open the target repository in the editor
-4. open the Cognis panel and click **Install backend**
+4. open the Cognis panel and click **Install engine**, or set
+   `cognis.binaryPath` to your source-built binary
 5. run **Cognis: Set Up Workspace**
 
 See [../apps/cognis-vscode/README.md](../apps/cognis-vscode/README.md) for the
@@ -170,4 +173,4 @@ This keeps the index up to date as files change.
 
 - [install.md](install.md) for installation details and troubleshooting
 - [mcp-client-config.md](mcp-client-config.md) for client-specific configuration
-- [operations.md](operations.md) for Docker-based deployment
+- [operations.md](operations.md) for source-built container deployment status

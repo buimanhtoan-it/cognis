@@ -7,15 +7,24 @@
 //!
 //! ## Semantic leg (query-time half of the embedding pipeline)
 //!
-//! [`StoreEngine::open`] loads `.cognis/config.yaml` (relative to the DB) and
-//! builds the configured embedder best-effort via `cognis_embed::build_embedder`
-//! (`embedder.backend`, default `local` → ONNX). When an embedder is present
-//! **and** `symbol_vec` is populated (the indexer's index-time half ran), the
-//! server embeds the query and runs a KNN over the vector index; otherwise the
-//! semantic leg degrades to empty — the same graceful behaviour the Python
-//! server has when the vector index is unpopulated. A build without the `onnx`
-//! feature (or with the model assets absent) simply yields no embedder, so the
-//! server still serves lexical + structural retrieval.
+//! [`StoreEngine::open`] / [`StoreEngine::open_with_policy`] load
+//! `.cognis/config.yaml` (relative to the DB) and wire a lazy
+//! [`cognis_embed::ModelSlot`]:
+//!
+//! * [`SemanticWarmPolicy::Eager`] — warm the slot up front (best-effort) so
+//!   the legacy / direct-launch path still maps the model at open.
+//! * [`SemanticWarmPolicy::Lazy`] — leave the slot empty so **zero** ONNX
+//!   session is resident before demand. Concurrent first demand coalesces into
+//!   one single-flight load; failures enter a bounded cooldown; in-flight
+//!   borrows refuse eviction (Requirement 2.5; Correctness Property 6).
+//!
+//! When an embedder is present **and** `symbol_vec` is populated (the indexer's
+//! index-time half ran), the server embeds the query and runs a KNN over the
+//! vector index; otherwise the semantic leg degrades to empty — the same
+//! graceful behaviour the Python server has when the vector index is
+//! unpopulated. A build without the `onnx` feature (or with the model assets
+//! absent) simply fails the factory once and cools down, so the server still
+//! serves lexical + structural retrieval.
 //!
 //! The same type also backs the **contract e2e fixture**: [`in_memory_fixture`]
 //! seeds a `:memory:` UCKG with a small, deterministic call graph so the live
@@ -26,9 +35,10 @@
 //! [`in_memory_fixture`]: StoreEngine::in_memory_fixture
 
 use std::path::Path;
+use std::time::Duration;
 
-use cognis_core::{Config, Hit, Result, Symbol};
-use cognis_embed::Embedder;
+use cognis_core::{Config, Hit, Result, SemanticWarmPolicy, Symbol};
+use cognis_embed::{failure_cooldown_from_env, Embedder, ModelSlot, DEFAULT_FAILURE_COOLDOWN};
 use cognis_store::{Database, SymbolStore};
 
 use crate::engine::RetrievalEngine;
@@ -36,9 +46,27 @@ use crate::engine::RetrievalEngine;
 /// A [`RetrievalEngine`] backed by a `cognis-store` UCKG database.
 pub struct StoreEngine {
     db: Database,
-    /// The configured embedder, when one could be built for this process. When
-    /// `None` the semantic leg degrades to empty (lexical/structural only).
-    embedder: Option<Box<dyn Embedder>>,
+    /// Lazy single-flight embedder slot (Requirement 2.5).
+    ///
+    /// * Under [`SemanticWarmPolicy::Lazy`] the slot starts empty — zero ONNX
+    ///   resident before demand; first semantic demand loads via single-flight.
+    /// * Under [`SemanticWarmPolicy::Eager`] the slot is warmed in
+    ///   [`open_with_policy`](StoreEngine::open_with_policy) (best-effort).
+    /// * Fixture / injected engines use [`ModelSlot::empty`] or
+    ///   [`ModelSlot::from_optional`].
+    ///
+    /// `semantic_available()` probes `is_loaded()` only (never triggers a load).
+    /// Semantic demand goes through [`ModelSlot::borrow_or_load`]; load
+    /// failures and an empty slot degrade to an empty semantic leg (never a
+    /// hard tool error).
+    model: ModelSlot,
+    /// Config used by the on-demand factory (loaded at open). Default for
+    /// fixture / injected engines.
+    embedder_config: Config,
+    /// Failure cooldown between load attempts (env-resolved at open).
+    failure_cooldown: Duration,
+    /// When false, demand never calls the factory (fixture / pure-lexical).
+    allow_demand_load: bool,
     /// Whether additive integration-edge capsule context is enabled
     /// (`config.artifact.integration_edge_context`, default `false`). Threaded
     /// from the loaded config in [`open`](StoreEngine::open); `false` for the
@@ -52,39 +80,86 @@ impl StoreEngine {
     pub fn new(db: Database) -> Self {
         StoreEngine {
             db,
-            embedder: None,
+            model: ModelSlot::empty(),
+            embedder_config: Config::default(),
+            failure_cooldown: DEFAULT_FAILURE_COOLDOWN,
+            allow_demand_load: false,
             integration_edge_context: false,
         }
     }
 
     /// Build an engine over `db` with an explicit embedder (dependency-injected
-    /// in tests; also the shape [`open`](StoreEngine::open) constructs).
+    /// in tests).
+    ///
+    /// `Some(e)` seeds a ready [`ModelSlot`]; `None` leaves the slot empty.
+    /// Demand-load is disabled: the caller supplied (or omitted) the embedder
+    /// explicitly.
     pub fn with_embedder(db: Database, embedder: Option<Box<dyn Embedder>>) -> Self {
         StoreEngine {
             db,
-            embedder,
+            model: ModelSlot::from_optional(embedder),
+            embedder_config: Config::default(),
+            failure_cooldown: DEFAULT_FAILURE_COOLDOWN,
+            allow_demand_load: false,
             integration_edge_context: false,
         }
     }
 
     /// Open the UCKG at `path` (runs migrations) and build an engine over it,
-    /// wiring the configured embedder for the semantic leg.
+    /// wiring the configured embedder for the semantic leg according to the
+    /// process warm policy ([`SemanticWarmPolicy::from_env`]).
     ///
-    /// The config is loaded from `<repo>/.cognis/config.yaml` inferred from the
-    /// DB path (`<repo>/.cognis/uckg.db`), falling back to defaults when it
-    /// can't be located. The embedder is built best-effort: an unavailable
-    /// backend (e.g. `onnx` not compiled in, or model assets missing) degrades
-    /// to no embedder rather than failing the server to start. The
-    /// `artifact.integration_edge_context` flag is threaded from the same
-    /// config to gate additive integration-edge capsule context (default off).
+    /// Delegates to [`open_with_policy`](StoreEngine::open_with_policy). Prefer
+    /// that entry point when the caller already resolved the policy (daemon
+    /// entry points) so the resolution site is explicit and testable.
     pub fn open(path: &str) -> Result<Self> {
+        Self::open_with_policy(path, SemanticWarmPolicy::from_env())
+    }
+
+    /// Open the UCKG at `path` and build an engine under an explicit warm
+    /// policy (Requirement 2.4 / 2.5; Correctness Properties 5–6).
+    ///
+    /// * [`SemanticWarmPolicy::Eager`] — warm the [`ModelSlot`] up front
+    ///   (best-effort; unavailable backends leave the slot Empty / Failed with
+    ///   cooldown, equivalent to the historical `.ok()` degradation). This is
+    ///   the legacy / direct-launch behavior and the safe fallback for invalid
+    ///   env values.
+    /// * [`SemanticWarmPolicy::Lazy`] — leave the slot empty so zero
+    ///   ONNX/session is resident before demand. First semantic demand
+    ///   initializes via single-flight; concurrent waiters share the outcome;
+    ///   load failures cool down before retry. Until then the semantic leg
+    ///   degrades to empty (same empty-degradation contract as "no embedder").
+    ///
+    /// Non-semantic retrieval (FTS / structural / lookup / diffuse / capsule)
+    /// never waits on ONNX under either policy (preservation 3.3). Semantic
+    /// hits and error envelopes remain equivalent for the same
+    /// repo/DB/fingerprint/query once the embedder is present (preservation
+    /// 3.4).
+    pub fn open_with_policy(path: &str, policy: SemanticWarmPolicy) -> Result<Self> {
         let db = Database::open(path)?;
         let config = config_for_db(path);
-        let embedder = cognis_embed::build_embedder(&config).ok();
+        let integration_edge_context = config.artifact.integration_edge_context;
+        let failure_cooldown = failure_cooldown_from_env();
+
+        // Eager: honor the historical up-front warm via a best-effort factory
+        // call, then seed the slot. Lazy: start Empty so zero ONNX is resident
+        // before demand (bug facets `semanticWarmPolicyIsIgnoredOrInconsistent`
+        // and `processLoadsDuplicateModelWithoutDemand`).
+        let model = if policy.is_eager() {
+            let embedder = cognis_embed::build_embedder(&config).ok();
+            ModelSlot::from_optional(embedder)
+        } else {
+            ModelSlot::empty()
+        };
+
         Ok(StoreEngine {
             db,
-            embedder,
-            integration_edge_context: config.artifact.integration_edge_context,
+            model,
+            embedder_config: config,
+            failure_cooldown,
+            // Daemon / open path: demand may load the configured backend.
+            allow_demand_load: true,
+            integration_edge_context,
         })
     }
 
@@ -97,14 +172,27 @@ impl StoreEngine {
     }
 
     /// Load all symbols once (milestone hydration path).
-    ///
-    /// `hydrate` / `lookup` / `dependency_trace` read the full symbol/edge set
-    /// and resolve in-memory. This is correct and simple for the migration
-    /// milestone; the indexed point-read primitives land with the store's
-    /// read-surface completion. The contract e2e runs on a tiny fixture, so the
-    /// O(n) scan is immaterial here.
     fn all_symbols(&self) -> Result<Vec<Symbol>> {
         self.db.list_symbols()
+    }
+
+    /// Borrow the embedder for a semantic call, loading on demand (single-flight).
+    ///
+    /// Returns `None` when the slot cannot supply an embedder (empty + no
+    /// demand-load, cooldown, or factory failure) — the empty-degradation
+    /// contract (never a hard tool error).
+    fn demand_embedder(&self) -> Option<cognis_embed::ModelBorrow<'_>> {
+        if let Some(b) = self.model.try_borrow() {
+            return Some(b);
+        }
+        if !self.allow_demand_load {
+            return None;
+        }
+        let config = self.embedder_config.clone();
+        let cooldown = self.failure_cooldown;
+        self.model
+            .borrow_or_load(cooldown, || cognis_embed::build_embedder(&config))
+            .ok()
     }
 }
 
@@ -114,19 +202,20 @@ impl RetrievalEngine for StoreEngine {
     }
 
     fn semantic_search(&self, query: &str, k: usize) -> Result<Vec<Hit>> {
-        // Query-time half of the semantic pipeline: embed the query with the
-        // configured embedder, then KNN over the persisted `symbol_vec`.
-        // Degrades to empty (never errors the tool) when no embedder is wired,
-        // the query is blank, or the embedder fails — mirroring the Python
-        // server's behaviour when the vector index / model is unavailable.
-        let Some(embedder) = self.embedder.as_ref() else {
+        // Query-time half of the semantic pipeline: demand the embedder
+        // (single-flight load under Lazy; already Ready under Eager), embed the
+        // query, then KNN over the persisted `symbol_vec`. Degrades to empty
+        // (never errors the tool) when the slot cannot supply an embedder, the
+        // query is blank, or the embedder fails — mirroring the Python server's
+        // behaviour when the vector index / model is unavailable.
+        let Some(borrow) = self.demand_embedder() else {
             return Ok(Vec::new());
         };
         let q = query.trim();
         if q.is_empty() || k == 0 {
             return Ok(Vec::new());
         }
-        let query_vec = match embedder.embed_text(q) {
+        let query_vec = match borrow.embedder().embed_text(q) {
             Ok(v) => v,
             Err(_) => return Ok(Vec::new()),
         };
@@ -245,8 +334,10 @@ impl RetrievalEngine for StoreEngine {
 
     fn semantic_available(&self) -> bool {
         // Semantic is usable only when both halves of the pipeline are present:
-        // an embedder to embed the query, and a populated `symbol_vec` to search.
-        self.embedder.is_some() && self.db.vec_row_count().map(|n| n > 0).unwrap_or(false)
+        // a *currently resident* embedder (is_loaded — never triggers a load),
+        // and a populated `symbol_vec` to search. Under Lazy this stays false
+        // until first demand warms the slot (Requirement 2.5; preservation 3.3).
+        self.model.is_loaded() && self.db.vec_row_count().map(|n| n > 0).unwrap_or(false)
     }
 
     fn integration_edge_context(&self) -> bool {
@@ -480,5 +571,127 @@ pub(crate) mod tests {
             assert!(h.evidence.get("on_path").is_some());
             assert!(h.evidence.get("ppr_score").is_some());
         }
+    }
+
+    /// Lazy policy: open leaves the slot empty; first semantic demand warms it.
+    #[test]
+    fn lazy_open_defers_load_until_semantic_demand() {
+        use cognis_store::SymbolWriter;
+
+        let dir = std::env::temp_dir().join(format!(
+            "cognis-slot-lazy-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join(".cognis")).unwrap();
+        std::fs::write(
+            dir.join(".cognis").join("config.yaml"),
+            "embedder:\n  backend: stub\n  dim: 8\n",
+        )
+        .unwrap();
+        let db_path = dir.join(".cognis").join("uckg.db");
+        {
+            use cognis_core::{Symbol, SymbolKind};
+            let mut db = Database::open(&db_path).unwrap();
+            let sym = Symbol {
+                id: "python:src/a.py:a.f@1".into(),
+                kind: SymbolKind::Function,
+                name: "f".into(),
+                qualified_name: "a.f".into(),
+                language: "python".into(),
+                module: "a".into(),
+                file_path: "src/a.py".into(),
+                line_start: 1,
+                line_end: 2,
+                signature: None,
+                docstring: None,
+                content_hash: "x".into(),
+                body_excerpt: Some("f body".into()),
+                semantic_summary: None,
+                risk_score: 0.0,
+                ambiguous: false,
+                untrusted_flags: Vec::new(),
+                updated_at: 1,
+            };
+            db.upsert_symbols(std::slice::from_ref(&sym)).unwrap();
+            db.reconcile_embedding_dim(8).unwrap();
+            db.upsert_embeddings(&[(sym.id, vec![1.0; 8])]).unwrap();
+        }
+
+        let engine =
+            StoreEngine::open_with_policy(db_path.to_str().unwrap(), SemanticWarmPolicy::Lazy)
+                .expect("open lazy");
+        assert!(
+            !engine.semantic_available(),
+            "Lazy open must not map a model before demand"
+        );
+        // First demand loads the stub via single-flight.
+        let _ = engine.semantic_search("f", 5).unwrap();
+        assert!(
+            engine.semantic_available(),
+            "after demand the slot must be Ready and vectors are present"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Eager policy: open warms the slot so semantic is available immediately
+    /// when vectors are present.
+    #[test]
+    fn eager_open_warms_slot_up_front() {
+        let dir = std::env::temp_dir().join(format!(
+            "cognis-slot-eager-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join(".cognis")).unwrap();
+        std::fs::write(
+            dir.join(".cognis").join("config.yaml"),
+            "embedder:\n  backend: stub\n  dim: 8\n",
+        )
+        .unwrap();
+        let db_path = dir.join(".cognis").join("uckg.db");
+        {
+            use cognis_core::{Symbol, SymbolKind};
+            use cognis_store::SymbolWriter;
+            let mut db = Database::open(&db_path).unwrap();
+            let sym = Symbol {
+                id: "python:src/a.py:a.f@1".into(),
+                kind: SymbolKind::Function,
+                name: "f".into(),
+                qualified_name: "a.f".into(),
+                language: "python".into(),
+                module: "a".into(),
+                file_path: "src/a.py".into(),
+                line_start: 1,
+                line_end: 2,
+                signature: None,
+                docstring: None,
+                content_hash: "x".into(),
+                body_excerpt: Some("f body".into()),
+                semantic_summary: None,
+                risk_score: 0.0,
+                ambiguous: false,
+                untrusted_flags: Vec::new(),
+                updated_at: 1,
+            };
+            db.upsert_symbols(std::slice::from_ref(&sym)).unwrap();
+            db.reconcile_embedding_dim(8).unwrap();
+            db.upsert_embeddings(&[(sym.id, vec![1.0; 8])]).unwrap();
+        }
+
+        let engine =
+            StoreEngine::open_with_policy(db_path.to_str().unwrap(), SemanticWarmPolicy::Eager)
+                .expect("open eager");
+        assert!(
+            engine.semantic_available(),
+            "Eager open must warm the slot so semantic is available with zero tool calls"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

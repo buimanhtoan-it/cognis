@@ -19,39 +19,39 @@ flow** of code that plain embedding search misses.
 
 Everything runs on your machine. Your code is never uploaded anywhere.
 
-> **This extension is the control panel.** The actual indexing/search engine is
-> a small Python backend — the extension installs and manages it for you in one
-> click. All you may need is Python 3.11+ on your machine.
+> **This extension is the control panel.** The indexing/search engine is one
+> self-contained Rust `cognis` binary. No Python, `pip`, or virtual environment
+> is required.
 
 ---
 
 ## Setup (do this once)
 
-The only thing you may need is **Python 3.11+** on your machine. Everything else
-is one click.
+Choose one distribution path:
 
-### Step 1 — Make sure Python 3.11+ is available
+- **Prebuilt:** buy one versioned ZIP from Polar and install the `.vsix` inside
+  it. Polar does not deliver a separate VSIX, license key, or activation.
+- **Source:** clone the public repository and run
+  `cargo build --release -p cognis --bin cognis --features onnx-download`, then
+  package this extension with `npm install` and `npm run package`. Set
+  `cognis.binaryPath` to the source-built `cognis` binary.
 
-```bash
-python --version
-```
+Both paths provide the same functionality under Apache-2.0. The Polar purchase
+pays for the ready-to-install package and delivery, not feature access.
 
-If it's missing or below 3.11, install it from
-[python.org](https://www.python.org/downloads/) (on Windows, keep the default
-"Add Python to PATH" option checked). Cognis will find it automatically.
+### Step 1 — Install the engine
 
-### Step 2 — Install the backend (one click)
+With the Polar build, open the **Cognis sidebar panel** and click **Install
+engine**. Cognis fetches the matching release-managed Rust binary and semantic
+model, verifies their SHA-256 checksums, and stores them privately. With a
+source build, set `cognis.binaryPath` to `target/release/cognis` (or
+`cognis.exe`) and provide local model assets as described in
+[`assets/models/README.md`](../../assets/models/README.md).
 
-Open the **Cognis sidebar panel** and click **Install backend**. Cognis
-downloads the prebuilt, self-contained `cognis` engine binary for your platform
-from the GitHub Release, checksum-verifies it, and stores it privately — no
-terminal, no `pip`, no Python, no compiler. When it finishes the panel advances
-on its own.
-
-### Step 3 — Set up the workspace
+### Step 2 — Set up the workspace
 
 Click **Set Up Workspace** in the panel (Cognis also offers this right after the
-backend installs), or run **Cognis: Set Up Workspace** from the Command Palette
+engine installs), or run **Cognis: Set Up Workspace** from the Command Palette
 (`Ctrl/Cmd+Shift+P`).
 
 This single action:
@@ -102,11 +102,14 @@ client to the same workspace? Use **Connect MCP**:
   wired yet, or
 - run **Cognis: Connect MCP (write mcp.json)** from the Command Palette.
 
-Cognis writes the real workspace `mcp.json` for your detected editor and **opens
-it** so you can see exactly what changed, then offers a one-click **Reload
-Window**. For wiring a client Cognis didn't write to (a custom MCP host), the
-reference guide format — collected environment, the exact `mcpServers` JSON, and
-per-host reload steps — is still available.
+Cognis writes the real **workspace** `mcp.json` for your detected editor by
+default (`cognis.mcpConfigScope = workspace`) and **opens it** so you can see
+exactly what changed, then offers a one-click **Reload Window**. Workspace scope
+avoids host × repository idle daemon fan-out from a global multi-repo config.
+For wiring a client Cognis didn't write to (a custom MCP host), the reference
+guide format — collected environment, the exact `mcpServers` JSON, and per-host
+reload steps — is still available in the repo docs.
+
 
 ---
 
@@ -143,9 +146,10 @@ on large repos.
 ## Removing Cognis
 
 Cognis writes to three places: the local `.cognis/` index inside each repo, your
-editor's MCP config (global `~/.cursor/mcp.json` by default, shared across
-repos), and the Python backend it installed for you. The panel's **Danger zone**
-(bottom of the sidebar) cleans these up — no terminal needed:
+editor's MCP config (workspace `mcp.json` by default; global host config only if
+you opt into `cognis.mcpConfigScope = global`), and the managed engine binary +
+model it installed for you. The panel's **Danger zone** (bottom of the sidebar)
+cleans these up — no terminal needed:
 
 - **Remove from this workspace** — stops indexing, removes *this repo's* MCP
   entry, and deletes this repo's `.cognis/`. Other indexed repos keep working.
@@ -156,7 +160,8 @@ repos), and the Python backend it installed for you. The panel's **Danger zone**
   with nothing left behind.
   Command: **Cognis: Remove Everything (Prepare for Uninstall)**.
 
-Both leave your **source code** untouched.
+Both leave your **source code** untouched. Non-Cognis MCP servers are preserved.
+
 
 ---
 
@@ -168,10 +173,12 @@ wiring, and indexing, then tells you the next step.
 
 | Symptom | Fix |
 | --- | --- |
-| "Install the Cognis backend" | Click **Install backend** in the panel — Cognis sets it up automatically. |
-| "Cognis backend not ready" | Click **Install backend** (or **Reinstall backend**) in the panel. |
+| "Install the Cognis engine" | Click **Install engine** in the panel — Cognis sets it up automatically. |
+| "Cognis engine not ready" | Click **Install engine** (or **Reinstall engine**) in the panel. |
 | AI tools don't appear in chat | Reload your editor / MCP host. If still missing, run **Troubleshoot & Repair**. |
+| Many idle Cognis/`mcpd` processes or high RAM | Keep `cognis.mcpConfigScope=workspace` and `cognis.mcpStdioMode=proxy`; migrate/remove stale global `cognis-*` entries only for closed repos. See [MCP client setup](https://github.com/buimanhtoan-it/cognis/blob/main/docs/mcp-client-config.md). |
 | Indexing or config errors | Run **Troubleshoot & Repair**; open **Cognis: Show Output** for details. |
+
 | Degraded health | Open **Cognis: Show Health**, then **Troubleshoot & Repair**. |
 | Filing a bug report | Run **Cognis: Show Diagnostics Log** — a structured JSON trace of every flow, command, and backend call (with timings) you can attach. Set `cognis.logLevel` to `debug` for more detail. |
 
@@ -188,7 +195,11 @@ Diagnostics Log**, and the health report.
 | `cognis.autoStartLiveIndexing` | `true` | Start live indexing during auto-manage. |
 | `cognis.autoIndexOnFileChange` | `true` | Re-index automatically when you save files. |
 | `cognis.promptBeforeMcpWrite` | `true` | Confirm before writing MCP config during auto-manage. |
-| `cognis.mcpHost` | `auto` | Target host for generated MCP config (`auto`, `cursor`, `vscode`, `claude`). |
+| `cognis.mcpHost` | `auto` | Target host for generated MCP config (`auto`, `cursor`, `vscode`, `kiro`, `claude`). |
+| `cognis.mcpConfigScope` | `workspace` | Write MCP config inside the repo (default) or opt in to global host config (fan-out risk). |
+| `cognis.mcpStdioMode` | `proxy` | Thin model-free stdio proxy to one heavy daemon per repo (`heavy` = legacy per-connection daemon). |
+| `cognis.mcpSharedHttpEnabled` | `false` | Reversible shared-HTTP gate (default OFF; failed checks keep thin-proxy stdio). |
+| `cognis.mcpWarmSemanticOnStartup` | `false` | Generated config explicitly sets lazy ONNX loading (`COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP=0`); enable for eager `=1`. Direct launches with the variable absent remain eager. |
 | `cognis.pollHealthSeconds` | `30` | Health refresh interval while indexing runs. |
 | `cognis.mcpSoftTimeoutSeconds` | `0` | Override `COGNIS_MCP_SOFT_TIMEOUT_S`; `0` keeps defaults. |
 | `cognis.mcpHardTimeoutSeconds` | `0` | Override `COGNIS_MCP_HARD_TIMEOUT_S`; `0` keeps defaults. |
@@ -197,7 +208,10 @@ Diagnostics Log**, and the health report.
 | `cognis.logLevel` | `info` | Verbosity of the diagnostics log (**Cognis: Show Diagnostics Log**). Use `debug` to capture every CLI call + command with timings when filing an issue. |
 
 On Windows, generated MCP config uses a safer automatic timeout budget for the
-first semantic query unless you override these explicitly.
+first semantic query unless you override these explicitly. Workspace scope +
+thin proxy are the defaults that avoid idle host × repository process fan-out.
+Details: [docs/mcp-client-config.md](https://github.com/buimanhtoan-it/cognis/blob/main/docs/mcp-client-config.md).
+
 
 ---
 
@@ -210,13 +224,19 @@ first semantic query unless you override these explicitly.
 - **Untrusted content tagged.** Comments and docstrings are marked untrusted
   before reaching the model.
 - Every MCP tool call is logged locally to `.cognis/audit.log` (hashed args).
+- Shared HTTP (optional, gate default OFF) is loopback-bound with repository
+  identity and model-fingerprint checks; see
+  [docs/security.md](https://github.com/buimanhtoan-it/cognis/blob/main/docs/security.md).
+
 
 ---
 
 ## Requirements
 
 - VS Code 1.85+ or Cursor (any MCP-capable editor).
-- Python 3.11+ available on your machine (the backend installs in one click).
+- Network access on first managed install, or a local source-built engine and
+  semantic model assets.
+- Rust stable and Node.js 18+ only when building from source.
 - Languages indexed today: **TypeScript / JavaScript, Python, Go, C#, Java**.
 
 ---
@@ -226,7 +246,7 @@ first semantic query unless you override these explicitly.
 - **Source, docs & issues:** [github.com/buimanhtoan-it/cognis](https://github.com/buimanhtoan-it/cognis)
 - **How CSAR works (the math):** [docs/csar.md](https://github.com/buimanhtoan-it/cognis/blob/main/docs/csar.md)
 - **MCP client setup:** [docs/mcp-client-config.md](https://github.com/buimanhtoan-it/cognis/blob/main/docs/mcp-client-config.md)
-- **License:** Commercial — see [LICENSE.txt](LICENSE.txt)
+- **License:** Apache-2.0 — see [LICENSE.txt](LICENSE.txt)
 
 ---
 

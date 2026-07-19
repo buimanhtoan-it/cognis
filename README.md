@@ -176,54 +176,46 @@ Threat model: [docs/security.md](docs/security.md).
 
 ## Install
 
-**One-click prebuilt build (recommended).** Install the `.vsix`, open the Cognis
-panel, click **Install backend**, then **Set Up Workspace**. The extension
-downloads the single prebuilt `cognis` binary for your platform (checksum
-verified) — no terminal, no Python, no `pip`.
-[**Buy Cognis Pro**](https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW)
-and you're running in two minutes; follow the `INSTALL.md` in your download.
+Cognis has two supported paths:
 
-**Prebuilt binary (no build tools).** Download the `cognis` binary for your
-platform from the [latest release](https://github.com/buimanhtoan-it/cognis/releases),
-verify its `.sha256` sidecar, put it on your `PATH`, and run:
-
-```bash
-cognis bootstrap .   # init + index + health
-cognis mcpd          # start the MCP server (stdio)
-```
-
-The binary is fully self-contained: SQLite is bundled, and no Python runtime is
-required. The same file dispatches every surface — `cognis cli …`,
-`cognis mcpd`, `cognis indexd` — busybox-style.
-
-**From source (for experts).** Requires the [Rust toolchain](https://rustup.rs)
-(stable) and Git. No Python needed.
+1. **Buy the ready-to-install ZIP from Polar.** The Polar File Download benefit
+   contains one versioned ZIP with the VS Code / Cursor `.vsix`, `INSTALL.md`,
+   and the Apache-2.0 license. Install the bundled `.vsix`, open the Cognis
+   panel, click **Install engine**, then **Set Up Workspace**. There is no
+   license key, activation, or feature gate.
+   [**Buy the prebuilt ZIP on Polar**](https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW).
+2. **Build the same software from source for free.** Clone this repository,
+   build the Rust engine, then optionally package the editor extension:
 
 ```bash
 git clone https://github.com/buimanhtoan-it/cognis && cd cognis
-cargo build --release            # builds the single `cognis` binary
-./target/release/cognis bootstrap .   # init + index + health
-./target/release/cognis mcpd          # start the MCP server (stdio)
+cargo build --release -p cognis --bin cognis --features onnx-download
+cd apps/cognis-vscode
+npm install
+npm run package
 ```
 
-Point any MCP client at the `cognis` binary's `mcpd` surface (see
-[docs/mcp-client-config.md](docs/mcp-client-config.md)). Re-index from scratch
-with `cognis index --clear .`. Keep an index live with
-`cognis indexd --repo-root .`.
+The source-built engine is `target/release/cognis` (`cognis.exe` on Windows).
+Set `cognis.binaryPath` to that file when using a source-built extension, or
+point any MCP client at its `mcpd` surface. The binary is fully self-contained
+apart from the optional semantic model assets described in
+[`assets/models/README.md`](assets/models/README.md); SQLite is bundled and no
+Python runtime is required.
+
+The Polar purchase pays for prebuilding, packaging, delivery, and support. It
+does not unlock extra software features. GitHub provides source, tags,
+documentation, and release infrastructure; the supported end-user prebuilt
+download is the single ZIP delivered by Polar.
 
 See [docs/getting-started.md](docs/getting-started.md),
 [docs/install.md](docs/install.md), and
-[docs/distribution.md](docs/distribution.md) for fresh-machine, build-matrix,
-and `sqlite-vec` details.
+[docs/distribution.md](docs/distribution.md) for complete setup details.
 
-## Self-hosted (Docker)
+## Self-hosted containers
 
-```bash
-export WORKSPACE_HOST_PATH=/path/to/your/codebase
-docker compose -f deploy/compose.yaml up -d
-```
-
-See [docs/operations.md](docs/operations.md).
+Container deployment must be built from the public source checkout; it is not a
+separate prebuilt product channel. See [docs/operations.md](docs/operations.md)
+for the current source-build status and prerequisites.
 
 ## Current scope
 
@@ -260,9 +252,10 @@ The VS Code / Cursor extension (`apps/cognis-vscode`, TypeScript) is built with
 
 ## License
 
-The **engine** (this repo) is Apache-2.0 — see [`LICENSE`](LICENSE). The
-**prebuilt VS Code / Cursor build** is a separate commercial product — see
-[`apps/cognis-vscode/LICENSE.txt`](apps/cognis-vscode/LICENSE.txt).
+Cognis source code and distributed builds, including the VS Code / Cursor
+extension and the Polar ZIP, are licensed under Apache-2.0. See
+[`LICENSE`](LICENSE). A Polar purchase is payment for the ready-to-install
+package and delivery, not for a separate software license or feature unlock.
 
 ## Links
 

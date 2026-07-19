@@ -499,7 +499,7 @@ export function resetHarness(repoRoot: string, options: ConfigureOptions = {}): 
       // Keep all MCP writes inside the temp repo so tests never touch $HOME.
       mcpHost: "cursor",
       mcpConfigScope: "workspace",
-      mcpWarmSemanticOnStartup: true,
+      mcpWarmSemanticOnStartup: false,
       ...(options.config?.cognis ?? {}),
     },
   };

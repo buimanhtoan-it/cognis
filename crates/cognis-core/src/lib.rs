@@ -11,14 +11,26 @@ pub mod contract;
 pub mod error;
 pub mod graph;
 pub mod hit;
+pub mod identity;
+pub mod lease;
 pub mod models;
+pub mod warm_policy;
 
 pub use config::Config;
 pub use contract::{handshake_payload, CLI_COMMANDS, CONTRACT_VERSION, MCP_TOOLS};
 pub use error::{CognisError, Result};
 pub use graph::CodeGraph;
 pub use hit::Hit;
+pub use identity::{
+    canonicalize_path, verify_repo_attachment, verify_repo_wire_key, AttachmentDecision,
+    RepoIdentity, DB_PATH_ENV, REPO_IDENTITY_HEADER, REPO_ROOT_ENV,
+};
+pub use lease::{
+    acquire_or_attach, lease_path, resolve_repo_root_from_env, AcquireOutcome, LeaseGuard,
+    LeaseRecord, LeaseRole, DEFAULT_LEASE_TTL,
+};
 pub use models::{Edge, EdgeKind, FileRecord, ParseStatus, Symbol, SymbolAttribute, SymbolKind};
+pub use warm_policy::{SemanticWarmPolicy, WARM_SEMANTIC_ENV};
 
 #[cfg(test)]
 mod tests {

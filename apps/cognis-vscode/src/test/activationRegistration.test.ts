@@ -230,10 +230,6 @@ const stubModules: Record<string, any> = {
   "./reconcile": { reconcileWorkspaceOnActivate: async () => {} },
   "./handshake": { performHandshake: async () => undefined },
   "./contract": { handshakeWarning: () => undefined },
-  "./license": {
-    enterLicenseKey: async () => {},
-    requireLicense: async () => true,
-  },
   "./gitignore": {
     addCognisToGitignore: () => undefined,
     shouldRemindGitignore: () => false,
@@ -356,7 +352,6 @@ const EXPECTED_COMMANDS = [
   "cognis.cancelIndexing",
   "cognis.pauseSync",
   "cognis.resumeSync",
-  "cognis.enterLicense",
   "cognis.installBackend",
   "cognis.removeFromWorkspace",
   "cognis.prepareUninstall",

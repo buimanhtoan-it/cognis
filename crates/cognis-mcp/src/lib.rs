@@ -31,5 +31,17 @@ pub use audit::AuditLog;
 pub use caps::Caps;
 pub use engine::RetrievalEngine;
 pub use errors::{error_envelope, is_error_envelope, McpError};
+pub use http::{
+    is_loopback_host, BindOptions, HttpServeConfig, RouteCredential, ALLOW_REMOTE_ENV,
+    ROUTE_CREDENTIAL_ENV, ROUTE_CREDENTIAL_HEADER,
+};
 pub use server::McpServer;
 pub use store_engine::StoreEngine;
+
+// Re-export isolation types so daemon entry points can configure attachment
+// verification without reaching into cognis-core / cognis-embed directly.
+pub use cognis_core::{
+    verify_repo_attachment, verify_repo_wire_key, AttachmentDecision, RepoIdentity,
+    REPO_IDENTITY_HEADER,
+};
+pub use cognis_embed::{session_reuse_allowed, ModelFingerprint, MODEL_FINGERPRINT_HEADER};

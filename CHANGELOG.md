@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> Current distribution policy: Cognis source and distributed builds are
+> Apache-2.0. Polar delivers one ready-to-install ZIP with no license key,
+> activation, feature gate, or separate VSIX benefit. Older entries describing
+> commercial extension licensing or Ed25519 activation are historical and have
+> been retired.
+
 ## [0.8.4]
 
 ### Added
@@ -103,6 +109,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   static SQLite test asset, not a Python dependency).
 
 ## [Unreleased]
+
+### Fixed
+
+- **0.8.9 preparation — MCP process / RAM duplication (topology + lifecycle).** Idle multi-host /
+  multi-repo setups could spawn host × repository heavy `mcpd` processes and map
+  ONNX in each, driving high aggregate private bytes (recorded defect snapshot:
+  6 `mcpd` + 2 `indexd` ≈ 154 MiB private bytes each ≈ 1.23 GiB on one Windows
+  topology — baseline, not a universal claim). The fix defaults MCP config to
+  **workspace scope**, migrates global Cognis entries with atomic write +
+  timestamped backup + verified rollback, consumes
+  `COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP` in the Rust engine (eager `1` / lazy `0`
+  / absent→eager legacy), makes extension-generated config explicitly **lazy by
+  default**, switches StoreEngine and IndexerPipeline to **lazy single-flight**
+  ONNX with failure cooldown and in-flight-safe eviction, adds **cross-process
+  repository leases** with heartbeat and safe orphan reclaim, and defaults
+  editor stdio to a **model-free thin proxy** with shared HTTP behind a
+  reversible gate (default OFF; failed gate keeps stdio with no data loss).
+  Loopback bind, scoped credentials, repository-identity checks, and
+  model-fingerprint isolation guard shared routes. Eight MCP tool shapes and
+  `CONTRACT_VERSION` stay unchanged unless intentionally bumped in lockstep.
+  Private-byte / process-cardinality measurement lives under
+  `tests/e2e/private-bytes/`. Current private-byte evidence covers only the
+  **model-free/lazy topology**; it does not establish the equivalent ONNX-loaded
+  median target of ≤ **0.615 GiB**. That remains an **acceptance target** for a
+  named hardware/build/topology (`n ≥ 5`), **not** a result claimed as achieved.
+  See `docs/mcp-client-config.md`, `docs/security.md`,
+  `docs/development-criteria.md`, and `docs/e2e-testing.md`.
 
 ### Removed
 
@@ -955,7 +988,7 @@ First commercial release of the VS Code / Cursor extension.
   cold-start model loads no longer fail with a follow-up soft-timeout after the
   semantic stage already completed.
 
-[Unreleased]: https://github.com/buimanhtoan-it/cognis/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/buimanhtoan-it/cognis/compare/v0.8.8...HEAD
 [0.3.2]: https://github.com/buimanhtoan-it/cognis/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/buimanhtoan-it/cognis/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/buimanhtoan-it/cognis/compare/v0.2.1...v0.3.0

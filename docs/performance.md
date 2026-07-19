@@ -86,10 +86,20 @@ caches matter:
 2. **Indexer embedder LRU (LocalEmbedder)** — keyed on symbol `content_hash`
    during indexing; separate from query-time embedding.
 
-Loading the ONNX model into memory can still take time on the **first** call.
-`cognis mcpd` reuses a process-wide embedder and semantic layer, so warm queries
-avoid repeated model construction, but operators should still keep the MCP server
-as a long-lived process and avoid frequent restarts.
+Loading the ONNX model into memory can still take time on the **first** demand
+(or at process open under eager policy). `cognis mcpd` reuses a process-wide
+embedder and semantic layer once loaded, so warm queries avoid repeated model
+construction, but operators should still keep the MCP server as a long-lived
+process and avoid frequent restarts.
+
+Warm policy is controlled by `COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP` (see
+[mcp-client-config.md](mcp-client-config.md#eager-vs-lazy-semantic-startup)):
+
+| Value | Effect on cold path |
+| --- | --- |
+| `0` (lazy) | Model maps on first semantic demand (single-flight); idle private bytes stay lower until then |
+| `1` (eager) | Model maps at open; first semantic call avoids the load hitch |
+| absent | Eager (legacy / direct-launch) |
 
 The remaining cold-start risk is **initial model load**, especially on Windows.
 Generated MCP config now includes safer default values for
@@ -106,10 +116,11 @@ override them when an editor needs a larger startup budget.
 - Identical **MCP search tool** arguments (`symbol_search`, `semantic_search`,
   `discover_symbols`) are cached in-process for 60 seconds by default
   (`COGNIS_MCP_CACHE_TTL_S`), skipping repeated embedder and hydration work.
-- Expect the **first** semantic query after server start to be slow; treat
-  later queries as the steady-state budget (< 100 ms semantic target on a
-  warm index). `cognis-mcpd` also does a best-effort background semantic warm-up
-  on startup, but agents should still tolerate one cold-start interval.
+- Expect the **first** semantic query after a lazy start (or after idle eviction)
+  to pay model load; treat later queries as the steady-state budget (< 100 ms
+  semantic target on a warm index). Eager mode (`COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP=1`)
+  shifts that cost to process open. Agents should still tolerate one cold-start
+  interval.
 - Set `COGNIS_DB_PATH` once in MCP config so every tool hits the same index
   without rediscovery overhead.
 
@@ -168,6 +179,26 @@ When performance degrades, common checks include:
 - verify the database is on fast local storage
 - confirm the embedder and vector backend are available as expected
 - measure cold-start versus warm-cache behavior separately
+- prefer workspace MCP scope + thin-proxy stdio when idle process count or private bytes climb
+
+## Process cardinality and private bytes
+
+Latency is not the only resource signal. Idle multi-process topologies can
+inflate private bytes by mapping ONNX in every `mcpd`/`indexd`. Acceptance
+measurement for process cardinality and private bytes is documented in
+[`tests/e2e/private-bytes/README.md`](../tests/e2e/private-bytes/README.md) and
+indexed in [development-criteria.md](development-criteria.md).
+
+Important labeling rules (preservation of evidence discipline):
+
+- Distinguish **process cardinality**, **idle private bytes**, **active-load
+  peak private bytes**, model mappings, and run variance.
+- Windows private bytes over the process tree are authoritative for the recorded
+  defect baseline (~1.23 GiB aggregate on one multi-process idle topology).
+- The median **target** of ≤ 0.615 GiB on an equivalent stabilized-idle
+  reproduction is a **gate target**, not a claim that every machine already
+  achieves it. Publish only measured medians for named hardware/build/topology
+  with `n ≥ 5` clean runs, labeled **empirical**.
 
 ## Known gaps
 
@@ -181,6 +212,8 @@ Additional gaps:
   timings require pointing the bench at an indexed DB via `COGNIS_DIFFUSE_DB`.
 - Cold-start latency still depends heavily on local hardware, disk cache, and
   Windows model-load characteristics.
+- Private-byte / process-cardinality medians are machine-specific; re-run the
+  private-bytes harness when claiming progress against the 0.615 GiB target.
 
 ## Future work
 

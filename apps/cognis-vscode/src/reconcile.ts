@@ -5,6 +5,7 @@ import {
   enableMcpForWorkspace,
   hasExpectedMcpConfigForRepo,
   isHttpMcpConfiguredForRepo,
+  isLiveSharedHttpAllowed,
 } from "./mcpConfig";
 import { isMcpServerRunning } from "./mcpServer";
 import { isSyncPaused, setAutoManaged, setMcpEnabled } from "./state";
@@ -156,19 +157,30 @@ export async function reconcileWorkspaceOnActivate(
 
   setAutoManaged(repoRoot, true);
 
-  // A standalone HTTP MCP server is per-session: if a previous session left an
-  // http-form mcp.json but no server is running now, the editor would point at
-  // a dead URL. Fall back to the editor-managed stdio config so the tools keep
-  // working; the user can click Start again to switch back to http on demand.
-  if (isHttpMcpConfiguredForRepo(repoRoot) && !isMcpServerRunning(repoRoot)) {
-    try {
-      await enableMcpForWorkspace(repoRoot);
-      channel.appendLine(
-        "[reconcile] Reverted a dangling HTTP MCP config to stdio (server not running)."
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      channel.appendLine(`[reconcile] could not revert HTTP MCP config: ${message}`);
+  // Shared HTTP is only valid while the reversible sharing gate is open
+  // (Requirement 2.9 / Property 10). A closed/failed gate, or a previous
+  // session that left an http-form mcp.json with no server running, must
+  // fall back to the editor-managed stdio path so tools keep working with
+  // no data loss (preservation 3.8). The user can re-open the gate (flag
+  // ON + evidence) and click Start again to switch back to http on demand.
+  if (isHttpMcpConfiguredForRepo(repoRoot)) {
+    const serverRunning = isMcpServerRunning(repoRoot);
+    const sharingAllowed = isLiveSharedHttpAllowed(repoRoot);
+    if (!serverRunning || !sharingAllowed) {
+      try {
+        await enableMcpForWorkspace(repoRoot);
+        const why = !sharingAllowed
+          ? "sharing gate closed/failed"
+          : "server not running";
+        channel.appendLine(
+          `[reconcile] Reverted HTTP MCP config to stdio (${why}; no data loss).`
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        channel.appendLine(
+          `[reconcile] could not revert HTTP MCP config: ${message}`
+        );
+      }
     }
   }
 

@@ -6,23 +6,25 @@ definition of "done".
 
 `cognis` is a single static binary — no Python, no `pip`, no virtual environment.
 
-The recommended path is:
+Choose one distribution path:
 
-1. get the `cognis` binary (download a prebuilt release or build from source)
-2. install the VS Code / Cursor extension
-3. open the repository you want to index
-4. run **Cognis: Set Up Workspace**
-5. verify that MCP tools are available
+1. buy the single ready-to-install ZIP from Polar, or
+2. clone the public repository and build the same software from source for free.
+
+The Polar ZIP is the only supported end-user prebuilt download. It contains the
+editor `.vsix`, `INSTALL.md`, and Apache-2.0 license; it does not require a
+license key or activation. GitHub Releases may provide checksum-verified engine
+and model assets used by the managed installer, but they are not a separate
+supported product download.
 
 ## Before You Start
 
 You need:
 
-- The `cognis` binary for your platform (prebuilt download) **or** the
-  [Rust toolchain](https://rustup.rs) + Git to build it from source
-- VS Code or Cursor (for the editor path)
-- Node.js 18 or newer only if you build the extension `.vsix` locally
-- about 200 MB of free disk space for the binary and the local embedding model
+- VS Code or Cursor for the editor path
+- network access for the managed install, or local engine/model assets
+- Rust stable, Git, and Node.js 18+ only when building from source
+- about 200 MB of free disk space for the binary and local embedding model
 
 ## Two Folders Matter
 
@@ -48,30 +50,33 @@ this is the simplest route.
 
 ### 1. Install the Extension
 
-Build the `.vsix` from `apps/cognis-vscode` (or use the prebuilt Pro build):
+For the prebuilt path, extract the ZIP downloaded from Polar and install the
+`.vsix` inside it. Polar does not offer a separate VSIX or license-key benefit.
+
+For the free source path:
 
 ```bash
-cd apps/cognis-vscode
+git clone https://github.com/buimanhtoan-it/cognis
+cd cognis/apps/cognis-vscode
 npm install
 npm run package
 ```
 
-In Cursor or VS Code:
+In Cursor or VS Code, choose **Install from VSIX...**, select the generated or
+Polar-bundled `cognis-vscode-<version>.vsix`, and reload if prompted.
 
-1. Open the Extensions view.
-2. Open the `...` menu.
-3. Choose **Install from VSIX...**.
-4. Select `apps/cognis-vscode/cognis-vscode-<version>.vsix`.
-5. Reload the editor if prompted.
+### 2. Install the Engine
 
-### 2. Install the Backend
+For the Polar-bundled extension, open the Cognis panel and click **Install
+engine**. The extension detects your platform, downloads the matching `cognis`
+binary and semantic model, verifies their checksums, and stages them under
+editor global storage. No terminal or Python is required.
 
-Open the Cognis panel and click **Install backend**. The extension detects your
-platform, downloads the matching `cognis` binary, verifies its checksum, and
-stages it under the extension's storage. No terminal, no Python.
-
-If you prefer to manage the binary yourself, put a `cognis` binary on your
-`PATH` (see Path B) — the extension will use it.
+For a source build, run
+`cargo build --release -p cognis --bin cognis --features onnx-download` and set
+`cognis.binaryPath` to
+`target/release/cognis` (`cognis.exe` on Windows). Provide semantic model assets
+through `COGNIS_ONNX_MODEL_DIR` when semantic search is required.
 
 ### 3. Open the Target Repository
 
@@ -82,9 +87,13 @@ Cognis: Set Up Workspace
 ```
 
 You can run it from the Command Palette or from the Cognis sidebar. This command
-creates `.cognis/` in the target repository, writes MCP configuration for the
-editor (pointing at the `cognis` binary's `mcpd` surface), starts managed
-indexing, and runs a health check.
+creates `.cognis/` in the target repository, writes **workspace-scoped** MCP
+configuration for the editor by default (so only the open repo is started — not
+every repo listed in a global host file), starts managed indexing, and runs a
+health check. Prefer keeping `cognis.mcpConfigScope` at `workspace` and
+`cognis.mcpStdioMode` at `proxy` unless you deliberately need global multi-repo
+fan-out or legacy heavy-per-connection stdio. Migration and multi-host lifecycle
+details: [mcp-client-config.md](mcp-client-config.md).
 
 ### 4. Verify the Setup
 
@@ -104,13 +113,13 @@ Use this path if you do not want the extension to manage setup.
 
 ### 1. Get the Binary
 
-Either download a prebuilt release and put it on your `PATH`, or build from
-source:
+Build the CLI from source. Standalone prebuilt binaries are not an end-user
+distribution channel:
 
 ```bash
 git clone https://github.com/buimanhtoan-it/cognis
 cd cognis
-cargo build --release
+cargo build --release -p cognis --bin cognis --features onnx-download
 # the binary is at target/release/cognis (cognis.exe on Windows)
 ```
 
@@ -152,9 +161,10 @@ cognis indexd --repo-root /path/to/my-app
 
 ## Faster First Run
 
-The first run can take longer because the local embedding model may be fetched
-on first use. If you want a faster setup with lexical and structural search
-only, skip embeddings on the first index:
+The managed extension provisions the local embedding model during engine setup;
+source builds must supply it through `COGNIS_ONNX_MODEL_DIR`. If you want a
+faster setup with lexical and structural search only, skip embeddings on the
+first index:
 
 ```bash
 cognis bootstrap . --skip-embeddings
@@ -175,6 +185,15 @@ Run **Cognis: Troubleshoot & Repair**, then reload the editor or MCP host. If yo
 configured MCP manually, check that `COGNIS_DB_PATH`, `COGNIS_AUDIT_LOG`, and
 `COGNIS_REPO_ROOT` point to the target repository, and that the server command
 points at your `cognis` binary's `mcpd` surface.
+
+### Many Idle Cognis Processes / High RAM
+
+Prefer workspace MCP scope and thin-proxy stdio. If older global
+`cognis-*` entries remain under `~/.cursor/mcp.json` or `~/.vscode/mcp.json`,
+migrate them to the workspace file (repair/connect flows) or remove only the
+Cognis entries for closed repos — never wipe unrelated MCP servers. See
+[mcp-client-config.md](mcp-client-config.md) and the private-bytes procedure in
+[e2e-testing.md](e2e-testing.md).
 
 ### Health Is Degraded
 

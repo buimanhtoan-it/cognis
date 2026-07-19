@@ -9,6 +9,12 @@ import * as vscode from "vscode";
 import { getOutputChannel } from "./cli";
 import { trace } from "./diagnostics";
 import { resolveIndexdInvocation } from "./binary";
+import {
+  reconcileOrphanLease,
+  removeLeaseForPid,
+  verifyLeaseOwner,
+  type OwnerVerification,
+} from "./lease";
 import { modelEnv } from "./model";
 import type { IndexStatusReport } from "./types";
 
@@ -44,6 +50,12 @@ interface LiveIndexingHandle {
   statusWatcher?: fs.FSWatcher;
   pid?: number;
   external?: boolean;
+  /**
+   * Number of local clients currently holding this daemon open. The daemon is
+   * only stopped when the last client releases (reference-aware graceful
+   * shutdown — Requirements 2.7). Spawned / attached handles start at 1.
+   */
+  refCount: number;
 }
 
 export interface StartLiveIndexingOptions {
@@ -140,10 +152,33 @@ function isPidAlive(pid: number | undefined): boolean {
  *
  * Failures are swallowed and logged (with the offending pid) to the output
  * channel so one stubborn process never blocks cleanup of the rest (R10.5).
+ *
+ * When a `repoRoot` is supplied, the kill is gated on the repository-scoped
+ * lease (Task 6.2): a `"mismatch"` verification means the pid was reused by an
+ * unrelated process and we refuse to terminate it (preservation 3.9). A
+ * `"match"` or `"unknown"` proceeds (unknown is the legacy best-effort path
+ * when no lease exists yet — still never kills a dead pid).
  */
-function killByPid(pid: number | undefined): void {
+function killByPid(
+  pid: number | undefined,
+  repoRoot?: string
+): void {
   if (!pid || pid <= 0 || !isPidAlive(pid)) {
     return;
+  }
+  if (repoRoot) {
+    const verdict: OwnerVerification = verifyLeaseOwner(
+      repoRoot,
+      "indexd",
+      pid
+    );
+    if (verdict === "mismatch") {
+      getOutputChannel().appendLine(
+        `[indexd] refusing to kill pid ${pid}: lease process-start identity ` +
+          `does not match (pid reuse); safe non-destruction (3.9)`
+      );
+      return;
+    }
   }
   try {
     if (process.platform === "win32") {
@@ -299,13 +334,32 @@ function makeEphemeralStatus(
   };
 }
 
+/**
+ * Record (or refresh) a repository-scoped `indexd.lease` for a live orphan so
+ * a reloaded extension can later reclaim it safely. Best-effort — never
+ * throws. The Rust daemon also writes this lease on start (Task 6.1); this
+ * path covers the case where the extension observes a status-file pid after a
+ * reload and the daemon-written lease is missing or expired.
+ */
+function ensureIndexdLease(repoRoot: string, pid: number | undefined): void {
+  reconcileOrphanLease(repoRoot, "indexd", pid);
+}
+
 export function isLiveIndexing(repoRoot: string): boolean {
   const handle = processes.get(repoRoot);
   if (isHandleRunning(handle)) {
     return true;
   }
   const status = readIndexStatus(defaultStatusPath(repoRoot));
-  return isStatusProcessAlive(status);
+  if (!isStatusProcessAlive(status)) {
+    return false;
+  }
+  // A live status-file pid after a reload means a live orphan. Reconcile a
+  // repository-scoped lease so the owner (pid + process-start identity +
+  // nonce) is recorded and can later be reclaimed safely (Requirements 2.7,
+  // 2.13; exploration test in indexd.test.ts).
+  ensureIndexdLease(repoRoot, status.pid);
+  return true;
 }
 
 export function getLiveIndexStatus(
@@ -320,14 +374,26 @@ function attachToExistingIndexd(
   status: IndexStatusReport
 ): void {
   const existing = processes.get(repoRoot);
+  if (existing && isHandleRunning(existing)) {
+    // Another local client is already attached — bump the refcount so the
+    // last release (not this one) stops the daemon.
+    existing.refCount += 1;
+    existing.pid = status.pid ?? existing.pid;
+    ensureIndexdLease(repoRoot, existing.pid);
+    publishIndexStatus(repoRoot, status);
+    return;
+  }
   existing?.statusWatcher?.close();
   const handle: LiveIndexingHandle = {
     statusPath,
     statusWatcher: watchStatusFile(repoRoot, statusPath),
     pid: status.pid,
     external: true,
+    refCount: 1,
   };
   processes.set(repoRoot, handle);
+  // Record / refresh the lease so a future reload still has the owner identity.
+  ensureIndexdLease(repoRoot, status.pid);
   publishIndexStatus(repoRoot, status);
 }
 
@@ -339,7 +405,7 @@ export async function startLiveIndexing(
 ): Promise<void> {
   const forceFullRebuild = options?.forceFullRebuild === true;
   if (forceFullRebuild) {
-    await stopLiveIndexing(repoRoot);
+    await stopLiveIndexing(repoRoot, { force: true });
   } else if (isLiveIndexing(repoRoot)) {
     const existingStatus = readIndexStatus(statusPath);
     if (isStatusProcessAlive(existingStatus)) {
@@ -382,9 +448,15 @@ export async function startLiveIndexing(
     statusPath,
     pid: proc.pid,
     external: false,
+    refCount: 1,
   };
   processes.set(repoRoot, handle);
   handle.statusWatcher = watchStatusFile(repoRoot, statusPath);
+  // The Rust daemon writes the authoritative lease on start; also reconcile
+  // from the extension so a lease is present even if the daemon's write is
+  // delayed or fails (the exploration test asserts the lease exists once the
+  // extension has observed a live owner).
+  ensureIndexdLease(repoRoot, proc.pid);
   publishIndexStatus(
     repoRoot,
     makeEphemeralStatus({
@@ -402,6 +474,9 @@ export async function startLiveIndexing(
   proc.on("close", (code) => {
     handle.statusWatcher?.close();
     processes.delete(repoRoot);
+    // Clean our lease only when the pid still matches (do not clobber a
+    // newer owner's record — safe non-destruction, 3.9).
+    removeLeaseForPid(repoRoot, "indexd", handle.pid);
     channel.appendLine(`[indexd] exited ${code ?? "?"}`);
     const previous = statuses.get(repoRoot);
     publishIndexStatus(
@@ -418,6 +493,7 @@ export async function startLiveIndexing(
   proc.on("error", (err) => {
     handle.statusWatcher?.close();
     processes.delete(repoRoot);
+    removeLeaseForPid(repoRoot, "indexd", handle.pid);
     channel.appendLine(`[indexd] error: ${err.message}`);
     const previous = statuses.get(repoRoot);
     publishIndexStatus(
@@ -434,33 +510,67 @@ export async function startLiveIndexing(
   });
 }
 
-export async function stopLiveIndexing(repoRoot: string): Promise<void> {
+export interface StopLiveIndexingOptions {
+  /**
+   * When true, ignore the reference count and stop the daemon immediately
+   * (used by force-rebuild / remove-from-workspace / deactivate). Default
+   * false implements reference-aware graceful shutdown: only the last client
+   * release actually kills the process.
+   */
+  force?: boolean;
+}
+
+/**
+ * Release one local client hold on the live-indexing daemon for `repoRoot`.
+ *
+ * Reference-aware: the process is only stopped when the last client releases
+ * (or when `force: true`). Cleanup is lease-verified — a pid whose process-
+ * start identity no longer matches the recorded lease is never terminated
+ * (preservation 3.9). Idempotent on a missing handle / already-dead pid.
+ */
+export async function stopLiveIndexing(
+  repoRoot: string,
+  options?: StopLiveIndexingOptions
+): Promise<void> {
+  const force = options?.force === true;
   const handle = processes.get(repoRoot);
   if (!handle) {
+    // No in-memory handle (post-reload). Only kill a status-file pid when the
+    // lease confirms identity (or there is no lease at all, in which case we
+    // still refuse on a live mismatch path — but with no lease the verification
+    // returns "unknown" and we proceed with the legacy best-effort kill of a
+    // *live* status pid only when force is set, never on a mere release).
+    if (!force) {
+      return;
+    }
     const status = readIndexStatus(defaultStatusPath(repoRoot));
     if (status?.pid && isPidAlive(status.pid)) {
-      try {
-        process.kill(status.pid);
-      } catch {
-        // Ignore: another host may have already stopped it.
-      }
+      killByPid(status.pid, repoRoot);
       await waitForPidExit(status.pid);
+      removeLeaseForPid(repoRoot, "indexd", status.pid);
     }
     return;
   }
+
+  if (!force) {
+    handle.refCount = Math.max(0, handle.refCount - 1);
+    if (handle.refCount > 0) {
+      // Other local clients still hold the daemon open — leave it running.
+      return;
+    }
+  }
+
   handle.statusWatcher?.close();
+  const pid = handle.pid ?? handle.proc?.pid;
   if (handle.proc) {
     handle.proc.kill();
     await waitForProcessExit(handle.proc);
-  } else if (handle.pid && isPidAlive(handle.pid)) {
-    try {
-      process.kill(handle.pid);
-    } catch {
-      // Ignore: another host may have already stopped it.
-    }
-    await waitForPidExit(handle.pid);
+  } else if (pid && isPidAlive(pid)) {
+    killByPid(pid, repoRoot);
+    await waitForPidExit(pid);
   }
   processes.delete(repoRoot);
+  removeLeaseForPid(repoRoot, "indexd", pid);
   const previous = statuses.get(repoRoot);
   publishIndexStatus(
     repoRoot,
@@ -474,19 +584,28 @@ export async function stopLiveIndexing(repoRoot: string): Promise<void> {
   );
 }
 
+/**
+ * Force-stop every live-indexing daemon this extension owns (used on
+ * deactivate / prepare-uninstall). Ignores reference counts so a host teardown
+ * always reclaims Cognis-owned state; still lease-verified so a PID-reused
+ * unrelated process is never terminated (preservation 3.9).
+ */
 export function stopAllIndexing(): void {
   for (const [root, handle] of processes) {
     handle.statusWatcher?.close();
     processes.delete(root);
+    const pid = handle.pid ?? handle.proc?.pid;
     if (handle.proc) {
       // Graceful stop first (R10.4); waitForProcessExit escalation is handled
       // by the per-repo stopLiveIndexing path.
       handle.proc.kill();
     } else {
       // pid-only handle (attached via attachToExistingIndexd): don't skip it —
-      // tree-kill by pid so no orphaned daemon survives deactivate (R10.1, R10.3).
-      killByPid(handle.pid);
+      // tree-kill by pid so no orphaned daemon survives deactivate (R10.1,
+      // R10.3). Lease-verified: refuse on process-start mismatch (3.9).
+      killByPid(handle.pid, root);
     }
+    removeLeaseForPid(root, "indexd", pid);
     const previous = statuses.get(root);
     publishIndexStatus(
       root,

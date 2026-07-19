@@ -1,9 +1,9 @@
 {
-  "productName": "Cognis Pro",
+  "productName": "Cognis Prebuilt ZIP",
   "repo": "buimanhtoan-it/cognis",
   "buyUrl": "https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW",
   "price": "$9.90",
   "supportEmail": "buimanhtoan.it@gmail.com",
-  "fallbackVersion": "0.8.8"
+  "version": "0.8.9"
 }
 

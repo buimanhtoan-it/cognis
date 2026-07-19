@@ -70,6 +70,27 @@ the real `cognis indexd` watcher are run under repeated edits, asserting bounded
 OS-handle and RSS growth — the deterministic fingerprint of a per-call
 connection/file leak. A near-linear handle climb fails.
 
+### 5b. Private-byte / process-cardinality measurement
+
+For the MCP process/RAM acceptance gate (requirements 2.11, 2.14; preservation
+3.10, 3.11), use the procedure and harness under
+[`tests/e2e/private-bytes/`](../tests/e2e/private-bytes/README.md):
+
+```bash
+node tests/e2e/private-bytes/measure.mjs --self-test
+node tests/e2e/private-bytes/measure.mjs \
+  --runs 5 \
+  --binary target/release/cognis.exe \
+  --topology baseline-idle \
+  --out tests/e2e/private-bytes/out/report.json
+```
+
+Windows private bytes are measured over the Cognis process tree in isolated
+temp homes that never touch the real `.cognis` or host MCP config. The script
+records `A` / `H` / `I`, a ≥5-run median, and gate labels against the ~1.23 GiB
+baseline / 0.615 GiB target (empirical for named hardware/build/topology —
+not a universal claim).
+
 ### 6. Full-stack VS Code host e2e
 
 `apps/cognis-vscode` `npm run test:host` (`src/test-host/`) is the only layer
@@ -106,9 +127,10 @@ cross-app contract change explicit and intentional.
 
 ## Notes / gotchas these tests already encode
 
-- **The embedder loads before serving.** `cognis mcpd` warms the shared semantic
-  layer before it starts serving so the first `semantic_search` call does not
-  race model load on a request path.
+- **Semantic warm policy is consumed.** `COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP=0`
+  keeps zero ONNX resident at open (lazy single-flight on demand); `=1` or an
+  absent variable uses eager open-time init for legacy/direct-launch
+  compatibility. Do not assume the server always maps the model before serving.
 - **The status file is written atomically with a retry.** It is polled
   concurrently by the extension; on Windows an atomic replace can hit a transient
   sharing violation, so the daemon retries and never crashes over a status update.
@@ -116,3 +138,6 @@ cross-app contract change explicit and intentional.
   (`symbol_search`) with `--skip-embeddings` so they run fast without a model.
   The semantic regression path opts into the real embedder and is skipped
   automatically when the ONNX model assets are absent.
+- **Private-byte claims are empirical.** Use `tests/e2e/private-bytes/` for
+  acceptance medians; never quote 0.615 GiB as achieved without a named
+  hardware/build/topology report.

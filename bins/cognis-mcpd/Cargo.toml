@@ -16,12 +16,13 @@ path = "src/main.rs"
 [dependencies]
 cognis-core.workspace = true
 cognis-mcp.workspace = true
+cognis-embed.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 
 [features]
 # Forward the ONNX embedder backend so the release MCP daemon serves real
 # semantic search. Off by default (offline workspace build/test).
-onnx = ["cognis-mcp/onnx"]
-onnx-download = ["cognis-mcp/onnx-download"]
+onnx = ["cognis-mcp/onnx", "cognis-embed/onnx"]
+onnx-download = ["cognis-mcp/onnx-download", "cognis-embed/onnx-download"]

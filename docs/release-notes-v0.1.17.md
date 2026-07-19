@@ -1,5 +1,10 @@
 # Release Notes — cognis v0.1.17
 
+> **Historical Python-era release.** The install commands and runtime
+> architecture below are archival and must not be used for current Cognis.
+> Follow [install.md](install.md) for the pure-Rust product and current Polar
+> ZIP/source-build distribution.
+>
 > **Phase 1 MVP** — first public beta release.
 
 ## What's in This Release

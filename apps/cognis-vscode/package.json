@@ -2,9 +2,9 @@
   "name": "cognis-vscode",
   "displayName": "Cognis",
   "description": "Managed Cognis setup: semantic code search, MCP wiring, and live indexing across MCP-capable editors.",
-  "version": "0.8.8",
+  "version": "0.8.9",
   "publisher": "ToanBui",
-  "license": "SEE LICENSE IN LICENSE.txt",
+  "license": "Apache-2.0",
   "icon": "media/icon.png",
   "author": {
     "name": "ToanBui",
@@ -121,12 +121,6 @@
       {
         "command": "cognis.cancelIndexing",
         "title": "Cancel Indexing",
-        "category": "Cognis",
-        "icon": "media/command.png"
-      },
-      {
-        "command": "cognis.enterLicense",
-        "title": "Enter License Key",
         "category": "Cognis",
         "icon": "media/command.png"
       },
@@ -260,19 +254,14 @@
           "default": "",
           "description": "Advanced: override the base URL the semantic embedding model files (bge-small model.onnx / tokenizer.json / pooling.json) and their .sha256 checksums are downloaded from. Leave empty to use the matching GitHub Release for this extension version."
         },
-        "cognis.buyUrl": {
-          "type": "string",
-          "default": "",
-          "description": "Where the \"Buy Cognis\" button sends users (e.g. your Polar checkout link). Leave empty to use the project page."
-        },
         "cognis.mcpConfigScope": {
           "type": "string",
           "enum": [
             "workspace",
             "global"
           ],
-          "default": "global",
-          "description": "Where to write MCP client config. global merges cognis-<repo-slug> entries into ~/.cursor/mcp.json so multiple indexed repos can stay connected at once. workspace writes to .cursor/mcp.json inside the target repository."
+          "default": "workspace",
+          "description": "Where to write MCP client config. workspace (default) writes .cursor/mcp.json inside the target repository so each host starts only the open repo's server (no host × repository fan-out). global merges cognis-<repo-slug> entries into ~/.cursor/mcp.json so multiple indexed repos can stay connected at once; opt in explicitly, as every MCP host then starts a daemon for every indexed repo."
         },
         "cognis.autoManageOnActivate": {
           "type": "boolean",
@@ -344,8 +333,22 @@
         },
         "cognis.mcpWarmSemanticOnStartup": {
           "type": "boolean",
-          "default": true,
-          "description": "When true, generated MCP config sets COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP=1 so the embedder preloads on MCP server start and avoids first-query timeouts."
+          "default": false,
+          "description": "When false (default), generated MCP config explicitly sets COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP=0 for lazy first-demand loading. Enable it to emit =1 and preload the embedder on MCP server start. Direct launches with the variable absent remain eager for compatibility."
+        },
+        "cognis.mcpStdioMode": {
+          "type": "string",
+          "enum": [
+            "proxy",
+            "heavy"
+          ],
+          "default": "proxy",
+          "description": "How editor-owned Cognis MCP stdio servers launch. proxy (default) spawns a model-free thin proxy that forwards JSON-RPC to one heavy repository daemon (host × repository connections cost a thin process, not a heavy one). heavy restores the legacy path where each editor connection is itself a heavy daemon. Can also be set via COGNIS_MCP_STDIO_MODE."
+        },
+        "cognis.mcpSharedHttpEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Reversible sharing gate for direct shared HTTP (one heavy repository daemon served over bounded-concurrent loopback HTTP). Default OFF: Cognis keeps the compatible thin-proxy / per-repository-daemon stdio path. When enabled, shared HTTP is still withheld until every required gate check has evidence of pass (semantic parity, eight-tool contracts, cancellation/failure, concurrent load/eviction, repository isolation, model-fingerprint isolation, process/private-byte improvement); a failed gate falls back to stdio with no data loss. Can also be set via COGNIS_MCP_SHARED_HTTP=1."
         },
         "cognis.logLevel": {
           "type": "string",
@@ -368,7 +371,8 @@
   },
   "scripts": {
     "postinstall": "npm run compile",
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run clean && npm run compile",
+    "clean": "node -e \"require('node:fs').rmSync('out',{recursive:true,force:true})\"",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "package": "vsce package",

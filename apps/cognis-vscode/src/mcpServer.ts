@@ -22,6 +22,12 @@ import * as vscode from "vscode";
 
 import { getOutputChannel } from "./cli";
 import { resolveMcpdInvocation } from "./binary";
+import {
+  reconcileOrphanLease,
+  removeLeaseForPid,
+  verifyLeaseOwner,
+  type OwnerVerification,
+} from "./lease";
 import { modelEnv } from "./model";
 
 // ---------------------------------------------------------------------------
@@ -85,6 +91,92 @@ export function buildMcpdHttpFlags(host: string, port: number): string[] {
 }
 
 /**
+ * Env var that marks a cognis-mcpd process as a model-free thin stdio proxy
+ * (Requirements 2.8, 2.11). Mirrored in `bins/cognis-mcpd/src/proxy.rs` and
+ * re-exported from `mcpRuntime` for the process probe (kept free of the
+ * VS Code API so unit tests can import it without a harness).
+ */
+export const THIN_PROXY_ENV = "COGNIS_MCP_PROXY";
+
+/**
+ * Env var holding the loopback HTTP URL of the heavy daemon a thin proxy
+ * forwards to. Optional — when absent the proxy acquire-or-spawns the heavy.
+ */
+export const PROXY_TARGET_ENV = "COGNIS_MCP_PROXY_TARGET";
+
+/**
+ * How the editor-owned stdio server block launches mcpd.
+ *
+ * * ``"proxy"`` — thin stdio proxy: forwards JSON-RPC to one heavy daemon,
+ *   loads no ONNX / holds no repository DB (Requirements 2.8, 2.11).
+ * * ``"heavy"`` — legacy compatible path: the editor-spawned process is itself
+ *   the heavy daemon (preservation 3.8 escape hatch).
+ */
+export type McpStdioMode = "proxy" | "heavy";
+
+/**
+ * The flags (without the ``<binary> mcpd`` prefix) that put the mcpd surface
+ * into thin-proxy mode. The proxy speaks stdio to the editor and forwards to a
+ * single heavy repository daemon over loopback HTTP.
+ */
+export function buildMcpdProxyFlags(targetUrl?: string): string[] {
+  const flags = ["--proxy"];
+  if (targetUrl && targetUrl.trim()) {
+    flags.push("--proxy-target", targetUrl.trim());
+  }
+  return flags;
+}
+
+/**
+ * True when a stdio server block is the model-free thin-proxy form (args
+ * contain ``--proxy`` / ``--transport proxy``, or env has
+ * ``COGNIS_MCP_PROXY=1``). Pure so unit tests can classify config without
+ * spawning.
+ */
+export function isThinProxyServerBlock(block: unknown): boolean {
+  if (typeof block !== "object" || block === null) {
+    return false;
+  }
+  const b = block as { args?: unknown; env?: unknown };
+  const args = Array.isArray(b.args) ? b.args.map(String) : [];
+  if (args.includes("--proxy")) {
+    return true;
+  }
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === "--transport" && (args[i + 1] ?? "").toLowerCase() === "proxy") {
+      return true;
+    }
+    if (args[i].toLowerCase() === "--transport=proxy") {
+      return true;
+    }
+  }
+  const env =
+    typeof b.env === "object" && b.env !== null
+      ? (b.env as Record<string, unknown>)
+      : {};
+  return env[THIN_PROXY_ENV] === "1" || env[THIN_PROXY_ENV] === 1;
+}
+
+/**
+ * True when a stdio server block is a *heavy* cognis mcpd (command form that
+ * is not a thin proxy). Used by process-cardinality accounting so thin proxies
+ * do not count toward the heavy-daemon budget (Requirement 2.11).
+ */
+export function isHeavyStdioServerBlock(block: unknown): boolean {
+  if (typeof block !== "object" || block === null) {
+    return false;
+  }
+  if (isHttpServerBlock(block)) {
+    return false;
+  }
+  if (isThinProxyServerBlock(block)) {
+    return false;
+  }
+  const b = block as { command?: unknown };
+  return typeof b.command === "string" && b.command.length > 0;
+}
+
+/**
  * The stdio mcp.json server block that points an editor at the single
  * ``cognis`` **binary**, dispatched to its ``mcpd`` surface. This is what
  * ``mcp.json`` carries once the binary backend is installed — no Python entry
@@ -97,6 +189,33 @@ export function buildBinaryStdioServerBlock(
   extraArgs: string[] = []
 ): { command: string; args: string[]; env: Record<string, string> } {
   return { command: binaryPath, args: ["mcpd", ...extraArgs], env };
+}
+
+/**
+ * A model-free thin-proxy stdio server block: the editor spawns
+ * ``<binary> mcpd --proxy``, which forwards JSON-RPC to one heavy repository
+ * daemon and loads no ONNX / holds no repository DB (Requirements 2.8, 2.11).
+ * Marks the process via ``COGNIS_MCP_PROXY=1`` so the runtime probe can
+ * classify it. Optional ``targetUrl`` pins the heavy endpoint; when omitted
+ * the proxy acquire-or-spawns the heavy itself.
+ */
+export function buildBinaryThinProxyServerBlock(
+  binaryPath: string,
+  env: Record<string, string>,
+  targetUrl?: string
+): { command: string; args: string[]; env: Record<string, string> } {
+  const proxyEnv: Record<string, string> = {
+    ...env,
+    [THIN_PROXY_ENV]: "1",
+  };
+  if (targetUrl && targetUrl.trim()) {
+    proxyEnv[PROXY_TARGET_ENV] = targetUrl.trim();
+  }
+  return buildBinaryStdioServerBlock(
+    binaryPath,
+    proxyEnv,
+    buildMcpdProxyFlags(targetUrl)
+  );
 }
 
 /**
@@ -121,7 +240,60 @@ export function rewriteServerBlockToBinary(
   while (rest[0] === "mcpd") {
     rest = rest.slice(1);
   }
-  return buildBinaryStdioServerBlock(binaryPath, block.env ?? {}, rest);
+  // Strip thin-proxy flags/env so a heavy rewrite of a previous proxy block is
+  // a clean heavy stdio launch (preservation 3.8 escape hatch).
+  const cleaned: string[] = [];
+  for (let i = 0; i < rest.length; i += 1) {
+    const a = rest[i];
+    if (a === "--proxy") {
+      continue;
+    }
+    if (a === "--proxy-target") {
+      i += 1; // skip value
+      continue;
+    }
+    if (a.startsWith("--proxy-target=")) {
+      continue;
+    }
+    if (a === "--transport" && (rest[i + 1] ?? "").toLowerCase() === "proxy") {
+      i += 1;
+      continue;
+    }
+    if (a.toLowerCase() === "--transport=proxy") {
+      continue;
+    }
+    cleaned.push(a);
+  }
+  const env = { ...(block.env ?? {}) };
+  delete env[THIN_PROXY_ENV];
+  delete env[PROXY_TARGET_ENV];
+  return buildBinaryStdioServerBlock(binaryPath, env, cleaned);
+}
+
+/**
+ * Normalize a stdio server block into the thin-proxy binary form
+ * (``command: <binary>``, ``args: ["mcpd", "--proxy", …]``,
+ * ``env.COGNIS_MCP_PROXY=1``). Idempotent under repeated application. Pure so
+ * the selection path is unit-testable without spawning.
+ */
+export function rewriteServerBlockToThinProxy(
+  block: { command?: string; args?: string[]; env?: Record<string, string> },
+  binaryPath: string,
+  targetUrl?: string
+): { command: string; args: string[]; env: Record<string, string> } {
+  // Preserve non-proxy env; strip any previous proxy-target so a fresh target
+  // (or none) wins.
+  const baseEnv = { ...(block.env ?? {}) };
+  delete baseEnv[THIN_PROXY_ENV];
+  delete baseEnv[PROXY_TARGET_ENV];
+  // Prefer an explicit target, else one already on the block, else let the
+  // proxy acquire-or-spawn.
+  const existingTarget =
+    typeof block.env?.[PROXY_TARGET_ENV] === "string"
+      ? block.env[PROXY_TARGET_ENV]
+      : undefined;
+  const target = (targetUrl ?? existingTarget)?.trim() || undefined;
+  return buildBinaryThinProxyServerBlock(binaryPath, baseEnv, target);
 }
 
 export type McpServerPhase = "stopped" | "starting" | "running" | "error";
@@ -152,6 +324,13 @@ export const STOPPED_STATE: McpServerState = Object.freeze({
 interface ServerHandle {
   proc: ChildProcessWithoutNullStreams;
   state: McpServerState;
+  /**
+   * Number of local clients holding this HTTP server open. Reference-aware
+   * graceful shutdown (Requirements 2.7): the server is only stopped when the
+   * last client releases (or on a forced teardown). A freshly launched handle
+   * starts at 1.
+   */
+  refCount: number;
 }
 
 const servers = new Map<string, ServerHandle>();
@@ -256,8 +435,14 @@ function launchOnPort(
         url: buildMcpUrl(LOOPBACK_HOST, port),
         pid: proc.pid ?? undefined,
       },
+      refCount: 1,
     };
     servers.set(repoRoot, handle);
+    // The heavy daemon writes the authoritative `mcpd.lease` on start (Task
+    // 6.1); also reconcile from the extension so a reloaded host can reclaim a
+    // live orphan safely by owner identity (pid + process-start id + nonce)
+    // instead of a bare pid (Requirements 2.7, 2.13).
+    reconcileOrphanLease(repoRoot, "mcpd", proc.pid ?? undefined);
     publish(repoRoot, handle.state);
 
     let settled = false;
@@ -283,6 +468,9 @@ function launchOnPort(
         ? { phase: "error", host: LOOPBACK_HOST, lastError: reason }
         : STOPPED_STATE;
       servers.delete(repoRoot);
+      // Clean our lease only when it still records this pid (never clobber a
+      // newer owner's record — safe non-destruction, 3.9).
+      removeLeaseForPid(repoRoot, "mcpd", proc.pid ?? undefined);
       publish(repoRoot, handle.state);
       // If it exits before we saw a successful bind, this attempt failed.
       settle(false, reason ?? "server exited before binding");
@@ -320,6 +508,9 @@ function launchOnPort(
 export async function startMcpServer(repoRoot: string): Promise<McpServerState> {
   const existing = servers.get(repoRoot);
   if (existing && (existing.state.phase === "running" || existing.state.phase === "starting")) {
+    // Another local client wants this server — reference-aware sharing: bump
+    // the hold count so only the last release stops it (Requirements 2.7).
+    existing.refCount += 1;
     return existing.state;
   }
   const channel = getOutputChannel();
@@ -346,13 +537,54 @@ export async function startMcpServer(repoRoot: string): Promise<McpServerState> 
   return errorState;
 }
 
+export interface StopMcpServerOptions {
+  /**
+   * When true, ignore the reference count and stop immediately (forced
+   * teardown: deactivate / remove-from-workspace). Default false implements
+   * reference-aware graceful shutdown — only the last client release stops
+   * the server (Requirements 2.7).
+   */
+  force?: boolean;
+}
+
 /**
- * Stop the HTTP MCP server for *repoRoot*. Idempotent: returns the stopped
- * state if nothing is running.
+ * Release one local client hold on the HTTP MCP server for *repoRoot*.
+ *
+ * Reference-aware: the server is only terminated when the last client releases
+ * (or when `force: true`). Termination is lease-verified — a pid whose
+ * process-start identity no longer matches the recorded `mcpd.lease` is never
+ * killed (a PID-reused unrelated process; preservation 3.9). Idempotent:
+ * returns the stopped state if nothing is running.
  */
-export async function stopMcpServer(repoRoot: string): Promise<McpServerState> {
+export async function stopMcpServer(
+  repoRoot: string,
+  options?: StopMcpServerOptions
+): Promise<McpServerState> {
+  const force = options?.force === true;
   const handle = servers.get(repoRoot);
   if (!handle) {
+    return STOPPED_STATE;
+  }
+  if (!force) {
+    handle.refCount = Math.max(0, handle.refCount - 1);
+    if (handle.refCount > 0) {
+      // Other local clients still hold the server open — leave it running.
+      return handle.state;
+    }
+  }
+  const pid = handle.proc.pid;
+  // Guard against terminating a PID-reused unrelated process: if the lease
+  // records this pid but the live process-start identity differs, refuse
+  // (safe non-destruction, 3.9). "match"/"unknown" proceed — killing our own
+  // child by its live process handle is always safe.
+  const verdict: OwnerVerification = verifyLeaseOwner(repoRoot, "mcpd", pid);
+  if (verdict === "mismatch") {
+    getOutputChannel().appendLine(
+      `[mcp-http] refusing to kill pid=${pid}: lease process-start identity ` +
+        `does not match (pid reuse); safe non-destruction (3.9)`
+    );
+    servers.delete(repoRoot);
+    publish(repoRoot, STOPPED_STATE);
     return STOPPED_STATE;
   }
   try {
@@ -364,12 +596,17 @@ export async function stopMcpServer(repoRoot: string): Promise<McpServerState> {
       }`
     );
   }
+  // Clean our lease only when the pid still matches (never clobber a newer
+  // owner's record — safe non-destruction, 3.9).
+  removeLeaseForPid(repoRoot, "mcpd", pid);
   // The exit handler will publish STOPPED. For symmetry return the optimistic
   // state immediately so the caller's UI flips at once.
   return STOPPED_STATE;
 }
 
-/** Stop every running MCP server (used on extension deactivation). */
+/** Stop every running MCP server (used on extension deactivation). Forced. */
 export async function stopAllMcpServers(): Promise<void> {
-  await Promise.all([...servers.keys()].map((repo) => stopMcpServer(repo)));
+  await Promise.all(
+    [...servers.keys()].map((repo) => stopMcpServer(repo, { force: true }))
+  );
 }

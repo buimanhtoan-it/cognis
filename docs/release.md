@@ -1,124 +1,120 @@
 # Release Guide
 
-This document is for maintainers preparing a tagged release of the pure-Rust
-`cognis` engine.
+This guide prepares the public source release and the single prebuilt ZIP sold
+through Polar.
 
-## Before starting
+## Distribution policy
 
-Complete the full pre-release checks from the repo root:
+- GitHub is the public Apache-2.0 source, tag, documentation, release-note, and
+  managed-asset infrastructure.
+- Polar receives exactly one File Download:
+  `cognis-prebuilt-<version>.zip`.
+- Do not publish or sell a separate VSIX, binary, container image, license key,
+  activation benefit, or feature-gated edition.
+- Anyone may build the same software from source for free.
 
-1. Run the workspace test suite:
-   ```bash
-   cargo test --workspace
-   ```
-2. Run lints and formatting:
-   ```bash
-   cargo clippy --workspace --all-targets -- -D warnings
-   cargo fmt --all --check
-   ```
-3. Confirm the release notes and `CHANGELOG.md` are up to date.
-4. Update the workspace version in `Cargo.toml` (`[workspace.package] version`).
+## 1. Update versions
 
-If you track release quality gates, review the current eval baseline in
-`docs/eval/phase1-baseline.md`.
+The root `[workspace.package].version` in `Cargo.toml` is the engine source of
+truth. Keep these manual locations in lockstep:
 
-## Versioning
+- `apps/cognis-vscode/package.json`
+- both root package version fields in `apps/cognis-vscode/package-lock.json`
+- `site/config.json` `version`
+- the baked `DEFAULTS.version` in `site/index.html`
+- `CHANGELOG.md`
 
-`cognis` follows [Semantic Versioning](https://semver.org/):
+## 2. Run release gates
 
-- stable releases: `MAJOR.MINOR.PATCH`
-- pre-releases: `0.8.0-rc.1`
+Engine, from the repository root with Cognis test-path variables unset:
 
-The single source of truth is `[workspace.package].version` in `Cargo.toml`;
-every crate and binary inherits it via `version.workspace = true`.
-
-## Release steps
-
-### 1. Update the version
-
-Edit `Cargo.toml`:
-
-```toml
-[workspace.package]
-version = "0.8.0"
+```powershell
+Remove-Item Env:\COGNIS_DB_PATH,Env:\COGNIS_MCP_FIXTURE,Env:\COGNIS_INDEXD_STATUS_PATH -ErrorAction SilentlyContinue
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo build --workspace
+cargo test --workspace
 ```
 
-Run `cargo build --workspace` so `Cargo.lock` picks up the new version, and
-commit both files.
+Extension, from `apps/cognis-vscode`:
 
-### 2. Update the changelog
-
-Add a new dated section to `CHANGELOG.md` describing the release contents and
-open a fresh `[Unreleased]` section.
-
-### 3. Build the artifacts
-
-Build the single-binary distribution (one static `cognis` binary per platform):
-
-```bash
-cargo xtask dist
+```powershell
+npm install
+npm run compile
+npm run lint
+npm test
+npm run test:e2e
+npm run test:host
 ```
 
-Expected outputs (under `dist/`): the per-platform `cognis` binary plus its
-`.sha256` checksum sidecar. See [docs/distribution.md](distribution.md) for the
-build matrix and platform targets.
+## 3. Tag the source release
 
-Build and push the container image:
+Commit and push only after the gates pass. An annotated `v<version>` tag starts
+the release workflow that builds checksum-verified engine/model assets required
+by the managed installer.
 
-```bash
-docker build -t cognis-engine:0.8.0 -t cognis-engine:latest .
-docker push ghcr.io/buimanhtoan-it/cognis-engine:0.8.0
-docker push ghcr.io/buimanhtoan-it/cognis-engine:latest
+```powershell
+git tag -a v<version> -m "Release v<version>"
+git push origin v<version>
 ```
 
-### 4. Create the Git tag
+Verify the workflow is green and that every supported platform engine, checksum,
+and semantic model asset exists for the exact extension version. These assets
+support **Install engine** inside the Polar-delivered extension; do not advertise
+them as another end-user product download.
 
-```bash
-git add -A
-git commit -m "chore: release v0.8.0"
-git tag -a v0.8.0 -m "Release v0.8.0"
-git push origin main --tags
+## 4. Build the Polar ZIP
+
+Build the ordinary Apache-2.0 extension. There is no Pro key injection:
+
+```powershell
+Set-Location apps/cognis-vscode
+npm run package
+Set-Location ../..
 ```
 
-Pushing a `v*` tag triggers the automated release workflow, which builds the
-cross-platform binary matrix and attaches the binaries + checksums to the
-GitHub Release. See [.github/workflows/release.yml](../.github/workflows/release.yml).
+Create a versioned `INSTALL.md` for the buyer, copy the Apache-2.0 license
+notice, and package exactly these three files:
 
-### 5. Create / verify the GitHub Release
-
-The workflow creates the release from the tag; verify the attached assets, or
-create it manually:
-
-```bash
-gh release create v0.8.0 \
-    --title "cognis v0.8.0" \
-    --notes-file docs/release-notes-v0.3.0.md \
-    dist/cognis-*
+```powershell
+Compress-Archive -Force -Path `
+  apps/cognis-vscode/cognis-vscode-<version>.vsix, `
+  business/dist/INSTALL.md, `
+  apps/cognis-vscode/LICENSE.txt `
+  -DestinationPath business/dist/cognis-prebuilt-<version>.zip
 ```
 
-## Docker Image Publishing
+Inspect both the outer ZIP and nested VSIX. Confirm:
 
-The Dockerfile is at the project root. Images are published to:
-`ghcr.io/buimanhtoan-it/cognis-engine:<version>`
+- names and manifest versions equal `<version>`;
+- `INSTALL.md` mentions the same version;
+- no license key, activation, private key, public-key injection, or seller
+  secret is present;
+- stale JavaScript is absent because `vscode:prepublish` cleans `out/`;
+- README and LICENSE describe pure Rust and Apache-2.0;
+- the extension's managed assets exist for `v<version>`.
 
-```bash
-docker build -t ghcr.io/buimanhtoan-it/cognis-engine:0.8.0 .
-echo $GITHUB_TOKEN | docker login ghcr.io -u USERNAME --password-stdin
-docker push ghcr.io/buimanhtoan-it/cognis-engine:0.8.0
-```
+## 5. Publish through Polar
 
-## Post-Release
+Configure the Polar product as a one-time purchase with one **File Download**
+benefit. Upload only `cognis-prebuilt-<version>.zip`.
 
-- [ ] Update `README.md` badge with the new version
-- [ ] Post announcement to relevant channels
-- [ ] Open `[Unreleased]` section in `CHANGELOG.md` for next release
-- [ ] File issues for any known regressions or deferred features
+Do not configure:
 
-## Rollback Procedure
+- a separate VSIX download;
+- Polar license keys;
+- an activation email or webhook;
+- per-seat or per-minor software entitlements.
 
-If a critical bug is found post-release:
+Update `site/config.json` and the baked site defaults only after that exact ZIP
+is downloadable from Polar.
 
-1. Mark the GitHub Release as a draft/pre-release (or delete it) so the binaries
-   are no longer advertised as stable: `gh release edit v0.8.0 --prerelease`.
-2. Retract the Docker image: `docker manifest rm ghcr.io/buimanhtoan-it/cognis-engine:0.8.0`
-3. Fix the bug, increment the patch version, re-release as `0.8.1`.
+## Rollback
+
+If the package is broken:
+
+1. replace or remove the Polar File Download immediately;
+2. stop advertising that ZIP version in `site/config.json`;
+3. mark the corresponding GitHub release as pre-release if its managed assets
+   are unsafe;
+4. fix the issue, bump the patch version, rerun all gates, and upload a new ZIP.

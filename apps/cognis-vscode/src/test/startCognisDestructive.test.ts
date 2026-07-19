@@ -259,10 +259,6 @@ const stubModules: Record<string, any> = {
   "./reconcile": { reconcileWorkspaceOnActivate: async () => {} },
   "./handshake": { performHandshake: async () => undefined },
   "./contract": { handshakeWarning: () => undefined },
-  "./license": {
-    enterLicenseKey: async () => {},
-    requireLicense: async () => true,
-  },
   "./gitignore": {
     addCognisToGitignore: () => undefined,
     shouldRemindGitignore: () => false,

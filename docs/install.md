@@ -1,103 +1,65 @@
 # Installation Guide
 
-This guide covers installing the `cognis` engine, optional editor integration,
-and the checks you should run before using it on a real codebase.
+Cognis has one source tree and two supported ways to install the same software:
 
-`cognis` ships as a **single static Rust binary** per platform. There is no
-Python runtime, no `pip`, and no virtual environment to manage — the binary is
-self-contained (SQLite is compiled in).
+1. buy one ready-to-install ZIP from Polar, or
+2. build from this Apache-2.0 repository for free.
+
+The Polar ZIP is the only supported end-user prebuilt download. It contains the
+VS Code / Cursor `.vsix`, `INSTALL.md`, and license notice. Polar does not offer
+a separate VSIX, license key, activation, subscription, or feature unlock.
 
 ## Requirements
 
-- Linux, macOS, or Windows on a supported architecture (see
-  [distribution.md](distribution.md) for the target matrix)
-- roughly 200 MB of free disk space for the binary and the local embedding model
-- Node.js 18 or newer **only** if you plan to build the VS Code / Cursor
-  extension from source
-- the [Rust toolchain](https://rustup.rs) (stable) **only** if you build the
-  engine from source instead of downloading a prebuilt binary
+For the Polar path:
 
-## Option A — prebuilt binary (recommended)
+- VS Code 1.85+ or Cursor
+- Windows x64, macOS Apple Silicon, or Linux x64
+- network access on first managed install for the checksum-verified engine and
+  semantic model
 
-Download the `cognis` binary for your platform from the
-[latest release](https://github.com/buimanhtoan-it/cognis/releases). Each
-artifact ships with a `.sha256` sidecar so you can verify it.
+For the source path:
 
-```bash
-# Verify the download (sha256sum -c format)
-sha256sum -c cognis-<triple>.sha256
+- Git and the stable Rust toolchain
+- Node.js 18+ to build the editor extension
+- local semantic model assets when semantic search is required; see
+  [`assets/models/README.md`](../assets/models/README.md)
 
-# Put it on PATH and mark it executable (POSIX)
-chmod +x cognis-<triple>
-mv cognis-<triple> /usr/local/bin/cognis
-```
+No path requires Python, `pip`, or a virtual environment.
 
-On Windows, verify with `Get-FileHash cognis-<triple>.exe -Algorithm SHA256` and
-place `cognis.exe` somewhere on your `PATH`.
+## Option A - Polar ZIP
 
-The single binary is multi-call (busybox-style): it behaves as the CLI, the MCP
-server, or the indexing daemon depending on how it is invoked:
+1. Purchase and download `cognis-prebuilt-<version>.zip` from Polar.
+2. Extract the ZIP. Treat the files inside as one product bundle; do not look
+   for a separate Polar VSIX or license-key benefit.
+3. In VS Code or Cursor, open Extensions, choose **Install from VSIX...**, and
+   select `cognis-vscode-<version>.vsix` from the extracted folder.
+4. Open the Cognis panel and click **Install engine**. The extension downloads
+   the engine and semantic model matching its version, verifies SHA-256
+   sidecars, and stores the assets under editor global storage.
+5. Open a repository and run **Cognis: Set Up Workspace**.
 
-- `cognis cli …` (or any bare subcommand such as `cognis bootstrap .`)
-- `cognis mcpd` — start the MCP server on stdio
-- `cognis indexd …` — start the live-indexing daemon
+There is no key to enter and no activation step. The prebuilt package has the
+same features as a source build.
 
-It also works when installed or symlinked under the legacy names `cognis-cli`,
-`cognis-mcpd`, and `cognis-indexd`, so existing `mcp.json` wiring keeps working.
+## Option B - build from source
 
-## Option B — build from source
-
-Building requires only the Rust toolchain and Git — no Python.
+Clone the repository and build the Rust engine:
 
 ```bash
 git clone https://github.com/buimanhtoan-it/cognis
 cd cognis
-cargo build --release
+cargo build --release -p cognis --bin cognis --features onnx-download
 ```
 
-The build produces the single binary at `target/release/cognis` (or
-`cognis.exe` on Windows). Copy it onto your `PATH`, or run it in place:
+The binary is `target/release/cognis` (`cognis.exe` on Windows). It is a
+busybox-style multi-call binary:
 
-```bash
-./target/release/cognis --version
-./target/release/cognis health
-```
+- `cognis bootstrap .` initializes, indexes, and checks health
+- `cognis mcpd` starts the MCP server on stdio
+- `cognis indexd --repo-root .` keeps the index current
 
-To produce a stripped, distribution-ready artifact (and a `.sha256` sidecar),
-use the packaging task:
-
-```bash
-cargo xtask dist                    # host target → dist/
-cargo xtask dist --target <triple>  # a specific platform
-```
-
-See [distribution.md](distribution.md) for the full build matrix, cross-compile
-notes, and the optional `onnx` / `onnx-download` features.
-
-## Verify the installation
-
-Run:
-
-```bash
-cognis --version
-cognis health
-```
-
-If you installed under the legacy name instead, `cognis-cli --version` and
-`cognis-cli health` behave identically.
-
-It is normal for `health` to report warnings before you initialize a repository.
-The first successful `init` or `bootstrap` run creates `.cognis/` and the local
-database.
-
-## Optional: build the VS Code / Cursor extension
-
-For editor integration the recommended path is the prebuilt extension: install
-the `.vsix`, open the Cognis panel, and click **Install backend** — the
-extension downloads the prebuilt `cognis` binary for your platform (checksum
-verified), so no terminal or compiler is needed.
-
-To build the extension from source, package it from its own directory:
+Package the editor extension from the same checkout:
 
 ```bash
 cd apps/cognis-vscode
@@ -105,77 +67,53 @@ npm install
 npm run package
 ```
 
-This creates `apps/cognis-vscode/cognis-vscode-<version>.vsix`.
+Install the generated `cognis-vscode-<version>.vsix`, then set the advanced
+`cognis.binaryPath` setting to the absolute source-built binary path. Set
+`COGNIS_ONNX_MODEL_DIR` to a directory containing `model.onnx`,
+`tokenizer.json`, and `pooling.json` when semantic search is required.
 
-Install the package in VS Code or Cursor:
-
-1. Open the Extensions view.
-2. Open the `...` menu.
-3. Select **Install from VSIX...**
-4. Choose `cognis-vscode-<version>.vsix`.
-5. Open the target repository and run **Cognis: Set Up Workspace**.
-
-The extension manages the `cognis` binary backend for you (download, version
-drift detection, and `mcp.json` wiring). For extension-specific details, see
-[../apps/cognis-vscode/README.md](../apps/cognis-vscode/README.md).
-
-## sqlite-vec
-
-`cognis` uses vector search for the semantic layer. The default binary ships an
-**in-Rust BLOB + linear-scan fallback**, so vector search works out of the box
-with no extension to install. For larger indexes you can opt into the faster
-`vec0` loadable extension by pointing `COGNIS_SQLITE_VEC_PATH` at a `sqlite-vec`
-build; the store loads it at runtime and falls back automatically if it cannot
-load. Lexical and structural retrieval are unaffected either way.
-
-## Docker deployment
-
-For a persistent self-hosted deployment, use Docker Compose:
+To stage a stripped binary and SHA-256 sidecar for your own use:
 
 ```bash
-export WORKSPACE_HOST_PATH=/path/to/your/codebase
-docker compose -f deploy/compose.yaml up -d
+cargo xtask dist
+cargo xtask dist --features onnx-download
 ```
 
-Published image tags use `ghcr.io/buimanhtoan-it/cognis-engine:<version>`.
-Operational steps are documented in [operations.md](operations.md).
+The second command links ONNX Runtime into the binary; model weights remain
+separate local assets.
 
-## Windows notes
+## Verify
 
-The binary is self-contained, so the most common Python-era `PATH` problems no
-longer apply. Place `cognis.exe` on your `PATH` (or invoke it by full path) and
-you are done. If you mainly use the VS Code / Cursor extension, the **Install
-backend** flow stages the binary under the extension's storage and wires it for
-you — no manual `PATH` setup required.
-
-## Upgrading
-
-Replace the binary with the newer release (or rebuild from an updated checkout)
-and re-run the health check:
+From a target repository:
 
 ```bash
+cognis --version
+cognis bootstrap .
 cognis health
 ```
 
-If `health` reports a version mismatch, run a full re-index:
+A ready setup has `.cognis/uckg.db`, reports `overall: ok`, and exposes the MCP
+tools after the editor or MCP host reloads.
 
-```bash
-cognis index --full .
-```
+## Docker from source
+
+The repository does not advertise a separate public container as an end-user
+prebuilt product. Build any container deployment from your source checkout and
+follow [operations.md](operations.md).
+
+## Upgrading
+
+- Polar path: download the replacement versioned ZIP from the Polar File
+  Download benefit, install its bundled VSIX, then use **Reinstall engine** if
+  prompted.
+- Source path: update the checkout, rebuild the engine and extension, and
+  reinstall the generated VSIX.
+
+Run `cognis health` after either path. Re-index when health reports an index or
+version mismatch.
 
 ## Uninstalling
 
-Delete the `cognis` binary from wherever you placed it. Optional cleanup:
-
-- remove `.cognis/` from repositories you indexed
-- uninstall the `.vsix` from the editor if you no longer need it
-
-## Troubleshooting
-
-| Problem | What to check |
-| --- | --- |
-| `cognis` is not recognized | Confirm the binary is on `PATH`, or invoke it by full path |
-| Health reports a version mismatch | Run `cognis index --full .` to rebuild the index |
-| Vector search unavailable | The BLOB fallback always works; for `vec0`, check `COGNIS_SQLITE_VEC_PATH` |
-| Permission errors under `.cognis/` | Verify the current user can create and write files in the repository |
-| `COGNIS_DB_PATH` is incorrect | Re-run `cognis init` or inspect `.cognis/config.yaml` and your environment |
+Use **Cognis: Remove Everything (Prepare for Uninstall)** before uninstalling
+the extension, or manually remove the source-built binary and each repository's
+`.cognis/` directory. Source files are never deleted.

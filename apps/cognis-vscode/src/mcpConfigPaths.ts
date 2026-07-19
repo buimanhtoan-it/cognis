@@ -52,17 +52,31 @@ export function getWorkspaceMcpConfigPath(
   }
 }
 
+/**
+ * Resolve where Cognis should write/read MCP config.
+ *
+ * Workspace scope never silently falls back to the global host config: if the
+ * host has no repository-local path (e.g. Claude Desktop), callers must pass
+ * `scope: "global"` explicitly. Global scope always targets the host's user
+ * config under `homeDir`.
+ */
 export function resolveMcpConfigPath(
   host: string,
   repoRoot: string | undefined,
   scope: McpConfigScope,
   homeDir: string
 ): string {
-  if (repoRoot && scope === "workspace") {
-    const workspacePath = getWorkspaceMcpConfigPath(repoRoot, host);
-    if (workspacePath) {
-      return workspacePath;
-    }
+  if (scope === "global" || !repoRoot) {
+    return getGlobalMcpConfigPath(host, homeDir);
   }
-  return getGlobalMcpConfigPath(host, homeDir);
+  // scope === "workspace" with a repo root: require a real workspace path.
+  // Never fall back to global — that is what produced host × repository
+  // fan-out when the setting defaulted to (or silently resolved as) global.
+  const workspacePath = getWorkspaceMcpConfigPath(repoRoot, host);
+  if (!workspacePath) {
+    throw new Error(
+      `MCP host "${host}" has no workspace-scoped config path; set cognis.mcpConfigScope to "global" to opt in to the shared user config`
+    );
+  }
+  return workspacePath;
 }

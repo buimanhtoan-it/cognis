@@ -16,12 +16,24 @@
 pub use cognis_core::Result;
 use cognis_core::{CognisError, Config, Hit};
 
+mod fingerprint;
+mod lifecycle;
 mod reranker;
 mod stub;
 
 #[cfg(feature = "_onnx")]
 mod onnx;
 
+pub use fingerprint::{
+    fingerprint_material, parse_sha256_sidecar, resolve_model_dir_for_fingerprint,
+    session_reuse_allowed, ModelFingerprint, MODEL_ASSET_FILES, MODEL_FINGERPRINT_ENV,
+    MODEL_FINGERPRINT_HEADER,
+};
+pub use lifecycle::{
+    failure_cooldown_from_env, idle_evict_after_from_env, DemandError, EvictOutcome, ModelBorrow,
+    ModelSlot, DEFAULT_FAILURE_COOLDOWN, DEFAULT_IDLE_EVICT_AFTER, FAILURE_COOLDOWN_ENV,
+    IDLE_EVICT_ENV,
+};
 pub use reranker::NoOpReranker;
 pub use stub::StubEmbedder;
 
@@ -34,7 +46,15 @@ pub use onnx::OnnxEmbedder;
 /// (`embed_text` / `embed_batch` / `embedding_dim`). Every vector a backend
 /// returns has length [`Embedder::embedding_dim`], so callers can size the
 /// `symbol_vec` table from a single source of truth (Requirement 2.3).
-pub trait Embedder {
+///
+/// The `Send + Sync` supertrait lets a single embedder be shared across threads
+/// behind an `Arc` (see [`ModelSlot`](crate::ModelSlot)), which the lazy
+/// single-flight lifecycle relies on: concurrent first demand coalesces into one
+/// load and all waiters share the same `Arc<dyn Embedder>`. Every backend in
+/// this crate already satisfies it — [`StubEmbedder`] is a plain value, and
+/// [`OnnxEmbedder`](crate::OnnxEmbedder) holds its `ort` session behind a
+/// `Mutex` with a `Send + Sync` `Tokenizer`.
+pub trait Embedder: Send + Sync {
     /// Dimension of every vector this backend produces.
     fn embedding_dim(&self) -> usize;
 

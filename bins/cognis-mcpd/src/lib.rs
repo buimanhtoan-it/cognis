@@ -1,15 +1,22 @@
 //! cognis-mcpd — MCP server entry point (Task 7).
 //!
 //! Serves the read-only [`McpServer`] over the 8-tool contract (Requirement 3)
-//! on one of two transports:
+//! on one of three transports:
 //!
 //! * **stdio** (default) — newline-delimited JSON-RPC on stdin/stdout, the
-//!   transport an editor spawns and owns.
+//!   transport an editor spawns and owns. A full heavy process that may open
+//!   the UCKG and (lazily) load ONNX.
 //! * **http** — `--transport http --host <h> --port <p>`, a standalone
 //!   localhost server the panel-managed "Start MCP server" flow launches and
 //!   the editor connects to by URL. Same JSON-RPC surface, same contract.
+//! * **thin proxy** — `--proxy` / `--transport proxy` / `COGNIS_MCP_PROXY=1`:
+//!   a model-free, DB-free stdio process that forwards JSON-RPC to a single
+//!   heavy repository daemon over loopback HTTP. So `host × repository`
+//!   connections cost a thin proxy, not a heavy process (Requirements 2.8,
+//!   2.11; preservation 3.8). See [`proxy`].
 //!
-//! The backing [`StoreEngine`] is chosen from the environment:
+//! The backing [`StoreEngine`] is chosen from the environment (heavy modes
+//! only):
 //!
 //! * `COGNIS_DB_PATH=<path>` — serve a real UCKG at that path (and wire the
 //!   configured embedder for semantic search).
@@ -26,8 +33,14 @@ use std::ffi::OsString;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
+use cognis_core::lease::{
+    acquire_or_attach, resolve_repo_root_from_env, AcquireOutcome, LeaseGuard, LeaseRole,
+};
+use cognis_core::SemanticWarmPolicy;
 use cognis_mcp::audit::AuditLog;
 use cognis_mcp::{McpServer, StoreEngine};
+
+pub mod proxy;
 
 /// Which transport the server should run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,7 +104,14 @@ fn build_engine() -> std::result::Result<StoreEngine, ExitCode> {
     let db_path = std::env::var("COGNIS_DB_PATH").unwrap_or_default();
 
     if !use_fixture && !db_path.trim().is_empty() {
-        StoreEngine::open(&db_path).map_err(|err| {
+        // Resolve the semantic warm policy at the daemon entry point so the
+        // extension's `COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP` signal is actually
+        // consumed (Requirement 2.4; bug facet
+        // `semanticWarmPolicyIsIgnoredOrInconsistent`). Eager builds the
+        // embedder up front (legacy behavior / direct launch); Lazy defers it
+        // to first demand so zero ONNX is resident at startup.
+        let policy = SemanticWarmPolicy::from_env();
+        StoreEngine::open_with_policy(&db_path, policy).map_err(|err| {
             eprintln!("cognis-mcpd: failed to open UCKG at {db_path}: {err}");
             ExitCode::FAILURE
         })
@@ -115,6 +135,37 @@ fn build_server(engine: StoreEngine) -> McpServer<StoreEngine> {
     server
 }
 
+/// Best-effort repository-scoped MCP lease acquisition.
+///
+/// Returns `Some(guard)` when this process becomes the owner (heartbeat runs
+/// until drop). Returns `None` when a live foreign lease already exists (attach
+/// path — we do not steal ownership) or when lease I/O fails. Under the default
+/// gate-OFF topology multiple editor-owned stdio processes may still run for
+/// the same repo (preservation 3.8); only one of them holds the lease record
+/// that enables safe orphan reclaim after reload/crash.
+fn acquire_mcpd_lease() -> Option<LeaseGuard> {
+    let repo_root = resolve_repo_root_from_env();
+    match acquire_or_attach(&repo_root, LeaseRole::Mcpd, None) {
+        Ok(AcquireOutcome::Acquired(guard)) => Some(guard),
+        Ok(AcquireOutcome::Attached { lease, path }) => {
+            eprintln!(
+                "cognis-mcpd: a live MCP owner already holds this repository \
+                 (pid {}, lease {}); attaching without claiming ownership",
+                lease.pid,
+                path.display()
+            );
+            None
+        }
+        Err(err) => {
+            eprintln!(
+                "cognis-mcpd: warning: could not acquire repository lease: {err}; \
+                 continuing without cross-process ownership"
+            );
+            None
+        }
+    }
+}
+
 /// Standalone-binary entry: run with the process argv.
 pub fn run() -> ExitCode {
     run_from(std::env::args_os())
@@ -130,7 +181,32 @@ pub fn run_from<I: IntoIterator<Item = OsString>>(args: I) -> ExitCode {
         .skip(1)
         .map(|s| s.to_string_lossy().into_owned())
         .collect();
+
+    // Thin-proxy mode short-circuits before any engine / ONNX / DB construction
+    // (Requirements 2.8, 2.11). Selected via `--proxy`, `--transport proxy`, or
+    // `COGNIS_MCP_PROXY=1`. The compatible stdio path is preserved — the editor
+    // still spawns a command-form server block; the block is just a thin proxy
+    // (preservation 3.8).
+    if proxy::is_proxy_mode(&flags) {
+        return proxy::run_proxy(&flags);
+    }
+
     let transport = parse_transport(flags);
+
+    // Acquire (or attach to) the repository-scoped MCP ownership lease so a
+    // reloaded extension / next owner can reclaim a live orphan safely instead
+    // of guessing from a bare pid (bug facet `repoHasDuplicateHeavyDaemonOrOrphan`;
+    // Requirements 2.7, 2.13). Ownership is recorded under `.cognis/mcpd.lease`
+    // with an owner nonce + pid + process-start identity + heartbeat/expiry.
+    //
+    // The one-heavy-daemon-per-repository *sharing* topology is gated OFF by
+    // default (Task 7), so we do NOT refuse to serve when a live lease already
+    // exists — that would regress the editor-owned stdio path (preservation
+    // 3.8). We record ownership best-effort and hold the guard for the process
+    // lifetime; when we are the fresh owner it heartbeats in the background and
+    // is removed on clean exit. A pre-existing live lease is logged for
+    // visibility. Bind the guard so it is not dropped before `serve` returns.
+    let _mcpd_lease: Option<LeaseGuard> = acquire_mcpd_lease();
 
     let engine = match build_engine() {
         Ok(e) => e,
@@ -166,8 +242,32 @@ pub fn run_from<I: IntoIterator<Item = OsString>>(args: I) -> ExitCode {
             ExitCode::SUCCESS
         }
         Transport::Http { host, port } => {
-            // Bind first so a port-in-use error is reported before we announce
-            // readiness (the extension's readiness check is a TCP connect).
+            // Isolation (Requirement 2.12 / Tasks 8.1 + 8.2):
+            // * Bind is loopback-only by default (`cognis_mcp::http::bind` rejects
+            //   non-loopback hosts unless `COGNIS_MCP_ALLOW_REMOTE=1`).
+            // * Every HTTP route requires an unguessable scoped credential.
+            //   Resolve from env or mint a fresh one so thin proxies / the
+            //   endpoint file can present it.
+            // * Repository identity + model fingerprint are verified on every
+            //   attachment; cross-repo access and fingerprint mismatch refuse
+            //   the session.
+            let credential = match cognis_mcp::http::RouteCredential::from_env_or_generate() {
+                Ok(c) => c,
+                Err(err) => {
+                    eprintln!(
+                        "cognis-mcpd: invalid {}: {err}",
+                        cognis_mcp::http::ROUTE_CREDENTIAL_ENV
+                    );
+                    return ExitCode::FAILURE;
+                }
+            };
+            // Propagate the token into the process env so any child inspection
+            // and the endpoint advertisement share the same secret.
+            std::env::set_var(cognis_mcp::http::ROUTE_CREDENTIAL_ENV, credential.as_str());
+
+            // Bind first so a port-in-use / policy error is reported before we
+            // announce readiness (the extension's readiness check is a TCP
+            // connect).
             let listener = match cognis_mcp::http::bind(&host, port) {
                 Ok(l) => l,
                 Err(err) => {
@@ -175,15 +275,55 @@ pub fn run_from<I: IntoIterator<Item = OsString>>(args: I) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
+            // Advertise the loopback endpoint + scoped credential + model
+            // fingerprint only after a successful bind so thin proxies can
+            // attach without spawning a second heavy and can refuse session
+            // reuse across differing fingerprints (Task 7.1 / 8.1 / 8.2).
+            // Best-effort: a write failure never blocks serve.
+            {
+                let repo_root = resolve_repo_root_from_env();
+                let url = format!("http://{host}:{port}/mcp");
+                let cfg_for_fp = cognis_core::Config::load(&repo_root).unwrap_or_default();
+                let fingerprint = cognis_embed::ModelFingerprint::from_env_or_derive(&cfg_for_fp);
+                if let Err(err) = proxy::write_endpoint_file_with_fingerprint(
+                    &repo_root,
+                    &url,
+                    Some(credential.as_str()),
+                    Some(fingerprint.as_str()),
+                ) {
+                    eprintln!("cognis-mcpd: warning: could not write endpoint file: {err}");
+                }
+            }
             eprintln!(
-                "cognis-mcpd (Rust) ready [http://{host}:{port}/mcp] — {} tools, contract v{}{}",
+                "cognis-mcpd (Rust) ready [http://{host}:{port}/mcp] — {} tools, contract v{}{} \
+                 (route credential required)",
                 cognis_core::MCP_TOOLS.len(),
                 cognis_core::CONTRACT_VERSION,
                 fixture_tag
             );
             let _ = io::stderr().flush();
 
-            if let Err(err) = cognis_mcp::http::serve_listener(&server, listener) {
+            let serve_cfg = {
+                // Isolation checks (repo identity + model fingerprint) apply to
+                // real repository daemons. Fixture/e2e servers skip them so the
+                // contract surface stays reachable without a workspace identity
+                // (preservation 3.7 / 3.8; Task 8.2 still enforces on real
+                // attachments via proxy + real heavy path).
+                let mut cfg = cognis_mcp::http::HttpServeConfig::with_credential(credential);
+                if !use_fixture {
+                    let owner_identity = cognis_core::RepoIdentity::from_env();
+                    let cfg_for_fp =
+                        cognis_core::Config::load(cognis_core::resolve_repo_root_from_env())
+                            .unwrap_or_default();
+                    let fingerprint =
+                        cognis_embed::ModelFingerprint::from_env_or_derive(&cfg_for_fp);
+                    cfg = cfg
+                        .with_repo_identity(owner_identity)
+                        .with_model_fingerprint(fingerprint);
+                }
+                cfg
+            };
+            if let Err(err) = cognis_mcp::http::serve_listener_with(&server, listener, serve_cfg) {
                 eprintln!("cognis-mcpd: http serve loop error: {err}");
                 return ExitCode::FAILURE;
             }

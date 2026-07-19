@@ -84,13 +84,36 @@ Measured against the recorded reference run (psf/requests, 736 symbols, CPU):
 
 ## Pillar 4 — Scaling / cost (protects large-repo viability)
 
-Measured against a real large-repo index:
+Measured against a real large-repo index **and** against the MCP process/RAM
+topology harness:
 
 | Criterion | Reference | Gate |
 | --- | --- | --- |
 | DB bytes / symbol | track (requests) | flag superlinear growth |
 | Cold-index wall time (large repo) | record per cycle | sub-linear vs symbol count |
 | Memory / handle footprint (mcpd) | sustained tool load | real server stays resource-bounded: OS-handle and RSS growth stay flat over hundreds of calls (the leak fingerprint is a near-linear handle climb) |
+| Process cardinality (`A`/`H`/`I`) | [`tests/e2e/private-bytes/`](../tests/e2e/private-bytes/README.md) | heavy repository daemons ≤ `A`; indexd ≤ 1 per repo and ≤ `I`; thin proxies ≤ `H` and model-free; no host × repository heavy fan-out |
+| Idle aggregate private bytes (Windows authoritative) | same harness, ≥5 clean runs, isolated temp homes | **Target** median ≤ 0.615 GiB on an equivalent stabilized-idle reproduction of the recorded ~1.23 GiB multi-process snapshot **on the same machine/build/model/topology**; no run exceeds the ~1.23 GiB baseline; zero owned Cognis daemon/orphan processes after stop + grace period. **This is a target, not an achieved universal result.** |
+| Active-load peak private bytes | same harness (`--active-load`) | reported **separately** from idle median; never substituted for the idle gate |
+
+**Evidence discipline for RAM / process claims:**
+
+- Label every published figure as **empirical** for named hardware, OS, build
+  (git sha / version), model fingerprint, and topology (`A`, `H`, `I`, warm
+  policy, stdio mode, sharing-gate state). Quote `n` (runs).
+- Distinguish process cardinality, idle private bytes, active peak, model
+  mappings, and run variance (preservation 3.11).
+- Never present 0.615 GiB as “already achieved” without attaching a report from
+  the private-bytes harness on the named machine/topology.
+- Never touch the developer’s real `.cognis` or host MCP config during
+  measurement (preservation 3.10).
+
+Related operator docs: [mcp-client-config.md](mcp-client-config.md) (scope,
+migration/rollback, eager/lazy, multi-host lifecycle),
+[security.md](security.md) (loopback / credentials / fingerprints),
+[e2e-testing.md](e2e-testing.md) § private-byte measurement,
+[performance.md](performance.md) § process cardinality.
+
 
 ---
 
@@ -146,6 +169,12 @@ why) when retrieval changes on purpose.
 - Omitting the contamination / regression / skip columns from a comparison.
 - Lowering a coverage or quality gate to make a build pass.
 - Public performance claims ahead of the Pillar-1 bar.
+- Claiming MCP process/RAM “≤ 0.615 GiB” or “half the baseline” without a named
+  machine/build/topology report from `tests/e2e/private-bytes/` and without
+  separating idle median from active-load peak.
+- Treating raw process count or RSS anecdotes as a substitute for
+  platform-correct private-byte / process-tree measurement.
+
 
 ## Status (this release)
 
@@ -161,5 +190,11 @@ why) when retrieval changes on purpose.
   context. Pillar 1 governs public claims, not whether the tool ships; the
   honest framing is "a local, mathematically-grounded retrieval engine, RRF-ranked,
   with structure as proven on-path context."
+- Pillar 4 process/RAM: the measurement procedure and harness exist under
+  `tests/e2e/private-bytes/`. Defaults are workspace MCP scope, thin-proxy
+  stdio, and sharing gate OFF. The ~1.23 GiB → median ≤ 0.615 GiB figure remains
+  an **acceptance target** for equivalent stabilized-idle reproductions on a
+  named machine/build/topology — **not** a result claimed as already achieved in
+  this document. Attach harness reports before any release claim.
 - The regression gate is built into the `cognis-eval` harness and the committed
   baselines, exercised by CI.

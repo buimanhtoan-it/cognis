@@ -20,6 +20,24 @@
 //! writer. Every tool failure is rendered as the stable
 //! `{error:{code,message,retryable}}` envelope inside a *successful* tool
 //! result, never as a JSON-RPC protocol error (Python/fastmcp parity).
+//!
+//! ## Isolation for shared routes (Requirement 2.12 / Task 8.1)
+//!
+//! When the same dispatch surface is exposed over HTTP (see [`crate::http`]),
+//! the transport layer enforces:
+//! * **Loopback-only bind by default** — non-loopback hosts are rejected unless
+//!   the operator opts in (`COGNIS_MCP_ALLOW_REMOTE=1` /
+//!   [`crate::http::BindOptions::allow_non_loopback`]).
+//! * **Unguessable scoped credential per route** — every HTTP POST must present
+//!   a [`crate::http::RouteCredential`] (`Authorization: Bearer …` or
+//!   `X-Cognis-Route-Token`). Stdio remains process-scoped (the OS already
+//!   isolates the pipe), so no extra credential is required on that transport.
+//!
+//! Repository-identity and model-fingerprint verification on attachment are
+//! Task 8.2 and live in [`cognis_core::identity`] + [`cognis_embed::fingerprint`]
+//! (enforced by the HTTP transport via `HttpServeConfig`). This module
+//! re-exports the bind/credential primitives so daemon entry points can depend
+//! on a single server-facing surface.
 
 use std::io::{self, BufRead, Write};
 
@@ -33,6 +51,13 @@ use crate::jsonrpc::{
     read_message, write_message, Request, Response, RpcError, INVALID_PARAMS, METHOD_NOT_FOUND,
 };
 use crate::tools;
+
+// Re-export isolation primitives (Task 8.1) so callers can configure HTTP bind
+// policy and route credentials without reaching into `http` internals.
+pub use crate::http::{
+    is_loopback_host, BindOptions, RouteCredential, ALLOW_REMOTE_ENV, ROUTE_CREDENTIAL_ENV,
+    ROUTE_CREDENTIAL_HEADER,
+};
 
 /// The MCP protocol version this server implements (echoed at `initialize`).
 const PROTOCOL_VERSION: &str = "2024-11-05";

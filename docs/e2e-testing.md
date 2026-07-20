@@ -100,6 +100,19 @@ that runs the real `extension.ts` inside a **real VS Code** (via
 `mcp.json` are written and the flow appears in the diagnostics trace. On Linux
 run under `xvfb-run -a`. CI job: `vscode-host-e2e`.
 
+The opt-in practical gate `npm run test:host:large` uses the same real host and
+binary on a deterministic, tracked production subset of this Cognis checkout
+(`crates/*/src`, `bins/*/src`, and top-level extension `src/*.ts`). It copies
+that corpus into one disposable sandbox, performs a cold setup through
+`cognis.setupWorkspace`, waits for indexd's authoritative settled `watching`
+status, and requires exact Rust/TypeScript lexical hits, exact symbol lookup,
+and a real structural dependency edge over the resulting UCKG. It is strictly
+no-network: the binary build uses Cargo offline, the runner requires a local VS
+Code executable (override with `COGNIS_VSCODE_EXECUTABLE`), and semantic/model
+downloads are out of scope. Build or prerequisite failures fail; they never
+silently skip. The runner prints diagnostics, reaps indexd, and removes the
+workspace, VS Code profile, diagnostics, and fake home together.
+
 ## Running
 
 ```bash
@@ -115,6 +128,10 @@ cd apps/cognis-vscode && npm run test:e2e
 # Full-stack: real VS Code host + real binary backend
 cd apps/cognis-vscode && npm run test:host        # Windows
 #   Linux: xvfb-run -a npm run test:host
+
+# Opt-in practical gate: real host + cold index of tracked Cognis Rust/TS
+cd apps/cognis-vscode && npm run test:host:large  # Windows, local VS Code required
+#   Linux: xvfb-run -a npm run test:host:large
 ```
 
 ## Updating contracts after an intentional change

@@ -3,6 +3,7 @@
 src/**
 out/test/**
 out/test-host/**
+out/test-host-large/**
 .gitignore
 tsconfig.json
 *.vsix

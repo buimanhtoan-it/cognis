@@ -2,7 +2,7 @@
   "name": "cognis-vscode",
   "displayName": "Cognis",
   "description": "Managed Cognis setup: semantic code search, MCP wiring, and live indexing across MCP-capable editors.",
-  "version": "0.8.9",
+  "version": "0.8.10",
   "publisher": "ToanBui",
   "license": "Apache-2.0",
   "icon": "media/icon.png",
@@ -378,6 +378,7 @@
     "package": "vsce package",
     "test": "npm run compile && node --test out/test/*.test.js",
     "test:host": "npm run compile && node out/test-host/runHostTests.js",
+    "test:host:large": "npm run compile && node out/test-host-large/runLargeHostTests.js",
     "sim:build": "npm run compile && node out/sim/build.js",
     "test:e2e": "npm run sim:build && playwright test",
     "lint": "tsc -p ./ --noEmit"

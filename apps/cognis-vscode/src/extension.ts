@@ -92,6 +92,19 @@ let indexingActive = false;
 let blockingIndexMessage: string | undefined;
 let autoIndexStartPromise: Promise<void> | undefined;
 /**
+ * Monotonic sequence guarding {@link pollHealth} against out-of-order results.
+ *
+ * ``pollHealth`` awaits the engine health CLI before rendering. Timers, MCP/
+ * index events, command handlers, and ``withProgress`` ``finally`` blocks can
+ * all fire it concurrently, so a slow *older* probe could otherwise resolve
+ * after a newer one and overwrite the fresher snapshot with stale data. Each
+ * call bumps this counter and captures its own generation; only the newest
+ * in-flight probe is allowed to publish (older ones drop their result). This is
+ * ordering hardening, not a retry — a dropped probe simply defers to the newer
+ * one already applied.
+ */
+let pollGeneration = 0;
+/**
  * The most recent {@link PanelContext} handed to {@link updateStatusBar}. Kept
  * so the ``cognis.advancedMode`` configuration listener can flip
  * ``advancedMode`` and re-render the panel in place (≤2s, no window reload)
@@ -202,7 +215,15 @@ async function pollHealth(): Promise<void> {
     updateStatusBar(buildIndexingContext(folder.uri.fsPath));
     return;
   }
+  // Claim a generation *before* the awaited probe. A later call bumps the
+  // counter, so when this (possibly slower) probe resolves we only publish if
+  // we're still the newest one — otherwise a stale snapshot could clobber a
+  // fresher render (out-of-order guard, not a retry).
+  const generation = ++pollGeneration;
   const context = await fetchPanelContext(folder.uri.fsPath);
+  if (generation !== pollGeneration) {
+    return;
+  }
   updateStatusBar(context);
 }
 
@@ -1225,11 +1246,20 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       const state = getState(repoRoot);
-      if (state.lastHealth) {
+      // A background index-status change must refresh ONLY the index-derived
+      // fields — it must not blow away the rest of the last full snapshot
+      // (health, mcpServer phase/url/name/error, configured, backendAvailable,
+      // prerequisites, version). Re-deriving a sparse PanelContext from a
+      // handful of state flags caused the panel to momentarily forget MCP/
+      // health state until the next 30s poll, flipping "Connected" back to
+      // "Off / Start Cognis" and mislabelling the title-bar toggles. Merge over
+      // the last rendered context so unrelated fields survive; only when we've
+      // never rendered do we fall back to a fresh full poll.
+      if (lastContext && state.lastHealth) {
         updateStatusBar({
+          ...lastContext,
           status: deriveStatus(repoRoot, state.lastHealth, false),
           liveIndexing: state.liveIndexing,
-          mcpEnabled: state.mcpEnabled,
           syncPaused: state.syncPaused,
           indexStatus: state.indexStatus,
           advancedMode: readAdvancedMode(),

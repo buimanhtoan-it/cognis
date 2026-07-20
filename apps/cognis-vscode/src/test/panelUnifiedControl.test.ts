@@ -130,6 +130,22 @@ const arbPanelContext: fc.Arbitrary<PanelContext> = fc.record({
   }),
 });
 
+test("configured + connected + live sync off offers Resume instead of Pause", () => {
+  const ctx: PanelContext = {
+    status: "mcpEnabled",
+    configured: true,
+    mcpEnabled: true,
+    liveIndexing: false,
+    syncPaused: false,
+  };
+
+  assert.equal(deriveCognisState(ctx), "paused");
+  assert.deepEqual(deriveUnifiedControl(ctx), {
+    id: "resumeSync",
+    label: "Resume",
+  });
+});
+
 test("Property 2: Unified_Control label + action match Cognis_State and are always non-destructive", () => {
   fc.assert(
     fc.property(arbPanelContext, (ctx) => {

@@ -45,6 +45,7 @@ npm run lint
 npm test
 npm run test:e2e
 npm run test:host
+npm run test:host:large
 ```
 
 ## 3. Tag the source release

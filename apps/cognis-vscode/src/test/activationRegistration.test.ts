@@ -45,6 +45,31 @@ let configListeners: Array<(e: any) => void> = [];
 let executed: string[] = [];
 /** PanelContexts pushed to the panel via updateContext (re-render evidence). */
 let panelContexts: any[] = [];
+/** Event listeners captured from the real activation wiring. */
+let indexStatusListeners: Array<(event: any) => void> = [];
+let mcpStateListeners: Array<(event: any) => void> = [];
+
+function defaultWorkspaceState(): any {
+  return {
+    liveIndexing: false,
+    mcpEnabled: false,
+    syncPaused: false,
+    indexStatus: undefined,
+    lastHealth: { overall: "ok", checks: {} },
+    autoManaged: false,
+  };
+}
+
+let workspaceState = defaultWorkspaceState();
+const defaultPanelContext = {
+  status: "idle",
+  liveIndexing: false,
+  mcpEnabled: false,
+  syncPaused: false,
+};
+let refreshPanelContextImpl: (repoRoot: string) => Promise<any> = async () => ({
+  ...defaultPanelContext,
+});
 /** Spy flags for the deactivate cleanup routines (R9.3). */
 const cleanup = { stopAllIndexing: 0, stopAllMcpServers: 0 };
 
@@ -203,13 +228,19 @@ const stubModules: Record<string, any> = {
   },
   "./indexd": {
     isLiveIndexing: () => false,
-    onDidChangeIndexStatus: () => ({ dispose() {} }),
+    onDidChangeIndexStatus: (listener: (event: any) => void) => {
+      indexStatusListeners.push(listener);
+      return { dispose() {} };
+    },
     stopAllIndexing: () => {
       cleanup.stopAllIndexing += 1;
     },
   },
   "./mcpServer": {
-    onDidChangeMcpServerState: () => ({ dispose() {} }),
+    onDidChangeMcpServerState: (listener: (event: any) => void) => {
+      mcpStateListeners.push(listener);
+      return { dispose() {} };
+    },
     startMcpServer: async () => ({}),
     stopAllMcpServers: async () => {
       cleanup.stopAllMcpServers += 1;
@@ -245,19 +276,18 @@ const stubModules: Record<string, any> = {
   },
   "./state": {
     deriveStatus: () => "idle",
-    getState: () => ({
-      liveIndexing: false,
-      mcpEnabled: false,
-      syncPaused: false,
-      indexStatus: undefined,
-      lastHealth: { overall: "ok", checks: {} },
-      autoManaged: false,
-    }),
+    getState: () => workspaceState,
     initStateStorage: () => {},
     isIndexStatusBusy: () => false,
-    setIndexStatus: () => {},
-    setLiveIndexing: () => {},
-    setMcpEnabled: () => {},
+    setIndexStatus: (_repoRoot: string, status: any) => {
+      workspaceState.indexStatus = status;
+    },
+    setLiveIndexing: (_repoRoot: string, active: boolean) => {
+      workspaceState.liveIndexing = active;
+    },
+    setMcpEnabled: (_repoRoot: string, enabled: boolean) => {
+      workspaceState.mcpEnabled = enabled;
+    },
   },
   "./types": {},
   "./mcpConfig": {
@@ -268,12 +298,7 @@ const stubModules: Record<string, any> = {
     getWorkspaceFolder: () => st.folder,
     isWorkspaceConfigured: () => true,
     isWorkspaceSyncPaused: () => false,
-    refreshPanelContext: async () => ({
-      status: "idle",
-      liveIndexing: false,
-      mcpEnabled: false,
-      syncPaused: false,
-    }),
+    refreshPanelContext: (repoRoot: string) => refreshPanelContextImpl(repoRoot),
     rehydrateWorkspaceState: async () => {},
     clearIndexAndReindex: async () => ({}),
     connectMcp: async () => {},
@@ -335,6 +360,17 @@ async function settle(ticks = 12): Promise<void> {
   }
 }
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 /**
  * The full set of `cognis.*` command ids the extension registers in
  * `activate()` (task 6.2 group). Mirrors `contributes.commands` in
@@ -374,6 +410,10 @@ async function freshActivate(): Promise<any> {
   configListeners = [];
   executed = [];
   panelContexts = [];
+  indexStatusListeners = [];
+  mcpStateListeners = [];
+  workspaceState = defaultWorkspaceState();
+  refreshPanelContextImpl = async () => ({ ...defaultPanelContext });
   cleanup.stopAllIndexing = 0;
   cleanup.stopAllMcpServers = 0;
   const ctx = makeFakeContext();
@@ -501,6 +541,121 @@ test("changing cognis.advancedMode re-renders the panel within 2s without a relo
   );
 
   st.advancedMode = false;
+  await extension.deactivate();
+});
+
+// ---------------------------------------------------------------------------
+// State publication regressions: latest health poll wins, and an index-status
+// event preserves fields owned by the last full panel snapshot.
+// ---------------------------------------------------------------------------
+
+test("an older health poll cannot overwrite a newer completed poll", async () => {
+  st.advancedMode = false;
+  await freshActivate();
+
+  const first = deferred<any>();
+  const second = deferred<any>();
+  const pending = [first, second];
+  refreshPanelContextImpl = async () => {
+    const next = pending.shift();
+    assert.ok(next, "each MCP event should start exactly one health poll");
+    return next.promise;
+  };
+
+  assert.equal(mcpStateListeners.length, 1, "extension must install one MCP state listener");
+  const event = { repoRoot: st.folder!.uri.fsPath };
+  mcpStateListeners[0](event);
+  mcpStateListeners[0](event);
+  await settle(1);
+
+  const fresh = {
+    status: "mcpEnabled",
+    liveIndexing: true,
+    mcpEnabled: true,
+    syncPaused: false,
+    version: "new",
+  };
+  second.resolve(fresh);
+  await settle();
+  const rendersAfterFreshPoll = panelContexts.length;
+  assert.equal(panelContexts.at(-1)?.version, "new");
+
+  first.resolve({ ...fresh, version: "stale", mcpEnabled: false });
+  await settle();
+  assert.equal(
+    panelContexts.length,
+    rendersAfterFreshPoll,
+    "the stale poll must not publish another panel context"
+  );
+  assert.equal(panelContexts.at(-1)?.version, "new");
+
+  await extension.deactivate();
+});
+
+test("index status updates preserve the last full panel snapshot", async () => {
+  st.advancedMode = false;
+  const richContext = {
+    status: "mcpEnabled",
+    health: { overall: "ok", runtime_version: "0.8.4", checks: {} },
+    liveIndexing: true,
+    mcpEnabled: true,
+    syncPaused: false,
+    mcpServerPhase: "error",
+    mcpServerUrl: "http://127.0.0.1:50001/mcp",
+    mcpServerName: "cognis-repo-ab12cd",
+    mcpServerError: "retained diagnostic",
+    mcpConfigPath: "D:/fake/repo/.vscode/mcp.json",
+    mcpRuntimeCount: 1,
+    mcpRuntimeRepoScoped: true,
+    version: "0.8.4",
+  };
+  await freshActivate();
+
+  // Publish one authoritative rich snapshot through the real MCP-event
+  // health-poll path before emitting the narrower index-status event.
+  refreshPanelContextImpl = async () => ({ ...richContext });
+  assert.equal(mcpStateListeners.length, 1, "extension must install one MCP state listener");
+  mcpStateListeners[0]({ repoRoot: st.folder!.uri.fsPath });
+  await settle();
+
+  const preserved = panelContexts.at(-1);
+  assert.equal(preserved?.mcpServerError, "retained diagnostic");
+  const status = {
+    active: false,
+    phase: "idle",
+    message: "Watching for changes",
+    pendingCount: 0,
+    pendingFiles: [],
+    inflightCount: 0,
+    inflightFiles: [],
+    recentFiles: ["src/updated.ts"],
+    updatedAt: 42,
+  };
+  assert.equal(indexStatusListeners.length, 1, "extension must install one index listener");
+  indexStatusListeners[0]({ repoRoot: st.folder!.uri.fsPath, status });
+  await settle();
+
+  const latest = panelContexts.at(-1);
+  for (const field of [
+    "health",
+    "mcpEnabled",
+    "mcpServerPhase",
+    "mcpServerUrl",
+    "mcpServerName",
+    "mcpServerError",
+    "mcpConfigPath",
+    "mcpRuntimeCount",
+    "mcpRuntimeRepoScoped",
+    "configured",
+    "backendAvailable",
+    "prerequisites",
+    "version",
+  ]) {
+    assert.deepEqual(latest?.[field], preserved?.[field], `${field} must be preserved`);
+  }
+  assert.equal(latest?.liveIndexing, false);
+  assert.deepEqual(latest?.indexStatus, status);
+
   await extension.deactivate();
 });
 

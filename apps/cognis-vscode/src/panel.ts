@@ -137,22 +137,26 @@ export type StatusLineText =
  * Collapse the separate indexing + MCP concepts into the single on/off/paused
  * model the unified primary control represents. The three states are mutually
  * exclusive and checked in order:
- *  1. `paused`  — the user has explicitly paused index sync (`syncPaused`).
- *  2. `running` — Cognis is provisioned and active for this workspace
- *     (`configured && mcpEnabled && !syncPaused`), or indexing work is actively
- *     in flight.
+ *  1. `paused`  — the user explicitly paused sync, or a configured and
+ *     connected workspace reports that live indexing is stopped.
+ *  2. `running` — indexing work is in flight, or Cognis is configured,
+ *     connected, and live indexing is not known to be stopped.
  *  3. `off`     — anything else (fresh machine, not set up, MCP not connected).
  */
 export function deriveCognisState(ctx: PanelContext): CognisState {
   if (ctx.syncPaused === true) {
     return "paused";
   }
-  const provisioned = Boolean(
-    ctx.configured && ctx.mcpEnabled && !ctx.syncPaused
-  );
   const activelyIndexing =
     ctx.status === "indexing" || isIndexStatusBusy(ctx.indexStatus);
-  if (provisioned || activelyIndexing) {
+  if (activelyIndexing) {
+    return "running";
+  }
+  const configuredAndConnected = Boolean(ctx.configured && ctx.mcpEnabled);
+  if (configuredAndConnected && ctx.liveIndexing === false) {
+    return "paused";
+  }
+  if (configuredAndConnected) {
     return "running";
   }
   return "off";

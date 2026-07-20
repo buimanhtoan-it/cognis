@@ -313,6 +313,7 @@ const MINIMAL_LABEL_BY_NAME: Record<string, string> = {
   "minimal-off": "Start Cognis",
   "minimal-running": "Pause",
   "minimal-paused": "Resume",
+  "minimal-live-sync-off": "Resume",
 };
 
 // Advanced fixtures (advancedMode ON). Every advanced surface renders the

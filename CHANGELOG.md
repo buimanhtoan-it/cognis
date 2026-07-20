@@ -10,6 +10,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > commercial extension licensing or Ed25519 activation are historical and have
 > been retired.
 
+## [Unreleased]
+
+## [0.8.10]
+
+### Added
+
+- **Opt-in practical large-host gate.** `npm run test:host:large` drives the real
+  extension and Rust engine in a local VS Code host against a deterministic
+  tracked Rust/TypeScript corpus. It requires a settled cold index plus exact
+  lexical, symbol-lookup, and structural-edge results, runs offline, and excludes
+  semantic/model downloads.
+
+### Fixed
+
+- **Panel state races no longer regress controls.** Health polls now publish only
+  the newest result, index-status events preserve the last complete panel
+  snapshot, and a connected workspace with live sync stopped is shown as
+  **Paused / Resume** instead of **Running / Pause**.
+
 ## [0.8.4]
 
 ### Added
@@ -108,7 +127,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Renamed the parity oracle fixture `python_uckg.db` â†’ `uckg_oracle.db` (it is a
   static SQLite test asset, not a Python dependency).
 
-## [Unreleased]
+## [0.8.9]
 
 ### Fixed
 

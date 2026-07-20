@@ -262,13 +262,14 @@ export const FIXTURES: NamedFixture[] = [
   // ---------------------------------------------------------------------------
   // Minimal_Surface / Advanced_Surface coverage across every Cognis_State.
   //
-  // Six fixtures below give one advancedMode-OFF and one advancedMode-ON
-  // fixture for each Cognis_State derived by `deriveCognisState`:
+  // The six baseline fixtures cover every state in both modes. One additional
+  // minimal fixture locks the recovery edge where MCP is connected but live
+  // sync stopped without a persisted pause:
   //   - off:     not provisioned, not indexing, not paused
-  //   - running: configured && mcpEnabled && !syncPaused (provisioned)
-  //   - paused:  syncPaused === true
+  //   - running: configured, connected, and live indexing active/unknown
+  //   - paused:  explicitly paused, or configured + connected + live sync off
   // Names are stable/greppable so the Playwright spec (task 8.2) can consume
-  // them directly: minimal-{off,running,paused} and advanced-{off,running,paused}.
+  // them directly.
   // ---------------------------------------------------------------------------
   {
     name: "minimal-off",
@@ -305,6 +306,20 @@ export const FIXTURES: NamedFixture[] = [
       configured: true,
       mcpEnabled: true,
       syncPaused: true,
+      advancedMode: false,
+      version: VERSION,
+    },
+  },
+  {
+    name: "minimal-live-sync-off",
+    title: "Minimal — live sync stopped without a persisted pause",
+    context: {
+      status: "mcpEnabled",
+      health: healthOk,
+      liveIndexing: false,
+      configured: true,
+      mcpEnabled: true,
+      syncPaused: false,
       advancedMode: false,
       version: VERSION,
     },

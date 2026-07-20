@@ -35,6 +35,8 @@ export interface McpServerBlock {
   command: string;
   args?: string[];
   env: Record<string, string>;
+  /** Kiro-specific list of MCP tools trusted without per-call approval. */
+  autoApprove?: string[];
 }
 
 /** JSON from `cognis-cli bootstrap --json`. */

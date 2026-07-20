@@ -3,6 +3,7 @@ import { getOutputChannel } from "./cli";
 import { isLiveIndexing } from "./indexd";
 import {
   enableMcpForWorkspace,
+  getMcpConfigMatchForRepo,
   hasExpectedMcpConfigForRepo,
   isHttpMcpConfiguredForRepo,
   isLiveSharedHttpAllowed,
@@ -50,6 +51,19 @@ async function maybeEnableMcp(
 ): Promise<void> {
   if (await hasExpectedMcpConfigForRepo(repoRoot)) {
     setMcpEnabled(repoRoot, true);
+    return;
+  }
+
+  // An existing repo-scoped Cognis block is already user-authorized. Repair it
+  // in place (including newly-required Kiro autoApprove entries) without asking
+  // the user to approve the same MCP write again. The prompt below remains for
+  // the first Cognis entry only.
+  if (getMcpConfigMatchForRepo(repoRoot)) {
+    const { configPath } = await enableMcpForWorkspace(repoRoot);
+    setMcpEnabled(repoRoot, true);
+    getOutputChannel().appendLine(
+      `[reconcile] Refreshed existing MCP config at ${configPath}`
+    );
     return;
   }
 

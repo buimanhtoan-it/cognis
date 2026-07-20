@@ -32,6 +32,7 @@ import test from "node:test";
 import fc from "fast-check";
 
 import {
+  ALL_MCP_TOOLS,
   EXPECTED_CONTRACT_VERSION,
   REQUIRED_CLI_COMMANDS,
   REQUIRED_MCP_TOOLS,
@@ -66,21 +67,6 @@ const RUST_CONTRACT_RS = path.join(
   "src",
   "contract.rs"
 );
-
-/**
- * The eight MCP tools in contract order — must stay lockstep with
- * `crates/cognis-core/src/contract.rs` `MCP_TOOLS` (Property 11 / Req 2.10).
- */
-const EIGHT_MCP_TOOLS = [
-  "diffuse_context",
-  "symbol_lookup",
-  "symbol_search",
-  "discover_symbols",
-  "semantic_search",
-  "resolve_symbols",
-  "dependency_trace",
-  "retrieve_context_capsule",
-] as const;
 
 /** Fault-injection steps that leave the migration mid-flight. */
 const INTERRUPT_STEPS: MigrationStep[] = [
@@ -164,7 +150,7 @@ function fullHandshake(
       "index",
       "handshake",
     ],
-    mcp_tools: [...EIGHT_MCP_TOOLS],
+    mcp_tools: [...ALL_MCP_TOOLS],
     ...over,
   };
 }
@@ -231,13 +217,13 @@ test("Property 11: CONTRACT_VERSION is unchanged at intentional baseline 1 (lock
 });
 
 test("Property 11: eight MCP tools match Rust MCP_TOOLS order and extension handshake", () => {
-  assert.equal(EIGHT_MCP_TOOLS.length, 8);
+  assert.equal(ALL_MCP_TOOLS.length, 8);
 
   const rustText = fs.readFileSync(RUST_CONTRACT_RS, "utf8");
   const rustTools = parseRustMcpTools(rustText);
   assert.deepEqual(
     rustTools,
-    [...EIGHT_MCP_TOOLS],
+    [...ALL_MCP_TOOLS],
     "TypeScript eight-tool set must match crates/cognis-core MCP_TOOLS order exactly"
   );
 
@@ -245,7 +231,7 @@ test("Property 11: eight MCP tools match Rust MCP_TOOLS order and extension hand
   // full eight-tool set advertised by the handshake.
   for (const tool of REQUIRED_MCP_TOOLS) {
     assert.ok(
-      (EIGHT_MCP_TOOLS as readonly string[]).includes(tool),
+      (ALL_MCP_TOOLS as readonly string[]).includes(tool),
       `REQUIRED_MCP_TOOLS entry '${tool}' must be one of the eight contract tools`
     );
   }
@@ -354,7 +340,7 @@ test("Property 11: real-output parity against tests/e2e/contracts fixtures", (t)
 test("Property 11: handshake property — full eight tools + matching version is ok; missing tools fail closed", () => {
   fc.assert(
     fc.property(
-      fc.subarray([...EIGHT_MCP_TOOLS], { minLength: 0 }),
+      fc.subarray([...ALL_MCP_TOOLS], { minLength: 0 }),
       fc.integer({ min: 0, max: 3 }),
       (subset, versionDelta) => {
         const tools = subset.length === 0 ? [] : subset;

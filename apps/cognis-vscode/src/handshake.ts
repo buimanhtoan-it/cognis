@@ -15,7 +15,8 @@ import {
  * a skew that bites in production is reconstructable after the fact.
  */
 export async function performHandshake(
-  repoRoot: string
+  repoRoot: string,
+  expectedEngineVersion?: string
 ): Promise<HandshakeResult | undefined> {
   let payload: HandshakePayload;
   try {
@@ -26,12 +27,13 @@ export async function performHandshake(
     });
     return undefined;
   }
-  const result = evaluateHandshake(payload);
+  const result = evaluateHandshake(payload, expectedEngineVersion);
   const data = {
     compatibility: result.compatibility,
     backendContractVersion: result.backendContractVersion,
     expectedContractVersion: result.expectedContractVersion,
     engineVersion: result.engineVersion,
+    expectedEngineVersion: result.expectedEngineVersion,
     missingCommands: result.missingCommands,
     missingTools: result.missingTools,
   };

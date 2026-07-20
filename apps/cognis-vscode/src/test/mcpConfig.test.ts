@@ -9,7 +9,12 @@ import * as path from "node:path";
 import test from "node:test";
 
 import { resetHarness } from "./testHarness";
-import { enableMcpForWorkspace, isCognisMcpServerName } from "../mcpConfig";
+import {
+  enableMcpForWorkspace,
+  hasExpectedMcpConfigForRepo,
+  isCognisMcpServerName,
+} from "../mcpConfig";
+import { ALL_MCP_TOOLS } from "../contract";
 import { isHttpServerBlock, isThinProxyServerBlock } from "../mcpServer";
 
 function generatedWarmPolicy(configPath: string): string | undefined {
@@ -164,5 +169,78 @@ test("a single-repo window starts at most one heavy cognis mcpd (no host×repo f
 
   for (const dir of [home, repoA, repoB, repoC]) {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("Kiro workspace MCP config auto-approves the complete advertised Cognis tool set", async () => {
+  const kiroRepo = mkRepo("kiro-autoapprove");
+  const cursorRepo = mkRepo("cursor-no-autoapprove");
+  try {
+    resetHarness(kiroRepo, {
+      appName: "Kiro",
+      config: { cognis: { mcpHost: "kiro", mcpConfigScope: "workspace" } },
+    });
+    await enableMcpForWorkspace(kiroRepo);
+    // Repeated enable must be idempotent and re-canonicalize an existing block.
+    await enableMcpForWorkspace(kiroRepo);
+    const kiroConfig = JSON.parse(
+      fs.readFileSync(path.join(kiroRepo, ".kiro", "settings", "mcp.json"), "utf8")
+    ) as { mcpServers: Record<string, { autoApprove?: string[] }> };
+    const kiroBlock = Object.values(kiroConfig.mcpServers)[0];
+    assert.deepEqual(kiroBlock.autoApprove, [...ALL_MCP_TOOLS]);
+    assert.equal(new Set(kiroBlock.autoApprove).size, 8, "autoApprove must contain eight unique tools");
+
+    resetHarness(cursorRepo, {
+      appName: "Cursor",
+      config: { cognis: { mcpHost: "cursor", mcpConfigScope: "workspace" } },
+    });
+    await enableMcpForWorkspace(cursorRepo);
+    const cursorConfig = JSON.parse(
+      fs.readFileSync(path.join(cursorRepo, ".cursor", "mcp.json"), "utf8")
+    ) as { mcpServers: Record<string, { autoApprove?: string[] }> };
+    const cursorBlock = Object.values(cursorConfig.mcpServers)[0];
+    assert.equal(
+      cursorBlock.autoApprove,
+      undefined,
+      "Kiro-specific autoApprove must not leak into another host's config"
+    );
+  } finally {
+    fs.rmSync(kiroRepo, { recursive: true, force: true });
+    fs.rmSync(cursorRepo, { recursive: true, force: true });
+  }
+});
+
+
+test("Kiro detects and backfills an existing partial autoApprove list", async () => {
+  const repo = mkRepo("kiro-autoapprove-backfill");
+  try {
+    resetHarness(repo, {
+      appName: "Kiro",
+      config: { cognis: { mcpHost: "kiro", mcpConfigScope: "workspace" } },
+    });
+    await enableMcpForWorkspace(repo);
+    const configPath = path.join(repo, ".kiro", "settings", "mcp.json");
+    const config = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
+      mcpServers: Record<string, { autoApprove?: string[] }>;
+    };
+    const block = Object.values(config.mcpServers)[0];
+    block.autoApprove = ["symbol_search"];
+    fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+
+    assert.equal(
+      await hasExpectedMcpConfigForRepo(repo),
+      false,
+      "a partial list must trigger config refresh"
+    );
+    await enableMcpForWorkspace(repo);
+    assert.equal(await hasExpectedMcpConfigForRepo(repo), true);
+
+    const refreshed = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
+      mcpServers: Record<string, { autoApprove?: string[] }>;
+    };
+    assert.deepEqual(Object.values(refreshed.mcpServers)[0].autoApprove, [...ALL_MCP_TOOLS]);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
   }
 });

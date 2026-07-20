@@ -19,6 +19,7 @@ import {
   type SharingGateDecision,
 } from "./mcpSharingGate";
 import { isManagedBinaryActive, managedBinaryPath } from "./binary";
+import { ALL_MCP_TOOLS } from "./contract";
 import { modelEnv } from "./model";
 import type { McpConfigPayload, McpServerBlock } from "./types";
 
@@ -343,6 +344,37 @@ export function applyBinaryBackend(payload: McpConfigPayload): McpConfigPayload 
 }
 
 /**
+ * Add Kiro's per-server auto-approval list to a generated Cognis block. This is
+ * deliberately applied after binary/thin-proxy normalization because those
+ * rewrites rebuild the launch block and would otherwise drop host metadata.
+ * Other hosts are left byte-for-byte unchanged: `autoApprove` is a Kiro config
+ * field, not part of the portable MCP transport contract.
+ */
+export function applyHostAutoApprove(payload: McpConfigPayload): McpConfigPayload {
+  if (payload.host !== "kiro") {
+    return payload;
+  }
+  const serverName = payload.server_name;
+  const block = payload.config.mcpServers[serverName];
+  if (!block) {
+    return payload;
+  }
+  return {
+    ...payload,
+    config: {
+      ...payload.config,
+      mcpServers: {
+        ...payload.config.mcpServers,
+        [serverName]: {
+          ...block,
+          autoApprove: [...ALL_MCP_TOOLS],
+        },
+      },
+    },
+  };
+}
+
+/**
  * Resolve how editor-owned stdio mcpd blocks should launch.
  *
  * Default is ``"proxy"`` (thin stdio proxy → one heavy daemon per repository),
@@ -467,7 +499,9 @@ export async function fetchMcpConfig(
     serverName,
     "--minimal-env",
   ]);
-  return applyBinaryBackend(applyWorkspaceEnvOverrides(repoRoot, payload));
+  return applyHostAutoApprove(
+    applyBinaryBackend(applyWorkspaceEnvOverrides(repoRoot, payload))
+  );
 }
 
 export function isCognisMcpConfiguredForRepo(repoRoot: string): boolean {
@@ -511,7 +545,15 @@ export async function hasExpectedMcpConfigForRepo(
     if (!expectedBlock) {
       return false;
     }
-    return envMatchesExpected(match.block.env ?? {}, expectedBlock.env);
+    const envMatches = envMatchesExpected(match.block.env ?? {}, expectedBlock.env);
+    if (!envMatches) {
+      return false;
+    }
+    if (host === "kiro") {
+      const approved = new Set(match.block.autoApprove ?? []);
+      return ALL_MCP_TOOLS.every((tool) => approved.has(tool));
+    }
+    return true;
   } catch {
     return false;
   }
@@ -575,7 +617,11 @@ export function writeHttpMcpConfig(
   const servers =
     (existing.mcpServers as Record<string, unknown> | undefined) ?? {};
   removeStaleCognisEntriesForRepo(servers, repoRoot, serverName);
-  servers[serverName] = buildHttpMcpServerBlock(url);
+  const httpBlock = buildHttpMcpServerBlock(url);
+  servers[serverName] =
+    host === "kiro"
+      ? { ...httpBlock, autoApprove: [...ALL_MCP_TOOLS] }
+      : httpBlock;
   existing.mcpServers = servers;
   writeJsonFile(configPath, existing);
   return { configPath, serverName, written: true, gate };

@@ -1127,7 +1127,9 @@ async function maybeCheckHandshake(): Promise<void> {
   if (!folder) {
     return;
   }
-  const result = await performHandshake(folder.uri.fsPath);
+  const expectedEngineVersion = extensionContext?.extension?.packageJSON
+    ?.version as string | undefined;
+  const result = await performHandshake(folder.uri.fsPath, expectedEngineVersion);
   if (!result || result.compatibility === "ok") {
     return;
   }
@@ -1135,9 +1137,15 @@ async function maybeCheckHandshake(): Promise<void> {
   if (!warning) {
     return;
   }
-  const skipKey =
-    `cognis.skipHandshakeWarning.${result.compatibility}.` +
-    `${result.backendContractVersion ?? "x"}->${result.expectedContractVersion}`;
+  // For engine-build skew the actionable identity is the engine version pair,
+  // not the (unchanged) contract version — key the skip on that so a later
+  // engine bump re-prompts instead of staying silenced.
+  const skewId =
+    result.compatibility === "engine-outdated" ||
+    result.compatibility === "engine-newer"
+      ? `${result.engineVersion ?? "x"}->${result.expectedEngineVersion ?? "x"}`
+      : `${result.backendContractVersion ?? "x"}->${result.expectedContractVersion}`;
+  const skipKey = `cognis.skipHandshakeWarning.${result.compatibility}.${skewId}`;
   if (extensionContext?.globalState.get<boolean>(skipKey)) {
     return;
   }

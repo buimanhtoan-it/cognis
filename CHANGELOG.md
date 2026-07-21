@@ -12,6 +12,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.11]
+
+### Fixed
+
+- **Engine skew detection + Kiro MCP approval repair.** The extension now detects
+  when the managed engine binary version drifts from the extension and repairs
+  the generated Kiro `autoApprove` list so all eight canonical MCP tools stay
+  approved after an engine update.
+
 ## [0.8.10]
 
 ### Added

@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cognis â€” Software Cognition Engine for AI coding agents</title>
+  <title>Cognis &mdash; Software Cognition Engine for AI coding agents</title>
   <meta name="description" content="Cognis is a local, private code-retrieval engine for MCP clients and AI coding agents. CSAR diffuses relevance along the call graph to recover on-path code that embedding and keyword search miss." />
-  <meta property="og:title" content="Cognis â€” Software Cognition Engine" />
-  <meta property="og:description" content="Local, private code retrieval for AI coding agents. Built on CSAR â€” relevance that follows the call graph." />
+  <meta property="og:title" content="Cognis &mdash; Software Cognition Engine" />
+  <meta property="og:description" content="Local, private code retrieval for AI coding agents. Built on CSAR &mdash; relevance that follows the call graph." />
   <meta property="og:type" content="website" />
   <meta property="og:image" content="assets/logo.png" />
   <link rel="icon" type="image/png" href="assets/logo.png" />
@@ -186,13 +186,13 @@
 
   <header>
     <div class="wrap">
-      <div class="eyebrow">Software Cognition Engine Â· open-source core (Apache-2.0)</div>
+      <div class="eyebrow">Software Cognition Engine &middot; open-source core (Apache-2.0)</div>
       <h1>Code retrieval that follows the call graph, not just the keywords.</h1>
       <p class="lede">
         Cognis indexes your repository locally and serves precise retrieval to any
         MCP-compatible coding agent. Its CSAR engine starts from ordinary lexical and
         semantic matches, then diffuses relevance along <code>calls</code> and
-        <code>imports</code> edges â€” recovering the on-path code that embedding and
+        <code>imports</code> edges &mdash; recovering the on-path code that embedding and
         keyword search leave out.
       </p>
       <p class="callout">
@@ -202,12 +202,12 @@
         prebuilding, packaging, delivery, and continued development.</strong>
       </p>
       <div class="cta-row">
-        <a class="btn btn-primary js-buy" href="https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW" target="_blank" rel="noopener">Buy the <span class="js-product">Cognis Prebuilt ZIP</span> â€” <span class="js-price">$9.90</span></a>
+        <a class="btn btn-primary js-buy" href="https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW" target="_blank" rel="noopener">Buy the <span class="js-product">Cognis Prebuilt ZIP</span> &mdash; <span class="js-price">$9.90</span></a>
         <a class="btn btn-outline js-gh" href="https://github.com/buimanhtoan-it/cognis" target="_blank" rel="noopener">Build free from source</a>
       </div>
       <p class="meta">
-        <strong>Local-first</strong> â€” your code never leaves the machine Â· works offline Â·
-        <strong>10 languages</strong>: TypeScript/JavaScript, Python, Go, C#, Java, Rust, C, C++, Ruby, PHP Â· runs in Cursor, Copilot, Claude and any MCP client.
+        <strong>Local-first</strong> &mdash; your code never leaves the machine &middot; works offline &middot;
+        <strong>10 languages</strong>: TypeScript/JavaScript, Python, Go, C#, Java, Rust, C, C++, Ruby, PHP &middot; runs in Cursor, Copilot, Claude and any MCP client.
       </p>
     </div>
   </header>
@@ -219,7 +219,7 @@
       <p class="section-lede">
         Ask an agent <em>"where is the JWT token validated on login?"</em> Embedding and
         BM25 score every symbol on its own. They find the two ends that mention "login" and
-        "validate" â€” but the middleware that actually runs the check matches no query words,
+        "validate" &mdash; but the middleware that actually runs the check matches no query words,
         so it never surfaces. The agent gets a flow with a gap and guesses.
       </p>
       <figure>
@@ -231,7 +231,7 @@
 
   <section id="method" class="soft">
     <div class="wrap">
-      <div class="kicker">The method â€” CSAR</div>
+      <div class="kicker">The method &mdash; CSAR</div>
       <h2>Relevance is a fixed point, not a similarity score.</h2>
       <p class="section-lede">
         Code Spreading-Activation Retrieval treats relevance like water poured onto the
@@ -242,36 +242,36 @@
 
       <div class="equation">
         <div class="eq">
-          <span class="v">r</span> = Î±<span class="v">s</span> + (1 âˆ’ Î±)<span class="v">P</span><span class="v">r</span>
+          <span class="v">r</span> = &alpha;<span class="v">s</span> + (1 &minus; &alpha;)<span class="v">P</span><span class="v">r</span>
         </div>
-        <div class="gloss">relevance = your own match (<span class="mono">Î± s</span>) + relevance flowing in from neighbors (<span class="mono">(1âˆ’Î±) P r</span>)</div>
+        <div class="gloss">relevance = your own match (<span class="mono">&alpha; s</span>) + relevance flowing in from neighbors (<span class="mono">(1&minus;&alpha;) P r</span>)</div>
         <ul class="legend">
-          <li><span class="sym">r</span><span>the relevance vector being solved for â€” the final ranking over all symbols.</span></li>
+          <li><span class="sym">r</span><span>the relevance vector being solved for &mdash; the final ranking over all symbols.</span></li>
           <li><span class="sym">s</span><span>the seed: cheap lexical + semantic matches, normalized to sum to 1.</span></li>
           <li><span class="sym">P</span><span>the column-stochastic transition matrix over <code>calls</code> / <code>imports</code> edges.</span></li>
-          <li><span class="sym">Î±</span><span>the single knob. Î±â†’1 is pure embedding; Î±â†’0 is pure structure.</span></li>
-          <li><span class="sym">Îµ</span><span>the residual threshold. Forward-push solves <span class="mono">r</span> in at most <span class="mono">1/(Î±Â·Îµ)</span> work â€” <strong>independent of repo size</strong>.</span></li>
+          <li><span class="sym">&alpha;</span><span>the single knob. &alpha;&rarr;1 is pure embedding; &alpha;&rarr;0 is pure structure.</span></li>
+          <li><span class="sym">&epsilon;</span><span>the residual threshold. Forward-push solves <span class="mono">r</span> in at most <span class="mono">1/(&alpha;&middot;&epsilon;)</span> work &mdash; <strong>independent of repo size</strong>.</span></li>
         </ul>
       </div>
 
       <div class="steps">
         <div class="step">
-          <div class="num">1 â€” Seed</div>
+          <div class="num">1 &mdash; Seed</div>
           <p>Pour relevance onto the same lexical and semantic matches a normal index already produces.</p>
         </div>
         <div class="step">
-          <div class="num">2 â€” Diffuse</div>
-          <p>Each step keeps a fraction Î± at home and pushes (1âˆ’Î±) to neighbors. The middle node fills from both sides.</p>
+          <div class="num">2 &mdash; Diffuse</div>
+          <p>Each step keeps a fraction &alpha; at home and pushes (1&minus;&alpha;) to neighbors. The middle node fills from both sides.</p>
         </div>
         <div class="step">
-          <div class="num">3 â€” Rank</div>
+          <div class="num">3 &mdash; Rank</div>
           <p>Sort by accumulated mass. The on-path node rises next to the seeds, recovered in a single round trip.</p>
         </div>
       </div>
 
       <figure>
         <img src="assets/csar-why.svg" alt="Step-by-step: seeding, diffusion filling the middle node, and the final ranking with the recovered node." loading="lazy" />
-        <figcaption>The diffusion in three stages â€” the dry middle node ends up ranked right below the seeds.</figcaption>
+        <figcaption>The diffusion in three stages &mdash; the dry middle node ends up ranked right below the seeds.</figcaption>
       </figure>
     </div>
   </section>
@@ -283,7 +283,7 @@
       <p class="section-lede">
         Four stages run entirely on your machine: an incremental indexer, a local SQLite
         knowledge graph (UCKG), the CSAR retriever, and a read-only MCP server. It ships as
-        a <strong>single self-contained binary</strong> â€” pure Rust, SQLite bundled, no
+        a <strong>single self-contained binary</strong> &mdash; pure Rust, SQLite bundled, no
         Python and no pip. Embedders and rerankers are swappable behind a registry without
         touching the engine.
       </p>
@@ -298,8 +298,8 @@
       <div class="kicker">Tooling</div>
       <h2>Eight read-only MCP tools.</h2>
       <p class="section-lede">
-        One retrieval backend across every agent. All tools are bounded (depth â‰¤ 8, k â‰¤ 50,
-        â‰¤ 32k tokens, 10s) and write a hashed audit log â€” never raw arguments.
+        One retrieval backend across every agent. All tools are bounded (depth &le; 8, k &le; 50,
+        &le; 32k tokens, 10s) and write a hashed audit log &mdash; never raw arguments.
       </p>
       <dl class="tools">
         <dt>diffuse_context<span class="flag">FLAGSHIP</span></dt>
@@ -315,7 +315,7 @@
         <dt>dependency_trace</dt>
         <dd>Walk the call graph inbound, outbound, or both, with bounded depth.</dd>
         <dt>resolve_symbols</dt>
-        <dd>Hydrate up to 50 symbols â€” including bodies â€” in a single call.</dd>
+        <dd>Hydrate up to 50 symbols &mdash; including bodies &mdash; in a single call.</dd>
         <dt>retrieve_context_capsule</dt>
         <dd>Compose a task-focused context capsule that fits a token budget.</dd>
       </dl>
@@ -329,7 +329,7 @@
       <div class="cols" style="margin-bottom:40px">
         <div class="feature">
           <h3>Proven, not hand-waved</h3>
-          <p>All five CSAR / Personalized-PageRank theorems are verified in code and property-based tests, including both Î± endpoints. The cost bound 1/(Î±Â·Îµ) holds regardless of repository size.</p>
+          <p>All five CSAR / Personalized-PageRank theorems are verified in code and property-based tests, including both &alpha; endpoints. The cost bound 1/(&alpha;&middot;&epsilon;) holds regardless of repository size.</p>
         </div>
         <div class="feature">
           <h3>Private by construction</h3>
@@ -371,27 +371,27 @@
         and handles checkout, tax, and VAT.
       </p>
       <div class="price-card">
-        <div class="pname"><span class="js-product-upper">COGNIS PREBUILT ZIP</span> Â· <span class="js-version">v0.8.12</span></div>
+        <div class="pname"><span class="js-product-upper">COGNIS PREBUILT ZIP</span> &middot; <span class="js-version">v0.8.12</span></div>
         <div class="price"><span class="js-price">$9.90</span> <small>one-time</small></div>
         <ul>
           <li>One ZIP with the VS Code / Cursor extension and install guide</li>
           <li>Full CSAR engine + all 8 MCP retrieval tools</li>
           <li>Local semantic and structural search</li>
           <li>No license key, activation, or held-back features</li>
-          <li>Apache-2.0 Â· build the same software from source free</li>
+          <li>Apache-2.0 &middot; build the same software from source free</li>
         </ul>
-        <a class="btn btn-primary js-buy" href="https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW" target="_blank" rel="noopener" style="display:block;text-align:center">Buy the ZIP â€” <span class="js-price">$9.90</span></a>
-        <p class="note">Secure checkout via Polar Â· one-time charge. The download is a prebuilt convenience package, not a feature license.</p>
+        <a class="btn btn-primary js-buy" href="https://buy.polar.sh/polar_cl_tbpNy7AHIlPtsDR4PwB3KkGVDQrnoaqM4uZew1dRSRW" target="_blank" rel="noopener" style="display:block;text-align:center">Buy the ZIP &mdash; <span class="js-price">$9.90</span></a>
+        <p class="note">Secure checkout via Polar &middot; one-time charge. The download is a prebuilt convenience package, not a feature license.</p>
       </div>
     </div>
   </section>
 
   <footer>
     <div class="wrap">
-      <div>Cognis â€” Software Cognition Engine Â· Sold by Alpha Chain Co., Ltd.</div>
+      <div>Cognis &mdash; Software Cognition Engine &middot; Sold by Alpha Chain Co., Ltd.</div>
       <div>
-        <a class="js-gh" href="https://github.com/buimanhtoan-it/cognis" target="_blank" rel="noopener">GitHub</a> Â·
-        <a class="js-changelog" href="https://github.com/buimanhtoan-it/cognis/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a> Â·
+        <a class="js-gh" href="https://github.com/buimanhtoan-it/cognis" target="_blank" rel="noopener">GitHub</a> &middot;
+        <a class="js-changelog" href="https://github.com/buimanhtoan-it/cognis/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a> &middot;
         <a class="js-support" href="mailto:buimanhtoan.it@gmail.com">Support</a>
       </div>
     </div>
@@ -443,4 +443,3 @@
   </script>
 </body>
 </html>
-

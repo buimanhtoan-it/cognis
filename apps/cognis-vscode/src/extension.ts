@@ -87,6 +87,7 @@ import {
   disableMcp,
   pauseSync,
   removeFromWorkspace,
+  forceRemoveFromWorkspace,
   repairSetup,
   resumeSync,
   setupWorkspace,
@@ -895,6 +896,116 @@ async function runRemoveFromWorkspace(scope: "workspace" | "all" = "workspace"):
 }
 
 /**
+ * Force cleanup action: the escape hatch for when the graceful
+ * {@link runRemoveFromWorkspace} fails because a daemon (indexd/mcpd) is still
+ * holding an exclusive lock on ``uckg.db`` — the classic Windows "the process
+ * cannot access the file" / "directory not empty" error after a crash or
+ * reload. This is the automated version of the manual "find the process
+ * holding the .db, Stop-Process it, then delete .cognis" recovery: it
+ * force-kills every pid Cognis recorded for this repo (leases + status file +
+ * live ``cognis_mcpd`` processes) and then deletes ``.cognis`` with retries.
+ *
+ * @param scope "workspace" force-removes only this repo's wiring; "all" also
+ *   purges every cognis-* entry from the shared global MCP config and
+ *   uninstalls the engine (uninstall prep).
+ */
+async function runForceCleanup(scope: "workspace" | "all" = "workspace"): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    await showErrorGuidance(
+      new Error("Open a workspace folder before cleaning up Cognis."),
+      "Force cleanup"
+    );
+    return;
+  }
+  const purgeAllMcp = scope === "all";
+  const confirmMessage = purgeAllMcp
+    ? "Force cleanup everywhere? This FORCE-STOPS any running Cognis processes " +
+      "(indexd/mcpd) that are holding the local database open, deletes this " +
+      "workspace's .cognis index, removes EVERY cognis MCP server entry from your " +
+      "editor config (all repos), and uninstalls the Cognis engine. Use this when " +
+      "a normal Remove failed because the database was locked. Your source code is " +
+      "not touched."
+    : "Force cleanup this workspace? This FORCE-STOPS any running Cognis processes " +
+      "(indexd/mcpd) that are holding the local database open, disconnects the MCP " +
+      "server, and deletes the local .cognis index directory. Use this when a normal " +
+      "Remove failed because the database was locked. Your source code is not touched.";
+  const confirmLabel = purgeAllMcp ? "Force Clean Everything" : "Force Clean";
+  const confirmation = await vscode.window.showWarningMessage(
+    confirmMessage,
+    { modal: true },
+    confirmLabel
+  );
+  if (confirmation !== confirmLabel) {
+    return;
+  }
+  try {
+    const result = await withProgress(
+      purgeAllMcp ? "Cognis: Force cleanup (prepare to uninstall)" : "Cognis: Force cleanup",
+      async () => forceRemoveFromWorkspace({ purgeAllMcp })
+    );
+    if (!result) {
+      return;
+    }
+    // Re-probe the backend/prereqs next poll instead of trusting stale state.
+    lastPrerequisites = undefined;
+    const parts: string[] = [];
+    if (result.killedPids.length > 0) {
+      parts.push(
+        `force-stopped ${result.killedPids.length} process${
+          result.killedPids.length === 1 ? "" : "es"
+        } (pid ${result.killedPids.join(", ")})`
+      );
+    }
+    if (result.cognisDirRemoved) {
+      parts.push("deleted the local .cognis index");
+    }
+    if (purgeAllMcp && result.purgedConfigPaths.length > 0) {
+      parts.push(
+        `removed all Cognis MCP entries from ${result.purgedConfigPaths.join(", ")}`
+      );
+    } else if (result.mcpRemoved) {
+      parts.push(`disconnected MCP from ${result.configPath}`);
+    }
+    if (purgeAllMcp) {
+      try {
+        const binary = await uninstallManagedBinary();
+        if (binary.removed) {
+          parts.push("uninstalled the Cognis engine binary");
+        }
+      } catch (err) {
+        getOutputChannel().appendLine(
+          `[force-cleanup] binary uninstall warning: ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        );
+      }
+      if (uninstallManagedModel()) {
+        parts.push("removed the semantic model");
+      }
+    }
+    await refreshPrerequisites();
+    let summary =
+      parts.length > 0
+        ? `Force cleanup done: ${parts.join("; ")}. Reload your editor or MCP host to apply.`
+        : "Nothing to clean up — Cognis was not running or configured for this workspace.";
+    if (!result.cognisDirRemoved) {
+      summary =
+        "Force cleanup could not delete .cognis — a process may still be holding it. " +
+        "Close other editors/terminals using this folder and try again, or delete " +
+        ".cognis manually.";
+    }
+    if (purgeAllMcp && result.cognisDirRemoved) {
+      summary += " You can now uninstall the extension.";
+    }
+    await vscode.window.showInformationMessage(summary);
+    await pollHealth();
+  } catch (err) {
+    await showErrorGuidance(err, "Force cleanup");
+  }
+}
+
+/**
  * One-click backend install: fetch the prebuilt single ``cognis`` binary for
  * this platform, checksum-verified — no Python, pip, or compiler (Requirement
  * 1.1). We re-probe afterwards so the panel advances on its own.
@@ -1665,6 +1776,8 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   safeRegister("cognis.prepareUninstall", () => runRemoveFromWorkspace("all"));
+
+  safeRegister("cognis.forceCleanup", () => runForceCleanup("workspace"));
 
   safeRegister("cognis.reinstallEngine", () => runReinstallEngine());
 

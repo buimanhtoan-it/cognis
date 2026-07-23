@@ -192,6 +192,7 @@ const FORBIDDEN_ACTION_IDS = new Set([
   "clearReindex",
   "remove",
   "prepareUninstall",
+  "forceCleanup",
 ]);
 
 for (const { kind, expected } of REMEDIATION_DECISION_TABLE) {

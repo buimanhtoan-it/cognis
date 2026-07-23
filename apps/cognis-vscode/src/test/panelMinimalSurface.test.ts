@@ -52,6 +52,7 @@ const ADVANCED_ONLY_ACTIONS = new Set([
   "coldRestart",
   "remove",
   "prepareUninstall",
+  "forceCleanup",
   "startMcp",
   "stopMcp",
   "connectMcp",
@@ -73,6 +74,7 @@ const DESTRUCTIVE_ACTIONS = new Set([
   "coldRestart",
   "remove",
   "prepareUninstall",
+  "forceCleanup",
 ]);
 
 /**

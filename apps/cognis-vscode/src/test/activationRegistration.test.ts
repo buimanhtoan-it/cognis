@@ -340,6 +340,7 @@ const stubModules: Record<string, any> = {
       coldRestart: "cognis.coldRestart",
       remove: "cognis.removeFromWorkspace",
       prepareUninstall: "cognis.prepareUninstall",
+      forceCleanup: "cognis.forceCleanup",
     },
     // Backend-free caption; the real derivation is unit-tested in panel tests.
     // Here it only needs to be a non-empty user string so the notification is
@@ -403,6 +404,13 @@ const stubModules: Record<string, any> = {
       purgedConfigPaths: [],
       mcpRemoved: true,
       configPath: "mcp.json",
+    }),
+    forceRemoveFromWorkspace: async () => ({
+      cognisDirRemoved: true,
+      purgedConfigPaths: [],
+      mcpRemoved: true,
+      configPath: "mcp.json",
+      killedPids: [],
     }),
     repairSetup: async () => ({}),
     resumeSync: async () => {},
@@ -508,6 +516,7 @@ const EXPECTED_COMMANDS = [
   "cognis.updateExtension",
   "cognis.removeFromWorkspace",
   "cognis.prepareUninstall",
+  "cognis.forceCleanup",
   "cognis.reinstallEngine",
   "cognis.uninstallEngine",
   "cognis.coldRestart",

@@ -1,3 +1,4 @@
+import { spawnSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
@@ -29,6 +30,7 @@ import {
   showMcpConfigPreview,
 } from "./mcpConfig";
 import { getCognisMcpdRuntime } from "./mcpRuntime";
+import { readLease } from "./lease";
 import { getMcpServerState } from "./mcpServer";
 import { fetchPrerequisites } from "./prerequisites";
 import type { PanelContext } from "./panel";
@@ -964,6 +966,233 @@ export async function removeFromWorkspace(options?: {
   setAutoManaged(repoRoot, false);
 
   return { configPath, mcpRemoved, cognisDirRemoved, purgedConfigPaths };
+}
+
+/**
+ * Read the daemon pid recorded in ``.cognis/indexd-status.json`` (the file the
+ * Rust indexd writes on start). Returns undefined when the file is missing,
+ * empty, malformed, or carries no positive pid. Used by the force-cleanup path
+ * to catch a daemon whose lease has already expired/rotated but whose process
+ * is still alive and holding the DB lock.
+ */
+function readIndexdStatusPid(repoRoot: string): number | undefined {
+  try {
+    const statusPath = path.join(repoRoot, ".cognis", "indexd-status.json");
+    if (!fs.existsSync(statusPath)) {
+      return undefined;
+    }
+    const raw = fs.readFileSync(statusPath, "utf8").trim();
+    if (!raw) {
+      return undefined;
+    }
+    const parsed = JSON.parse(raw) as { pid?: unknown };
+    const pid = typeof parsed.pid === "number" ? parsed.pid : undefined;
+    return pid && pid > 0 ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Force-terminate the process tree rooted at ``pid``. This is the deliberate
+ * hard-kill used only by the force-cleanup command (the graceful paths remain
+ * lease-verified to avoid PID reuse). On Windows we ``taskkill /T /F`` to reap
+ * the whole tree (indexd/mcpd children are not detached); elsewhere we send
+ * SIGKILL. Idempotent: a falsy/invalid or already-dead pid is a no-op.
+ *
+ * Returns true when a kill was actually attempted against a live process,
+ * false when the pid was invalid or already gone (so the caller can report the
+ * pids it truly terminated).
+ */
+function forceKillPid(pid: number | undefined): boolean {
+  if (!pid || pid <= 0) {
+    return false;
+  }
+  // Skip the extension host's own pid as a safety guard — never self-terminate.
+  if (pid === process.pid) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+  } catch {
+    // Already dead / not our process to see — nothing to do.
+    return false;
+  }
+  try {
+    if (process.platform === "win32") {
+      spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+        windowsHide: true,
+      });
+    } else {
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch {
+        /* fall through to SIGKILL */
+      }
+      process.kill(pid, "SIGKILL");
+    }
+    return true;
+  } catch (err) {
+    getOutputChannel().appendLine(
+      `[force-cleanup] failed to terminate pid ${pid}: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+    return false;
+  }
+}
+
+/**
+ * Forcefully tear Cognis out of the current workspace when the graceful
+ * {@link removeFromWorkspace} can't (a daemon is holding an exclusive lock on
+ * ``uckg.db`` — the classic Windows "database is locked / directory in use"
+ * failure after a crash or reload). This is the automated version of the
+ * manual "find the process holding the .db and Stop-Process it, then delete
+ * .cognis" recovery.
+ *
+ * Steps, in order:
+ *  1. Best-effort graceful stop (reference-counted MCP + indexd) — try to let
+ *     the daemons exit cleanly first so we don't hard-kill needlessly.
+ *  2. Collect every pid Cognis recorded for this repo: the ``indexd.lease`` and
+ *     ``mcpd.lease`` owners, the ``indexd-status.json`` pid, and every live
+ *     ``cognis_mcpd`` process the OS reports. Force-kill each process tree.
+ *  3. Purge MCP wiring (all cognis-* entries when ``purgeAllMcp``).
+ *  4. Delete ``.cognis/`` — retried a few times because Windows may take a
+ *     moment to release the file handles after the owning process dies.
+ *  5. Reset cached state so the panel falls back to "Not set up".
+ *
+ * Returns the same shape as {@link removeFromWorkspace} plus the pids we
+ * terminated, so the caller can report exactly what happened.
+ */
+export async function forceRemoveFromWorkspace(options?: {
+  purgeAllMcp?: boolean;
+}): Promise<{
+  configPath: string;
+  mcpRemoved: boolean;
+  cognisDirRemoved: boolean;
+  purgedConfigPaths: string[];
+  killedPids: number[];
+}> {
+  const folder = requireWorkspaceFolder();
+  const repoRoot = folder.uri.fsPath;
+  const output = getOutputChannel();
+
+  // 1. Best-effort graceful stop first (never let a failure abort the force
+  //    path — that's the whole point of this command).
+  try {
+    await stopLiveIndexing(repoRoot, { force: true });
+  } catch (err) {
+    output.appendLine(
+      `[force-cleanup] graceful stop indexing warning: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+  }
+  setLiveIndexing(repoRoot, false);
+  setIndexStatus(repoRoot, undefined);
+
+  // 2. Collect every recorded / live owner pid and force-kill the tree.
+  const candidatePids = new Set<number>();
+  const indexdLease = readLease(repoRoot, "indexd");
+  if (indexdLease?.pid) {
+    candidatePids.add(indexdLease.pid);
+  }
+  const mcpdLease = readLease(repoRoot, "mcpd");
+  if (mcpdLease?.pid) {
+    candidatePids.add(mcpdLease.pid);
+  }
+  const statusPid = readIndexdStatusPid(repoRoot);
+  if (statusPid) {
+    candidatePids.add(statusPid);
+  }
+  try {
+    const runtime = await getCognisMcpdRuntime(repoRoot);
+    for (const pid of runtime.pids) {
+      candidatePids.add(pid);
+    }
+  } catch (err) {
+    output.appendLine(
+      `[force-cleanup] mcpd runtime probe warning: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+  }
+
+  const killedPids: number[] = [];
+  for (const pid of candidatePids) {
+    if (forceKillPid(pid)) {
+      killedPids.push(pid);
+    }
+  }
+
+  // 3. Disconnect / purge MCP wiring from the editor/host config.
+  let configPath = "";
+  let mcpRemoved = false;
+  const purgedConfigPaths: string[] = [];
+  try {
+    if (options?.purgeAllMcp) {
+      const touched = await removeAllCognisMcpEntries(repoRoot);
+      for (const entry of touched) {
+        purgedConfigPaths.push(entry.configPath);
+        output.appendLine(
+          `[force-cleanup] purged ${entry.serverNames.join(", ")} from ${entry.configPath}`
+        );
+      }
+      mcpRemoved = touched.length > 0;
+      configPath = touched[0]?.configPath ?? "";
+    } else {
+      const result = await disableMcpForWorkspace(repoRoot);
+      configPath = result.configPath;
+      mcpRemoved = result.removed;
+    }
+  } catch (err) {
+    output.appendLine(
+      `[force-cleanup] disable MCP warning: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+  }
+  setMcpEnabled(repoRoot, false);
+
+  // 4. Delete the local index directory, retrying because Windows can hold the
+  //    file handles for a short window after the owning process exits.
+  const cognisDir = path.join(repoRoot, ".cognis");
+  let cognisDirRemoved = false;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      if (!fs.existsSync(cognisDir)) {
+        cognisDirRemoved = true;
+        break;
+      }
+      fs.rmSync(cognisDir, { recursive: true, force: true });
+      cognisDirRemoved = !fs.existsSync(cognisDir);
+      if (cognisDirRemoved) {
+        break;
+      }
+    } catch (err) {
+      lastErr = err;
+    }
+    // Short synchronous back-off — the handle is usually released within ~1s.
+    const start = Date.now();
+    while (Date.now() - start < 250) {
+      /* spin-wait: keep the delete path synchronous */
+    }
+  }
+  if (!cognisDirRemoved && lastErr) {
+    output.appendLine(
+      `[force-cleanup] delete .cognis failed after retries: ${
+        lastErr instanceof Error ? lastErr.message : String(lastErr)
+      }`
+    );
+    throw lastErr;
+  }
+
+  // 5. Reset cached state so the panel falls back to "Not set up".
+  setLastHealth(repoRoot, undefined);
+  setAutoManaged(repoRoot, false);
+
+  return { configPath, mcpRemoved, cognisDirRemoved, purgedConfigPaths, killedPids };
 }
 
 export async function refreshPanelContext(repoRoot: string): Promise<PanelContext> {

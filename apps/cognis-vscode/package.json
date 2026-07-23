@@ -137,6 +137,12 @@
         "icon": "media/command.png"
       },
       {
+        "command": "cognis.forceCleanup",
+        "title": "Force Cleanup (Kill Processes & Delete)",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
         "command": "cognis.reinstallEngine",
         "title": "Reinstall Engine",
         "category": "Cognis",

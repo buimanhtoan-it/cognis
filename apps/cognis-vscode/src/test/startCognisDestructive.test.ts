@@ -325,6 +325,13 @@ const stubModules: Record<string, any> = {
       mcpRemoved: true,
       configPath: "mcp.json",
     })),
+    forceRemoveFromWorkspace: spy("forceRemoveFromWorkspace", async () => ({
+      cognisDirRemoved: true,
+      purgedConfigPaths: [] as string[],
+      mcpRemoved: true,
+      configPath: "mcp.json",
+      killedPids: [] as number[],
+    })),
     repairSetup: async () => ({}),
     resumeSync: async () => {},
     setupWorkspace: spy("setup", async () => {
@@ -526,6 +533,13 @@ const destructiveCases: DestructiveCase[] = [
     confirmLabel: "Cold Restart",
     routine: "removeFromWorkspace",
   },
+  {
+    title: "Force Cleanup (workspace)",
+    command: "cognis.forceCleanup",
+    args: [],
+    confirmLabel: "Force Clean",
+    routine: "forceRemoveFromWorkspace",
+  },
 ];
 
 for (const c of destructiveCases) {
@@ -558,7 +572,7 @@ for (const c of destructiveCases) {
 
 const confirmCases = destructiveCases.filter((c) =>
   // Confirm-path routines that are safe to drive through the stubs.
-  ["cognis.clearAndReindex", "cognis.removeFromWorkspace", "cognis.prepareUninstall", "cognis.uninstallEngine"].includes(
+  ["cognis.clearAndReindex", "cognis.removeFromWorkspace", "cognis.prepareUninstall", "cognis.uninstallEngine", "cognis.forceCleanup"].includes(
     c.command
   )
 );

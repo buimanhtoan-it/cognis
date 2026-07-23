@@ -41,6 +41,7 @@ export const ACTION_COMMANDS: Record<string, string> = {
   coldRestart: "cognis.coldRestart",
   remove: "cognis.removeFromWorkspace",
   prepareUninstall: "cognis.prepareUninstall",
+  forceCleanup: "cognis.forceCleanup",
 };
 
 // Canonical display label for the `cognis.resumeSync` action. Every rendered
@@ -1469,8 +1470,9 @@ function panelHtml(
       <div class="link-actions">
         <button class="link link-danger" data-action="remove" title="Stop indexing, disconnect MCP for this repo, and delete the local .cognis index for this workspace.">Remove from this workspace</button>
         <button class="link link-danger" data-action="prepareUninstall" title="Stop indexing, delete this workspace's .cognis index, remove ALL cognis MCP entries from your editor, and uninstall the Cognis engine Cognis installed. Run this before uninstalling the extension.">Remove everything (prepare to uninstall)</button>
+        <button class="link link-danger" data-action="forceCleanup" title="Force-stop any running Cognis processes (indexd/mcpd) that are holding the local database open, then delete .cognis. Use this when a normal Remove failed because the database was locked (Windows &quot;the process cannot access the file&quot; / &quot;directory not empty&quot;).">Force cleanup (kill processes &amp; delete .cognis)</button>
       </div>
-      <div class="surface-detail">Your source code is never touched. "Remove everything" also uninstalls the engine Cognis installed for you.</div>
+      <div class="surface-detail">Your source code is never touched. "Remove everything" also uninstalls the engine Cognis installed for you. Use "Force cleanup" only if a normal Remove failed because a process was locking the database.</div>
     </div>
   </details>`;
   return htmlDocument(cspSource, nonce, advancedBody);

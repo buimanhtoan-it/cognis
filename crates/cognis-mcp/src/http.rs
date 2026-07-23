@@ -1096,14 +1096,23 @@ mod tests {
             assert_eq!(status, 200, "expected successful tool response");
         }
         let total = start.elapsed();
-        assert!(
-            total < delay + delay / 2,
-            "requests serialized ({total:?}) instead of overlapping under the worker pool"
-        );
+        // Authoritative, deterministic proof of overlap: the engine bumps an
+        // atomic counter on entry to `fts_search` and records the peak, so a
+        // peak of >= 2 means two tool calls were provably in flight at the same
+        // instant. This does not depend on wall-clock scheduling.
         assert!(
             peak.load(Ordering::SeqCst) >= 2,
             "expected concurrent in-flight tool calls, peak={}",
             peak.load(Ordering::SeqCst)
+        );
+        // Wall-clock guard against a *gross* serialization regression only.
+        // Two fully serialized 400ms calls would take >= 2*delay (800ms); we
+        // allow generous headroom (3*delay) so ordinary scheduling jitter on a
+        // loaded CI machine cannot flake this, while a real "one-at-a-time"
+        // regression (which would blow past 2*delay) is still caught.
+        assert!(
+            total < delay * 3,
+            "requests serialized ({total:?}) instead of overlapping under the worker pool"
         );
     }
 

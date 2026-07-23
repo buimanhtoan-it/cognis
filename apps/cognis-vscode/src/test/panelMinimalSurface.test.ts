@@ -7,6 +7,7 @@ import test from "node:test";
 import fc from "fast-check";
 
 import { renderPanelHtml, type PanelContext } from "../panel";
+import { FIRST_PROBE_COMPATIBILITY_SNAPSHOT } from "../compatibility";
 import type {
   HealthReport,
   IndexStatusReport,
@@ -157,6 +158,7 @@ const arbPrerequisites: fc.Arbitrary<PrerequisiteReport | undefined> = fc.option
  * generated case renders the Minimal_Surface.
  */
 const arbMinimalPanelContext: fc.Arbitrary<PanelContext> = fc.record({
+  compatibility: fc.constant(FIRST_PROBE_COMPATIBILITY_SNAPSHOT),
   status: fc.constantFrom(...WORKSPACE_STATUSES),
   advancedMode: fc.constant(false),
   liveIndexing: fc.boolean(),

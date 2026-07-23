@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { renderPrerequisitesSection, type PanelContext } from "../panel";
+import { FIRST_PROBE_COMPATIBILITY_SNAPSHOT } from "../compatibility";
 import type { PrerequisiteReport } from "../types";
 
 function makeReport(overrides: Partial<PrerequisiteReport> = {}): PrerequisiteReport {
@@ -37,7 +38,11 @@ function makeReport(overrides: Partial<PrerequisiteReport> = {}): PrerequisiteRe
 }
 
 function ctx(report: PrerequisiteReport | undefined): PanelContext {
-  return { status: "notInstalled", prerequisites: report };
+  return {
+    status: "notInstalled",
+    compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+    prerequisites: report,
+  };
 }
 
 test("prerequisites section is empty when there is no report", () => {

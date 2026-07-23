@@ -89,6 +89,18 @@ test("a stale engine build (older than the extension) is flagged as engine-outda
   assert.match(handshakeWarning(result) ?? "", /0\.8\.4.*0\.8\.10|Install Backend/i);
 });
 
+test("engine 0.8.10 is outdated for extension 0.8.11 and preserves the version pair", () => {
+  const result = evaluateHandshake(payload({ engine_version: "0.8.10" }), "0.8.11");
+  assert.equal(result.compatibility, "engine-outdated");
+  assert.equal(result.usable, true);
+  assert.equal(result.engineVersion, "0.8.10");
+  assert.equal(result.expectedEngineVersion, "0.8.11");
+
+  const warning = handshakeWarning(result) ?? "";
+  assert.match(warning, /0\.8\.10/);
+  assert.match(warning, /0\.8\.11/);
+});
+
 test("a matching engine build stays ok", () => {
   const result = evaluateHandshake(payload({ engine_version: "0.8.10" }), "0.8.10");
   assert.equal(result.compatibility, "ok");

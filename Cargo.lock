@@ -274,7 +274,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cognis"
-version = "0.8.11"
+version = "0.8.12"
 dependencies = [
  "cognis-cli",
  "cognis-indexd",
@@ -283,7 +283,7 @@ dependencies = [
 
 [[package]]
 name = "cognis-cli"
-version = "0.8.11"
+version = "0.8.12"
 dependencies = [
  "clap",
  "cognis-core",
@@ -297,7 +297,7 @@ dependencies = [
 
 [[package]]
 name = "cognis-core"
-version = "0.8.11"
+version = "0.8.12"
 dependencies = [
  "proptest",
  "serde",
@@ -309,7 +309,7 @@ dependencies = [
 
 [[package]]
 name = "cognis-csar"
-version = "0.8.11"
+version = "0.8.12"
 dependencies = [
  "cognis-core",
  "proptest",
@@ -318,7 +318,7 @@ dependencies = [
 
 [[package]]
 name = "cognis-embed"
-version = "0.8.11"
+version = "0.8.12"
 dependencies = [
  "cognis-core",
  "criterion",
@@ -331,7 +331,7 @@ dependencies = [
 
 [[package]]
 name = "cognis-eval"
-version = "0.8.11"
+version = "0.8.12"
 dependencies = [
  "cognis-core",
  "cognis-csar",
@@ -346,7 +346,7 @@ dependencies = [
 
 [[package]]
 name = "cognis-indexd"
-version = "0.8.11"
+version = "0.8.12"
 dependencies = [
  "clap",
  "cognis-core",
@@ -362,7 +362,7 @@ dependencies = [
 
 [[package]]
 name = "cognis-indexer"
-version = "0.8.11"
+version = "0.8.12"
 dependencies = [
  "cognis-core",
  "cognis-embed",
@@ -386,7 +386,7 @@ dependencies = [
 
 [[package]]
 name = "cognis-mcp"
-version = "0.8.11"
+version = "0.8.12"
 dependencies = [
  "cognis-core",
  "cognis-csar",
@@ -401,7 +401,7 @@ dependencies = [
 
 [[package]]
 name = "cognis-mcpd"
-version = "0.8.11"
+version = "0.8.12"
 dependencies = [
  "cognis-core",
  "cognis-embed",
@@ -411,7 +411,7 @@ dependencies = [
 
 [[package]]
 name = "cognis-retrieval"
-version = "0.8.11"
+version = "0.8.12"
 dependencies = [
  "cognis-core",
  "cognis-csar",
@@ -424,7 +424,7 @@ dependencies = [
 
 [[package]]
 name = "cognis-store"
-version = "0.8.11"
+version = "0.8.12"
 dependencies = [
  "cognis-core",
  "rusqlite",
@@ -2372,7 +2372,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "xtask"
-version = "0.8.11"
+version = "0.8.12"
 dependencies = [
  "anyhow",
  "clap",

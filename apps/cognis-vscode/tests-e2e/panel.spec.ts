@@ -417,3 +417,171 @@ test.describe("panel minimal vs advanced surfaces", () => {
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Compatibility (version-skew) surfaces (Requirements R1.4, R1.5, R3.1, R3.4,
+// R3.5, R3.6, R3.9, R6.1, R6.2, R8.7, R8.8).
+//
+// For each Compatibility_Kind that maps to a distinct Compatibility_Primary_
+// Action, the fixtures (src/sim/fixtures.ts) render a Minimal and an Advanced
+// surface whose ONLY reason to show a remediation control is the committed
+// Confirmed_Mismatch (the base workspace state is healthy/connected/ready).
+//
+// This block asserts, by name, for BOTH advancedMode states:
+//   - exactly one Unified_Control ([data-unified]) renders (R3.1);
+//   - its label is the correct remediation label (R3.4/R3.5/R3.6) and its
+//     data-action resolves to the expected registered command (R3.9);
+//   - the Minimal_Surface leaks no Advanced_Only_Action (R3.9/R8.8);
+//   - no user-visible text contains "Backend" or the banned jargon (R6.1/R6.2).
+// ---------------------------------------------------------------------------
+
+interface CompatSurfaceCase {
+  name: string;
+  advanced: boolean;
+  label: string;
+  action: string;
+  command: string;
+}
+
+const COMPAT_SURFACE_CASES: CompatSurfaceCase[] = [
+  {
+    name: "compat-engine-outdated-minimal",
+    advanced: false,
+    label: "Update Engine",
+    action: "installBackend",
+    command: "cognis.installBackend",
+  },
+  {
+    name: "compat-engine-outdated-advanced",
+    advanced: true,
+    label: "Update Engine",
+    action: "installBackend",
+    command: "cognis.installBackend",
+  },
+  {
+    name: "compat-engine-newer-minimal",
+    advanced: false,
+    label: "Update Extension",
+    action: "updateExtension",
+    command: "cognis.updateExtension",
+  },
+  {
+    name: "compat-engine-newer-advanced",
+    advanced: true,
+    label: "Update Extension",
+    action: "updateExtension",
+    command: "cognis.updateExtension",
+  },
+  {
+    name: "compat-unreadable-minimal",
+    advanced: false,
+    label: "Repair Engine",
+    action: "reinstallEngine",
+    command: "cognis.reinstallEngine",
+  },
+  {
+    name: "compat-unreadable-advanced",
+    advanced: true,
+    label: "Repair Engine",
+    action: "reinstallEngine",
+    command: "cognis.reinstallEngine",
+  },
+];
+
+test.describe("panel compatibility remediation surfaces", () => {
+  for (const c of COMPAT_SURFACE_CASES) {
+    test(`${c.name}: single Unified_Control labeled "${c.label}" resolving to ${c.command}`, async ({
+      page,
+    }) => {
+      const fx = fixtureByName(c.name);
+      await page.goto(pageUrl(fx.file));
+      await expandAll(page);
+
+      // R3.1: exactly one Unified_Control on both surfaces, even with a
+      // Confirmed_Mismatch replacing Start/Pause/Resume.
+      const unified = page.locator("[data-unified]");
+      expect(
+        await unified.count(),
+        `${c.name} must render exactly one Unified_Control`,
+      ).toBe(1);
+
+      // R3.4/R3.5/R3.6: the Unified_Control shows the correct remediation label.
+      const label = ((await unified.textContent()) ?? "").trim();
+      expect(label, `${c.name} Unified_Control label`).toBe(c.label);
+
+      // R3.9: its data-action resolves to the expected registered command.
+      const action = await unified.getAttribute("data-action");
+      expect(action, `${c.name} Unified_Control data-action`).toBe(c.action);
+      expect(
+        manifest.commandMap[action ?? ""],
+        `${c.name} action "${action}" must resolve to ${c.command}`,
+      ).toBe(c.command);
+
+      // R5.5: the accessible name matches the visible label (button text is the
+      // accessible name for a plain <button>).
+      const accessibleName = ((await unified.textContent()) ?? "").trim();
+      expect(accessibleName.length, `${c.name} accessible name is non-empty`).toBeGreaterThan(0);
+      expect(accessibleName).toBe(c.label);
+    });
+  }
+
+  // Minimal_Surface compatibility fixtures must not leak any Advanced_Only_Action
+  // (R3.9/R8.8) and must have no dead buttons (R8.5).
+  //
+  // The Unified_Control itself is the one legitimate primary control. For the
+  // `unreadable` case that control's data-action IS `reinstallEngine` — the
+  // permitted Compatibility_Primary_Action (Repair Engine, R3.6), NOT a leaked
+  // danger-zone button. So the Advanced_Only_Action leak scan explicitly
+  // excludes whatever element carries `data-unified`: any OTHER occurrence of a
+  // danger-zone action would still be a leak.
+  for (const c of COMPAT_SURFACE_CASES.filter((x) => !x.advanced)) {
+    test(`${c.name}: Minimal_Surface has no Advanced_Only_Action and no dead buttons`, async ({
+      page,
+    }) => {
+      const fx = fixtureByName(c.name);
+      await page.goto(pageUrl(fx.file));
+      await expandAll(page);
+
+      // Actions carried by non-Unified_Control elements (a second button).
+      const nonUnifiedActions = await page.$$eval("[data-action]", (els) =>
+        els
+          .filter((e) => !e.hasAttribute("data-unified"))
+          .map((e) => ({
+            id: e.getAttribute("data-action") ?? "",
+            itemId: e.getAttribute("data-item"),
+          })),
+      );
+      const leaked = nonUnifiedActions
+        .map((a) => a.id)
+        .filter((id) => ADVANCED_ONLY_ACTIONS.has(id));
+      expect(
+        leaked,
+        `${c.name} must not leak Advanced_Only_Action(s): ${leaked.join(", ")}`,
+      ).toEqual([]);
+
+      // No dead buttons anywhere on the surface (including the Unified_Control).
+      assertNoDeadButtons(await readRenderedActions(page), c.name);
+    });
+  }
+
+  // Wording coherence for the compatibility surfaces: no user-visible "Backend"
+  // and none of the banned jargon (R6.1/R6.2). The per-fixture wording loop
+  // already covers this generically, but this asserts it explicitly for the
+  // version-skew surfaces the feature adds.
+  for (const c of COMPAT_SURFACE_CASES) {
+    test(`${c.name}: no "Backend"/jargon in visible text`, async ({ page }) => {
+      const fx = fixtureByName(c.name);
+      await page.goto(pageUrl(fx.file));
+      await expandAll(page);
+      const lower = ((await page.locator("body").textContent()) ?? "").toLowerCase();
+
+      expect(lower, 'visible text must not contain "Backend"').not.toContain("backend");
+      for (const term of BANNED_JARGON) {
+        expect(
+          lower,
+          `visible text must not contain banned jargon "${term}"`,
+        ).not.toContain(term.toLowerCase());
+      }
+    });
+  }
+});

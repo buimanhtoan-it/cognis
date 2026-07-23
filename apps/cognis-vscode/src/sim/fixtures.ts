@@ -7,9 +7,94 @@
  * standalone page and exercised by the Playwright spec.
  */
 import type { PanelContext } from "../panel";
+import {
+  FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+  compatibilitySnapshotFromHandshake,
+} from "../compatibility";
+import type { CompatibilitySnapshot } from "../compatibility";
+import {
+  evaluateHandshake,
+  REQUIRED_CLI_COMMANDS,
+  REQUIRED_MCP_TOOLS,
+} from "../contract";
+import type { ContractCompatibility, HandshakePayload } from "../contract";
 import type { HealthReport, PrerequisiteReport } from "../types";
 
 const VERSION = "0.4.0";
+
+// The Extension build these compatibility fixtures pretend to run as. The
+// mismatch fixtures drive a real `evaluateHandshake` against this expected
+// version so the verdicts are faithful (not hand-forged) — the exact
+// `0.8.10 -> 0.8.11` skew from Requirement 8.1.
+const EXPECTED_ENGINE_VERSION = "0.8.11";
+
+/** A complete, capability-full handshake payload; overrides tweak one field. */
+function completeHandshake(
+  overrides: Partial<HandshakePayload> = {}
+): HandshakePayload {
+  return {
+    contract_version: 1,
+    engine_version: EXPECTED_ENGINE_VERSION,
+    cli_commands: [...REQUIRED_CLI_COMMANDS],
+    mcp_tools: [...REQUIRED_MCP_TOOLS],
+    ...overrides,
+  };
+}
+
+/**
+ * Build a committed Confirmed_Mismatch snapshot for one Compatibility_Kind by
+ * running the real contract evaluator, so the sim renders the actual mismatch
+ * verdict the production pipeline would commit.
+ */
+function confirmedMismatch(
+  kind: Exclude<ContractCompatibility, "ok">
+): CompatibilitySnapshot {
+  let result;
+  switch (kind) {
+    case "engine-outdated":
+      result = evaluateHandshake(
+        completeHandshake({ engine_version: "0.8.10" }),
+        EXPECTED_ENGINE_VERSION
+      );
+      break;
+    case "engine-newer":
+      result = evaluateHandshake(
+        completeHandshake({ engine_version: "0.8.12" }),
+        EXPECTED_ENGINE_VERSION
+      );
+      break;
+    case "backend-older":
+      result = evaluateHandshake(
+        completeHandshake({ contract_version: 0 }),
+        EXPECTED_ENGINE_VERSION
+      );
+      break;
+    case "backend-newer":
+      result = evaluateHandshake(
+        completeHandshake({ contract_version: 2 }),
+        EXPECTED_ENGINE_VERSION
+      );
+      break;
+    case "capabilities-missing":
+      result = evaluateHandshake(
+        completeHandshake({ cli_commands: REQUIRED_CLI_COMMANDS.slice(0, -1) }),
+        EXPECTED_ENGINE_VERSION
+      );
+      break;
+    case "unreadable":
+      result = evaluateHandshake(
+        completeHandshake({ contract_version: undefined as unknown as number }),
+        EXPECTED_ENGINE_VERSION
+      );
+      break;
+  }
+  if (result.compatibility !== kind) {
+    throw new Error(
+      `confirmedMismatch("${kind}") produced "${result.compatibility}"`
+    );
+  }
+  return compatibilitySnapshotFromHandshake(result, 1, Date.now());
+}
 
 const healthOk: HealthReport = {
   runtime_version: VERSION,
@@ -64,7 +149,20 @@ export interface NamedFixture {
   context: PanelContext;
 }
 
-export const FIXTURES: NamedFixture[] = [
+interface FixtureDefinition {
+  name: string;
+  title: string;
+  context: Omit<PanelContext, "compatibility">;
+  /**
+   * Optional committed compatibility snapshot. When omitted the fixture is
+   * promoted through the deterministic first-probe snapshot (compatible /
+   * unprobed). Confirmed_Mismatch fixtures supply an explicit snapshot so the
+   * panel derives the Compatibility_Primary_Action.
+   */
+  compatibility?: CompatibilitySnapshot;
+}
+
+const FIXTURE_DEFINITIONS: FixtureDefinition[] = [
   {
     name: "fresh-machine",
     title: "Fresh machine — backend not installed",
@@ -366,4 +464,125 @@ export const FIXTURES: NamedFixture[] = [
       version: VERSION,
     },
   },
+  // ---------------------------------------------------------------------------
+  // Compatibility (version-skew) coverage — Requirement 8.7/8.8, Playwright
+  // task 6.1. Each Compatibility_Kind that maps to a distinct
+  // Compatibility_Primary_Action gets a Minimal and an Advanced fixture:
+  //   - engine-outdated → Update Engine   (installBackend)
+  //   - engine-newer    → Update Extension (updateExtension)
+  //   - unreadable      → Repair Engine    (reinstallEngine, modal)
+  //
+  // The base workspace state is healthy/connected/ready so the ONLY reason the
+  // panel shows "Needs attention" + a remediation control is the committed
+  // Confirmed_Mismatch — proving compatibility overrides a would-be "Ready".
+  // Names are stable/greppable so the Playwright spec can consume them directly.
+  // ---------------------------------------------------------------------------
+  {
+    name: "compat-engine-outdated-minimal",
+    title: "Minimal — Engine outdated (Update Engine)",
+    context: {
+      status: "mcpEnabled",
+      health: healthOk,
+      liveIndexing: true,
+      configured: true,
+      mcpEnabled: true,
+      advancedMode: false,
+      version: VERSION,
+    },
+    compatibility: confirmedMismatch("engine-outdated"),
+  },
+  {
+    name: "compat-engine-outdated-advanced",
+    title: "Advanced — Engine outdated (Update Engine)",
+    context: {
+      status: "mcpEnabled",
+      health: healthOk,
+      liveIndexing: true,
+      configured: true,
+      mcpEnabled: true,
+      mcpHost: "vscode",
+      mcpServerName: "cognis",
+      mcpConfigPath: ".vscode/mcp.json",
+      advancedMode: true,
+      version: VERSION,
+    },
+    compatibility: confirmedMismatch("engine-outdated"),
+  },
+  {
+    name: "compat-engine-newer-minimal",
+    title: "Minimal — Engine newer (Update Extension)",
+    context: {
+      status: "mcpEnabled",
+      health: healthOk,
+      liveIndexing: true,
+      configured: true,
+      mcpEnabled: true,
+      advancedMode: false,
+      version: VERSION,
+    },
+    compatibility: confirmedMismatch("engine-newer"),
+  },
+  {
+    name: "compat-engine-newer-advanced",
+    title: "Advanced — Engine newer (Update Extension)",
+    context: {
+      status: "mcpEnabled",
+      health: healthOk,
+      liveIndexing: true,
+      configured: true,
+      mcpEnabled: true,
+      mcpHost: "vscode",
+      mcpServerName: "cognis",
+      mcpConfigPath: ".vscode/mcp.json",
+      advancedMode: true,
+      version: VERSION,
+    },
+    compatibility: confirmedMismatch("engine-newer"),
+  },
+  {
+    name: "compat-unreadable-minimal",
+    title: "Minimal — Engine unreadable (Repair Engine)",
+    context: {
+      status: "mcpEnabled",
+      health: healthOk,
+      liveIndexing: true,
+      configured: true,
+      mcpEnabled: true,
+      advancedMode: false,
+      version: VERSION,
+    },
+    compatibility: confirmedMismatch("unreadable"),
+  },
+  {
+    name: "compat-unreadable-advanced",
+    title: "Advanced — Engine unreadable (Repair Engine)",
+    context: {
+      status: "mcpEnabled",
+      health: healthOk,
+      liveIndexing: true,
+      configured: true,
+      mcpEnabled: true,
+      mcpHost: "vscode",
+      mcpServerName: "cognis",
+      mcpConfigPath: ".vscode/mcp.json",
+      advancedMode: true,
+      version: VERSION,
+    },
+    compatibility: confirmedMismatch("unreadable"),
+  },
 ];
+
+/**
+ * Simulator states predate coordinator-backed probing, so every definition is
+ * promoted through the explicit deterministic first-probe snapshot unless it
+ * supplies its own committed Confirmed_Mismatch snapshot (the compatibility
+ * fixtures).
+ */
+export const FIXTURES: NamedFixture[] = FIXTURE_DEFINITIONS.map((fixture) => ({
+  name: fixture.name,
+  title: fixture.title,
+  context: {
+    compatibility: fixture.compatibility ?? FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+    ...fixture.context,
+  },
+}));

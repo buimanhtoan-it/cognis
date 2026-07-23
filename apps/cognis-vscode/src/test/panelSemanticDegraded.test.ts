@@ -12,6 +12,7 @@ import {
   isSemanticOnlyDegraded,
   type PanelContext,
 } from "../panel";
+import { FIRST_PROBE_COMPATIBILITY_SNAPSHOT } from "../compatibility";
 import type { HealthReport } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -33,6 +34,7 @@ const ok = { status: "ok", message: "ok" };
 function runningCtx(health: HealthReport): PanelContext {
   return {
     status: "ready",
+    compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
     advancedMode: false,
     liveIndexing: true,
     mcpEnabled: true,
@@ -40,7 +42,7 @@ function runningCtx(health: HealthReport): PanelContext {
     configured: true,
     backendAvailable: true,
     health,
-  } as PanelContext;
+  };
 }
 
 function health(
@@ -62,7 +64,13 @@ test("isSemanticOnlyDegraded: index ok + vector warn is semantic-only", () => {
 });
 
 test("isSemanticOnlyDegraded: false when health absent or overall ok", () => {
-  assert.equal(isSemanticOnlyDegraded({ status: "ready" } as PanelContext), false);
+  assert.equal(
+    isSemanticOnlyDegraded({
+      status: "ready",
+      compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+    }),
+    false
+  );
   assert.equal(
     isSemanticOnlyDegraded(
       runningCtx(health("ok", { config: ok, db: ok, index: ok, vector: ok }))

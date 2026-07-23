@@ -5,6 +5,13 @@ import type {
   PrerequisiteReport,
   WorkspaceStatus,
 } from "./types";
+import type { HandshakeResult } from "./contract";
+import type { CompatibilitySnapshot } from "./compatibility";
+import {
+  FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+  deriveRemediation,
+  isConfirmedMismatch,
+} from "./compatibility";
 import { isIndexStatusBusy } from "./state";
 
 /**
@@ -30,6 +37,7 @@ export const ACTION_COMMANDS: Record<string, string> = {
   installAllPrerequisites: "cognis.installAllPrerequisites",
   installBackend: "cognis.installBackend",
   reinstallEngine: "cognis.reinstallEngine",
+  updateExtension: "cognis.updateExtension",
   coldRestart: "cognis.coldRestart",
   remove: "cognis.removeFromWorkspace",
   prepareUninstall: "cognis.prepareUninstall",
@@ -42,6 +50,8 @@ const RESUME_SYNC_LABEL = "Resume sync";
 
 export interface PanelContext {
   status: WorkspaceStatus;
+  /** Compatibility verdict committed for the same workspace snapshot. */
+  compatibility: CompatibilitySnapshot;
   health?: HealthReport;
   liveIndexing?: boolean;
   mcpEnabled?: boolean;
@@ -96,14 +106,35 @@ export interface PanelContext {
 export type CognisState = "off" | "running" | "paused";
 
 /**
- * The unified primary control. Its `data-action` id always maps to a
- * Non_Destructive_Action (`startCognis` | `pauseSync` | `resumeSync`) and its
- * label changes with the {@link CognisState}.
+ * data-action ids the {@link UnifiedControl} can carry. Two disjoint groups:
+ *  - Operational_Primary_Action: `startCognis` | `pauseSync` | `resumeSync`
+ *    (the Start/Pause/Resume model from `extension-minimal-panel`).
+ *  - Compatibility_Primary_Action: `installBackend` | `updateExtension` |
+ *    `reinstallEngine` — the three permitted, non-Cold-Restart remediation
+ *    commands a Confirmed_Mismatch temporarily promotes to *the* one control
+ *    (Requirement 3.4–3.7). Every id resolves through {@link ACTION_COMMANDS}.
+ */
+export type UnifiedControlId =
+  | "startCognis"
+  | "pauseSync"
+  | "resumeSync"
+  | "installBackend"
+  | "updateExtension"
+  | "reinstallEngine";
+
+/**
+ * The unified primary control. Its `data-action` id always maps through
+ * {@link ACTION_COMMANDS} to a registered command. When there is no actionable
+ * Confirmed_Mismatch the id is an Operational_Primary_Action
+ * (`startCognis` | `pauseSync` | `resumeSync`); when a mismatch needs the user
+ * it becomes the Compatibility_Primary_Action (`installBackend` |
+ * `updateExtension` | `reinstallEngine`). It is never a Cold Restart /
+ * rebuild / remove action.
  */
 export interface UnifiedControl {
-  /** data-action id; always in ACTION_COMMANDS and always Non_Destructive. */
-  id: "startCognis" | "pauseSync" | "resumeSync";
-  /** "Start Cognis" | "Pause" | "Resume". */
+  /** data-action id; always resolves through ACTION_COMMANDS. */
+  id: UnifiedControlId;
+  /** e.g. "Start Cognis" | "Pause" | "Resume" | "Update Engine". */
   label: string;
 }
 
@@ -163,17 +194,35 @@ export function deriveCognisState(ctx: PanelContext): CognisState {
 }
 
 /**
- * Derive the single unified primary control from the current context. The
- * mapping is fixed on {@link deriveCognisState}:
+ * Derive the single unified primary control from the current context.
+ *
+ * An actionable Confirmed_Mismatch takes priority: when the committed
+ * compatibility snapshot is a confirmed non-`ok` verdict *and* it maps to a
+ * remediation (via {@link deriveRemediation}), the control becomes the
+ * Compatibility_Primary_Action — exactly one control whose `data-action`
+ * resolves to the remediation command (`installBackend` | `updateExtension` |
+ * `reinstallEngine`), replacing Start/Pause/Resume until the mismatch is
+ * resolved (Requirement 3.3–3.7). It is never a Cold Restart / rebuild /
+ * remove action.
+ *
+ * Otherwise the mapping is the Operational_Primary_Action fixed on
+ * {@link deriveCognisState}:
  *  - `off`     → `{ id: "startCognis", label: "Start Cognis" }`
  *  - `running` → `{ id: "pauseSync",   label: "Pause" }`
  *  - `paused`  → `{ id: "resumeSync",  label: "Resume" }`
  *
- * The `id` is therefore always in the Non_Destructive_Action set
- * `{startCognis, pauseSync, resumeSync}` and never resolves to a
- * Destructive_Action.
+ * so the id stays within the Non_Destructive Operational set and never
+ * resolves to a Destructive_Action.
  */
 export function deriveUnifiedControl(ctx: PanelContext): UnifiedControl {
+  // Compatibility_Primary_Action overrides Start/Pause/Resume whenever a
+  // confirmed mismatch has an actionable remediation (Requirement 3.3).
+  if (isConfirmedMismatch(ctx.compatibility)) {
+    const remediation = deriveRemediation(ctx.compatibility.result);
+    if (remediation) {
+      return { id: remediation.actionId, label: remediation.label };
+    }
+  }
   switch (deriveCognisState(ctx)) {
     case "running":
       return { id: "pauseSync", label: "Pause" };
@@ -258,6 +307,13 @@ export function deriveStatusLine(ctx: PanelContext): StatusLineText {
   ) {
     return "Working";
   }
+  // A Confirmed_Mismatch the user must act on takes priority over every idle
+  // verdict below: it overrides both "Ready" and the semantic-only-degraded
+  // case, so a version-skewed workspace never reads as fully ready (R1.4,
+  // R1.5). Busy indexing above still shows "Working" first.
+  if (isConfirmedMismatch(ctx.compatibility)) {
+    return "Needs attention";
+  }
   // The user explicitly paused index sync.
   if (ctx.syncPaused === true) {
     return "Paused";
@@ -299,6 +355,19 @@ export function deriveStatusHint(ctx: PanelContext): string {
   if (line === "Ready" && isSemanticOnlyDegraded(ctx)) {
     return "Ready — semantic search is still building in the background; lexical and structural search work now.";
   }
+  // A Confirmed_Mismatch reads as "Needs attention" (R1.4). Instead of the
+  // generic "turn on Advanced mode" caption, name whether the Engine or the
+  // Extension needs updating and how to proceed, matched 1:1 to the
+  // Compatibility_Primary_Action (R6.4). The caption is drawn from a closed,
+  // plain-language vocabulary and never leaks a raw version/URL/id/error — the
+  // raw versions live only in the labeled Advanced_Surface detail (R6.2, R6.3,
+  // Correctness Property 3).
+  if (line === "Needs attention" && isConfirmedMismatch(ctx.compatibility)) {
+    const hint = deriveCompatibilityHint(ctx.compatibility.result);
+    if (hint) {
+      return hint;
+    }
+  }
   switch (line) {
     case "Off":
       return "Not running yet. Click Start Cognis to set up and index this workspace.";
@@ -310,6 +379,37 @@ export function deriveStatusHint(ctx: PanelContext): string {
       return "Running and up to date. Your editor’s AI can search this workspace.";
     case "Needs attention":
       return "Something needs a look. Turn on Advanced mode (setting: cognis.advancedMode) to see details.";
+  }
+}
+
+/**
+ * The plain-language "Needs attention" caption for a confirmed compatibility
+ * mismatch, chosen 1:1 by the remediation the mismatch maps to (R6.4). Each
+ * caption names whether the Engine or the Extension needs updating and how to
+ * proceed, using only the user vocabulary "Engine"/"Extension".
+ *
+ * The captions are a closed vocabulary and deliberately carry NO raw technical
+ * value — no raw version numbers, URLs, server ids, or verbatim error strings
+ * (R6.2, Correctness Property 3). The raw Engine/Extension versions appear only
+ * in the labeled Advanced_Surface detail rendered by
+ * {@link renderCompatibilityDetail} (R6.3). Returns `undefined` for a result
+ * with no remediation (e.g. `ok`), so the caller falls back to the generic
+ * caption.
+ */
+export function deriveCompatibilityHint(
+  result: HandshakeResult
+): string | undefined {
+  const remediation = deriveRemediation(result);
+  if (!remediation) {
+    return undefined;
+  }
+  switch (remediation.actionId) {
+    case "installBackend":
+      return "The Engine needs updating to match the Extension. Click Update Engine to continue.";
+    case "updateExtension":
+      return "The Extension needs updating to match the Engine. Click Update Extension to continue.";
+    case "reinstallEngine":
+      return "The Engine could not be read and needs repair. Click Repair Engine to continue.";
   }
 }
 
@@ -695,8 +795,15 @@ export function derivePanelView(ctx: PanelContext): PanelView {
  */
 export function outcomeLabelForContext(ctx: PanelContext): string {
   const view = derivePanelView(ctx);
-  if (ctx.status === "indexing") {
+  if (ctx.status === "indexing" || isIndexStatusBusy(ctx.indexStatus)) {
     return "$(sync~spin) Cognis: Indexing";
+  }
+  // Mirror deriveStatusLine: a Confirmed_Mismatch the user must act on reads as
+  // "Action needed", overriding the "Ready"/warn verdicts below regardless of
+  // health being ok or semantic/vector warnings (R1.4). Busy indexing above
+  // still shows "Indexing" first.
+  if (isConfirmedMismatch(ctx.compatibility)) {
+    return "$(warning) Cognis: Action needed";
   }
   if (view.statusClass === "status-ok") {
     return ctx.mcpEnabled
@@ -1128,6 +1235,64 @@ export function renderPrerequisitesSection(context: PanelContext): string {
   </div>`;
 }
 
+/**
+ * Render the labeled Advanced_Surface detail area that carries the RAW Engine
+ * and Extension version strings for a confirmed mismatch (R6.3).
+ *
+ * This is the ONLY place the raw versions are allowed to appear: a detail
+ * surface with explicit labels ("Engine version" / "Extension version"),
+ * separate from the main status text (the Status_Line + caption never embed a
+ * raw version — see {@link deriveCompatibilityHint}, Correctness Property 3).
+ * Rendered only on the Advanced_Surface; the Minimal_Surface never calls it, so
+ * the raw versions can never leak onto the minimal surface.
+ *
+ * Returns "" when there is no confirmed mismatch (nothing to show) so the
+ * advanced body stays clean in the healthy/operational case.
+ */
+export function renderCompatibilityDetail(context: PanelContext): string {
+  const snapshot = context.compatibility;
+  if (!isConfirmedMismatch(snapshot)) {
+    return "";
+  }
+  const result = snapshot.result;
+  const remediation = deriveRemediation(result);
+  // Only surface versions we actually have; a labeled row is omitted when the
+  // corresponding version is unknown (e.g. an unreadable payload).
+  const rows: string[] = [];
+  if (result.engineVersion) {
+    rows.push(
+      `<div class="surface-detail">Engine version: <code>${escapeHtml(
+        result.engineVersion
+      )}</code></div>`
+    );
+  }
+  if (result.expectedEngineVersion) {
+    rows.push(
+      `<div class="surface-detail">Extension expects Engine version: <code>${escapeHtml(
+        result.expectedEngineVersion
+      )}</code></div>`
+    );
+  }
+  if (context.version) {
+    rows.push(
+      `<div class="surface-detail">Extension version: <code>${escapeHtml(
+        context.version
+      )}</code></div>`
+    );
+  }
+  const caption = remediation
+    ? deriveCompatibilityHint(result) ?? ""
+    : "";
+  const captionRow = caption
+    ? `<div class="surface-detail">${escapeHtml(caption)}</div>`
+    : "";
+  return `<div class="surface">
+    <div class="surface-title">Compatibility</div>
+    ${captionRow}
+    ${rows.join("\n    ")}
+  </div>`;
+}
+
 function panelHtml(
   logoSrc: vscode.Uri,
   cspSource: string,
@@ -1223,6 +1388,8 @@ function panelHtml(
         : ""
     }
   </div>
+
+  ${renderCompatibilityDetail(context)}
 
   ${renderStepperSection(context)}
 
@@ -1912,13 +2079,20 @@ export class CognisPanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "cognis.controlPanel";
 
   private view?: vscode.WebviewView;
-  private context: PanelContext = { status: "unknown" };
+  private context: PanelContext = {
+    status: "unknown",
+    compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+  };
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly version?: string
   ) {
-    this.context = { status: "unknown", version };
+    this.context = {
+      status: "unknown",
+      compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+      version,
+    };
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {

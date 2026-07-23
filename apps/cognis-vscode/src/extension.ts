@@ -32,13 +32,26 @@ import {
   stopMcpServer,
 } from "./mcpServer";
 import {
+  ACTION_COMMANDS,
   CognisPanelProvider,
+  deriveCompatibilityHint,
   outcomeLabelForContext,
   type PanelContext,
 } from "./panel";
 import { reconcileWorkspaceOnActivate } from "./reconcile";
 import { performHandshake } from "./handshake";
-import { handshakeWarning } from "./contract";
+import {
+  FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+  compatibilityIdentityKey,
+  deriveRemediation,
+  type CompatibilityRemediation,
+} from "./compatibility";
+import {
+  CompatibilityCoordinator,
+  StaleCompatibilityProbeError,
+} from "./compatibilityCoordinator";
+import { canonicalizePath } from "./mcpCanonical";
+import { type HandshakeResult } from "./contract";
 import {
   addCognisToGitignore,
   shouldRemindGitignore,
@@ -86,10 +99,18 @@ let statusBarItem: vscode.StatusBarItem;
 let panelProvider: CognisPanelProvider;
 let healthPollTimer: ReturnType<typeof setInterval> | undefined;
 let extensionContext: vscode.ExtensionContext | undefined;
+let compatibilityCoordinator: CompatibilityCoordinator | undefined;
 let lastPrerequisites: PrerequisiteReport | undefined;
 let backendAvailable: boolean | undefined;
 let indexingActive = false;
 let blockingIndexMessage: string | undefined;
+/**
+ * Compatibility_Identity keys already notified during the current activation
+ * session. Reset on every {@link activate} so at most one notification is shown
+ * per identity per session (Requirement 4.2). Purely in-memory; the persistent
+ * per-skew "skip" (Dismiss across sessions) stays in ``globalState``.
+ */
+const seenCompatibilityIdentities = new Set<string>();
 let autoIndexStartPromise: Promise<void> | undefined;
 /**
  * Monotonic sequence guarding {@link pollHealth} against out-of-order results.
@@ -132,6 +153,7 @@ function buildIndexingContext(repoRoot: string): PanelContext {
   const state = getState(repoRoot);
   return {
     status: "indexing",
+    compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
     liveIndexing: state.liveIndexing,
     mcpEnabled: state.mcpEnabled,
     syncPaused: state.syncPaused,
@@ -148,6 +170,7 @@ async function fetchPanelContext(repoRoot: string): Promise<PanelContext> {
   const context = await refreshPanelContext(repoRoot);
   return {
     ...context,
+    compatibility: context.compatibility,
     prerequisites: lastPrerequisites,
     configured: isWorkspaceConfigured(repoRoot),
     backendAvailable,
@@ -205,26 +228,105 @@ function updateStatusBar(context: PanelContext): void {
   panelProvider?.updateContext(context);
 }
 
+function expectedEngineVersion(): string | undefined {
+  return extensionContext?.extension?.packageJSON?.version as string | undefined;
+}
+
 async function pollHealth(): Promise<void> {
   const folder = getWorkspaceFolder();
   if (!folder) {
     return;
   }
+  const repoRoot = folder.uri.fsPath;
+  // Claim a generation before every possible publication path. In particular,
+  // this invalidates already-awaited health/compatibility work when an indexing
+  // render, workspace switch, or later poll takes over.
+  const generation = ++pollGeneration;
   // Don't let background health polls overwrite "Indexing…" while bootstrap/sync runs.
   if (indexingActive) {
-    updateStatusBar(buildIndexingContext(folder.uri.fsPath));
+    const indexingContext = Object.freeze(buildIndexingContext(repoRoot));
+    if (generation !== pollGeneration) {
+      return;
+    }
+    const currentFolder = getWorkspaceFolder();
+    if (
+      !currentFolder ||
+      canonicalizePath(currentFolder.uri.fsPath) !== canonicalizePath(repoRoot)
+    ) {
+      return;
+    }
+    updateStatusBar(indexingContext);
     return;
   }
-  // Claim a generation *before* the awaited probe. A later call bumps the
-  // counter, so when this (possibly slower) probe resolves we only publish if
-  // we're still the newest one — otherwise a stale snapshot could clobber a
-  // fresher render (out-of-order guard, not a retry).
-  const generation = ++pollGeneration;
-  const context = await fetchPanelContext(folder.uri.fsPath);
-  if (generation !== pollGeneration) {
+
+  const coordinator = compatibilityCoordinator;
+  if (!coordinator) {
     return;
   }
-  updateStatusBar(context);
+
+  try {
+    // Health and compatibility belong to one publish cycle for this canonical
+    // root. They may execute concurrently, but neither is published alone.
+    const [healthContext, compatibility] = await Promise.all([
+      fetchPanelContext(repoRoot),
+      coordinator.getOrProbe(repoRoot, expectedEngineVersion()),
+    ]);
+    // Preserve the existing latest-wins guard after *all* awaited work. A stale
+    // coordinator rejection, deactivation, or workspace switch cannot publish.
+    if (generation !== pollGeneration) {
+      return;
+    }
+    const currentFolder = getWorkspaceFolder();
+    if (
+      !currentFolder ||
+      canonicalizePath(currentFolder.uri.fsPath) !== canonicalizePath(repoRoot)
+    ) {
+      return;
+    }
+    const context = Object.freeze({
+      ...healthContext,
+      compatibility,
+    });
+    updateStatusBar(context);
+  } catch (err) {
+    if (err instanceof StaleCompatibilityProbeError) {
+      return;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Force a fresh compatibility probe for the current workspace and republish.
+ *
+ * A successful remediation that can change the engine (install/reinstall) or a
+ * workspace switch must not trust the cached ≤30s snapshot: the engine version
+ * just changed, so the TTL would otherwise keep showing the stale verdict. We
+ * bypass the TTL with a forced generation (R2.5) so the coordinator re-runs
+ * ``performHandshake`` once, then hand off to {@link pollHealth}, whose own
+ * non-forced ``getOrProbe`` reuses that just-committed fresh snapshot (no second
+ * CLI handshake — the cache is now warm) and publishes it alongside health in a
+ * single frozen context. A superseded/deactivated probe rejects with
+ * {@link StaleCompatibilityProbeError}; that is expected latest-wins behaviour,
+ * not an error, so we swallow it and let the newer publish path win.
+ */
+async function forceCompatibilityReprobe(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  const coordinator = compatibilityCoordinator;
+  if (!folder || !coordinator) {
+    return;
+  }
+  try {
+    await coordinator.getOrProbe(folder.uri.fsPath, expectedEngineVersion(), {
+      force: true,
+    });
+  } catch (err) {
+    if (!(err instanceof StaleCompatibilityProbeError)) {
+      throw err;
+    }
+    return;
+  }
+  await pollHealth();
 }
 
 async function ensureLiveIndexingForWorkspaceChange(
@@ -897,6 +999,12 @@ async function runInstallBinaryBackend(): Promise<void> {
       return;
     }
     await refreshPrerequisites();
+    // The engine binary just changed on disk, so any cached compatibility
+    // verdict is stale. Force a fresh probe (bypassing the ≤30s TTL) so the
+    // Panel/Status Bar reflect the newly installed engine version instead of
+    // the pre-install mismatch (R2.5, R5.5). Covers both Install Engine and
+    // Reinstall Engine, since the latter finishes through this routine.
+    await forceCompatibilityReprobe();
     const totalMs = outcome.timings.reduce((sum, t) => sum + t.ms, 0);
 
     // Fetch the semantic model (best-effort). Semantic search needs the
@@ -979,6 +1087,43 @@ async function runReinstallEngine(): Promise<void> {
   lastPrerequisites = undefined;
   // Re-download binary + model (also offers Set Up Workspace on success).
   await runInstallBinaryBackend();
+}
+
+/**
+ * Update Extension: the non-destructive remediation for the ``engine-newer`` /
+ * ``backend-newer`` skew, where the installed Engine is ahead of this Extension
+ * (Requirement 3.5). It opens the Cognis entry in the editor's Extensions view
+ * so the user can review and apply the pending Extension update through the
+ * editor's own update flow.
+ *
+ * It MUST NOT auto-downgrade or modify the installed Engine, the ``.cognis``
+ * index, the MCP config, or source code (Requirement 5.3): this handler only
+ * reveals the Extensions view and never touches the engine binary or workspace
+ * state. We resolve the extension identifier from the live extension context so
+ * the deep-link matches whatever publisher/name this build ships under, and
+ * fall back to the known id when the context isn't available yet. Opening the
+ * Extensions view is best-effort — if the primary deep-link command isn't
+ * available on this host we fall back to a plain search — so a remediation
+ * click never dead-ends.
+ */
+async function runUpdateExtension(): Promise<void> {
+  const extensionId = extensionContext?.extension?.id ?? "ToanBui.cognis-vscode";
+  try {
+    // Preferred: open the Cognis extension's page directly in the Extensions
+    // view so the user sees the Update button when one is pending.
+    await vscode.commands.executeCommand("extension.open", extensionId);
+  } catch {
+    try {
+      // Fallback for hosts that don't expose ``extension.open``: focus the
+      // Extensions view filtered to the Cognis extension by id.
+      await vscode.commands.executeCommand(
+        "workbench.extensions.search",
+        `@id:${extensionId}`
+      );
+    } catch (err) {
+      await showErrorGuidance(err, "Update Extension");
+    }
+  }
 }
 
 /**
@@ -1081,11 +1226,208 @@ async function runColdRestart(): Promise<void> {
 }
 
 /**
- * After an extension update, detect a managed engine binary that's older than
- * the extension and offer a one-click upgrade. Remembers a "skip this version"
- * choice so it doesn't nag. Silent when nothing is installed or versions match.
+ * Single compatibility reconciliation point (Requirement 4.1). Runs *after*
+ * the {@link CompatibilityCoordinator} has committed a snapshot and merges the
+ * two formerly independent activation prompts (``maybeUpgradeBackend`` +
+ * ``maybeCheckHandshake``) into one decision:
+ *
+ *   1. The committed handshake snapshot is the deciding source whenever it is
+ *      runnable (``phase === "confirmed"``). A confirmed non-``ok`` verdict is
+ *      the authoritative version-skew signal.
+ *   2. Managed binary drift is only a *fallback* when the handshake is
+ *      unavailable (``phase !== "confirmed"`` — fresh machine, unreachable
+ *      backend, or a superseded probe), so the two mechanisms can never both
+ *      fire for the same stale binary.
+ *
+ * At most one notification is shown per {@link CompatibilityIdentity} per
+ * activation session: the session-scoped {@link seenCompatibilityIdentities}
+ * set dedupes re-entrant reconciliations within one activation, while the
+ * existing per-skew ``globalState`` "skip" key preserves the cross-session
+ * Dismiss behaviour untouched (refined in task 5.2).
  */
-async function maybeUpgradeBackend(): Promise<void> {
+async function reconcileCompatibility(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  const coordinator = compatibilityCoordinator;
+  if (!folder || !coordinator) {
+    return;
+  }
+  let snapshot;
+  try {
+    snapshot = await coordinator.getOrProbe(
+      folder.uri.fsPath,
+      expectedEngineVersion()
+    );
+  } catch (err) {
+    if (err instanceof StaleCompatibilityProbeError) {
+      return;
+    }
+    throw err;
+  }
+  // Handshake is the deciding source when it produced a verdict.
+  if (snapshot.phase === "confirmed") {
+    await notifyHandshakeMismatch(snapshot.result);
+    return;
+  }
+  // Fallback only when the handshake is unavailable: managed binary drift.
+  await notifyManagedBinaryDrift();
+}
+
+/**
+ * Notify a confirmed handshake mismatch, deduped to one notification per
+ * {@link CompatibilityIdentity} per activation session. Silent for an ``ok``
+ * verdict or when the kind carries no remediation. Preserves the existing
+ * per-skew ``globalState`` Dismiss so a dismissed identity stays silent across
+ * sessions until the identity (kind or version pair) changes.
+ *
+ * The notification is the reminder surface, not the source of truth: its single
+ * remediation button MUST match the Panel's Compatibility_Primary_Action,
+ * derived from the same {@link deriveRemediation} table the Panel uses, so the
+ * button label and the command it invokes track the current Compatibility_Kind
+ * (Requirement 3.6):
+ *   - Update Engine    -> ``cognis.installBackend``  (non-destructive)
+ *   - Update Extension -> ``cognis.updateExtension`` (non-destructive; command
+ *     lands in task 5.4, referenced consistently here via ACTION_COMMANDS)
+ *   - Repair Engine    -> ``cognis.reinstallEngine`` (destructive; routed
+ *     through the existing modal confirmation in {@link runReinstallEngine})
+ * plus a ``Show Diagnostics`` action (``cognis.showDiagnostics``) and
+ * ``Dismiss`` (Requirement 4.3).
+ *
+ * The message body uses the Backend-free {@link deriveCompatibilityHint}
+ * vocabulary so no user-visible text says "Backend" (Requirement 6.1).
+ *
+ * Dismiss ONLY suppresses re-showing the notification for this exact
+ * Compatibility_Identity (via the per-skew ``globalState`` key); it never
+ * touches the committed CompatibilitySnapshot, so the Panel/Status Bar verdict
+ * is unaffected (Requirement 4.4). The snapshot is owned by the coordinator and
+ * republished by ``pollHealth``; nothing in this path clears it.
+ */
+async function notifyHandshakeMismatch(
+  result: HandshakeResult
+): Promise<void> {
+  if (result.compatibility === "ok") {
+    return;
+  }
+  // The notification's remediation is the Panel's Compatibility_Primary_Action:
+  // both derive from the same 1:1 table, so kind ⇒ (label, command) never drift.
+  const remediation = deriveRemediation(result);
+  if (!remediation) {
+    return;
+  }
+  // Backend-free message body (Engine/Extension vocabulary only) — the same
+  // caption the Panel shows for this remediation.
+  const message = deriveCompatibilityHint(result);
+  if (!message) {
+    return;
+  }
+  // One notification per identity per activation session.
+  const identityKey = compatibilityIdentityKey(result);
+  if (seenCompatibilityIdentities.has(identityKey)) {
+    return;
+  }
+  // For engine-build skew the actionable identity is the engine version pair,
+  // not the (unchanged) contract version — key the skip on that so a later
+  // engine bump re-prompts instead of staying silenced.
+  const skewId =
+    result.compatibility === "engine-outdated" ||
+    result.compatibility === "engine-newer"
+      ? `${result.engineVersion ?? "x"}->${result.expectedEngineVersion ?? "x"}`
+      : `${result.backendContractVersion ?? "x"}->${result.expectedContractVersion}`;
+  const skipKey = `cognis.skipHandshakeWarning.${result.compatibility}.${skewId}`;
+  if (extensionContext?.globalState.get<boolean>(skipKey)) {
+    return;
+  }
+  seenCompatibilityIdentities.add(identityKey);
+
+  // The remediation button label matches the Panel; its command resolves via
+  // the shared ACTION_COMMANDS map so notification and Panel invoke the same id.
+  const remediationLabel = remediation.label;
+  const remediationCommand = ACTION_COMMANDS[remediation.actionId];
+  const choice = await vscode.window.showWarningMessage(
+    message,
+    remediationLabel,
+    "Show Diagnostics",
+    "Dismiss"
+  );
+  if (choice === remediationLabel) {
+    await runCompatibilityRemediation(remediation.actionId, remediationCommand);
+  } else if (choice === "Show Diagnostics") {
+    void vscode.commands.executeCommand("cognis.showDiagnostics");
+  } else if (choice === "Dismiss") {
+    // Suppress ONLY the notification for this exact identity across sessions.
+    // The committed CompatibilitySnapshot (Panel/Status Bar verdict) is left
+    // entirely untouched — Dismiss is a notification-only action (R4.4).
+    await extensionContext?.globalState.update(skipKey, true);
+  }
+}
+
+/**
+ * Dispatch the chosen Compatibility_Primary_Action to the correct handler,
+ * matching the Panel's mapping exactly (Requirement 3.6), and guarantee that a
+ * *successful* remediation of ANY kind ends in a forced re-probe within ≤5s so
+ * a return to ``ok`` clears the warning and the Panel drops back to the
+ * operational control (Requirement 4.6):
+ *
+ *   - ``Update Engine`` (``installBackend``) and ``Repair Engine``
+ *     (``reinstallEngine``) reuse the in-process routines. Both finish through
+ *     {@link runInstallBinaryBackend}, which already forces the re-probe on a
+ *     successful install (R2.5); Repair Engine additionally keeps its modal
+ *     confirmation, and a cancelled modal makes no change (the mismatch is
+ *     retained, nothing is dismissed).
+ *   - ``Update Extension`` (``updateExtension``) invokes the registered command
+ *     id — shared with the Panel via {@link ACTION_COMMANDS} so the two
+ *     surfaces never diverge — then forces its own re-probe here (the editor
+ *     update path has no in-process install routine to piggy-back on). When the
+ *     updated versions now match, the fresh probe commits ``ok`` and the
+ *     warning clears; when they still differ (or the update is deferred to a
+ *     reload), the probe re-commits the mismatch so the Panel keeps prompting.
+ *
+ * On a remediation that FAILS or is CANCELLED the committed Confirmed_Mismatch
+ * is retained (only a confirmed ``ok`` clears it — coordinator invariant) and
+ * NOTHING records a Dismiss skip key here: the per-identity skip is written only
+ * on the explicit ``Dismiss`` button (see {@link notifyHandshakeMismatch}), so a
+ * failed attempt still re-prompts (Requirement 4.7 / 5.5). A failed Update
+ * Extension surfaces an error indicator and leaves the mismatch in place.
+ */
+async function runCompatibilityRemediation(
+  actionId: CompatibilityRemediation["actionId"],
+  command: string
+): Promise<void> {
+  switch (actionId) {
+    case "installBackend":
+      // runInstallBackend → runInstallBinaryBackend forces the re-probe on a
+      // successful install; a failed/cancelled install keeps the mismatch.
+      await runInstallBackend();
+      return;
+    case "reinstallEngine":
+      // Destructive: routed through the existing modal-confirmed routine, which
+      // also finishes through the install routine's forced re-probe on success.
+      // Cancelling the modal makes no change and records no Dismiss.
+      await runReinstallEngine();
+      return;
+    case "updateExtension":
+      // Non-destructive. Dispatch the registered command through the same id the
+      // Panel uses, then force a fresh (TTL-bypassing) probe so a now-matching
+      // version returns to ``ok`` and the Panel drops the warning (R4.6). If the
+      // command fails, surface an error, keep the mismatch, and record no
+      // Dismiss so a later attempt still prompts (R4.7 / R5.5).
+      try {
+        await vscode.commands.executeCommand(command);
+      } catch (err) {
+        await showErrorGuidance(err, "Update Extension");
+        return;
+      }
+      await forceCompatibilityReprobe();
+      return;
+  }
+}
+
+/**
+ * Fallback path used only when the handshake is unavailable: detect a managed
+ * engine binary that's older than the extension and offer a one-click upgrade.
+ * Remembers a "skip this version" choice so it doesn't nag. Silent when nothing
+ * is installed or versions match.
+ */
+async function notifyManagedBinaryDrift(): Promise<void> {
   const binaryDrift = checkManagedBinaryDrift();
   if (!binaryDrift.outdated || !binaryDrift.installed || !binaryDrift.expected) {
     return;
@@ -1113,59 +1455,13 @@ async function maybeUpgradeBackend(): Promise<void> {
   }
 }
 
-/**
- * Verify the backend implements the contract version this extension was built
- * against, and surface a clear, actionable warning when they disagree. This is
- * the version-skew guard: the extension updates via the marketplace while the
- * engine binary updates via GitHub Releases, so a mismatch is a normal
- * production state that the matched-version e2e suite cannot catch. Silent when the backend can't be
- * reached (fresh machine) or the contract matches. Remembers a per-skew "skip"
- * so it never nags.
- */
-async function maybeCheckHandshake(): Promise<void> {
-  const folder = getWorkspaceFolder();
-  if (!folder) {
-    return;
-  }
-  const expectedEngineVersion = extensionContext?.extension?.packageJSON
-    ?.version as string | undefined;
-  const result = await performHandshake(folder.uri.fsPath, expectedEngineVersion);
-  if (!result || result.compatibility === "ok") {
-    return;
-  }
-  const warning = handshakeWarning(result);
-  if (!warning) {
-    return;
-  }
-  // For engine-build skew the actionable identity is the engine version pair,
-  // not the (unchanged) contract version — key the skip on that so a later
-  // engine bump re-prompts instead of staying silenced.
-  const skewId =
-    result.compatibility === "engine-outdated" ||
-    result.compatibility === "engine-newer"
-      ? `${result.engineVersion ?? "x"}->${result.expectedEngineVersion ?? "x"}`
-      : `${result.backendContractVersion ?? "x"}->${result.expectedContractVersion}`;
-  const skipKey = `cognis.skipHandshakeWarning.${result.compatibility}.${skewId}`;
-  if (extensionContext?.globalState.get<boolean>(skipKey)) {
-    return;
-  }
-  const choice = await vscode.window.showWarningMessage(
-    warning,
-    "Install Backend",
-    "Show Diagnostics",
-    "Dismiss"
-  );
-  if (choice === "Install Backend") {
-    await runInstallBackend();
-  } else if (choice === "Show Diagnostics") {
-    void vscode.commands.executeCommand("cognis.showDiagnostics");
-  } else if (choice === "Dismiss") {
-    await extensionContext?.globalState.update(skipKey, true);
-  }
-}
-
 export function activate(context: vscode.ExtensionContext): void {
   extensionContext = context;
+  pollGeneration += 1;
+  lastContext = undefined;
+  seenCompatibilityIdentities.clear();
+  compatibilityCoordinator?.dispose();
+  compatibilityCoordinator = new CompatibilityCoordinator(performHandshake);
   initStateStorage(context);
   const extVersion = context.extension?.packageJSON?.version as string | undefined;
   trace.init(context, extVersion);
@@ -1302,6 +1598,27 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
+  // Workspace switch/close: never reuse a stale root's compatibility verdict.
+  // Every removed root is evicted from the coordinator so its cached snapshot
+  // can never be published for a different root (R2.7). If the *current* root
+  // changed as a result, force a fresh probe for the new root — its engine may
+  // differ from the one we last verified — and publish it via pollHealth. A
+  // pure render never triggers this; only an actual folder change does
+  // (R2.6, R5.5).
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders((event) => {
+      const coordinator = compatibilityCoordinator;
+      if (coordinator) {
+        for (const removed of event.removed) {
+          coordinator.evict(removed.uri.fsPath);
+        }
+      }
+      // A switch invalidates any in-flight publish targeting the old root.
+      pollGeneration += 1;
+      void forceCompatibilityReprobe();
+    })
+  );
+
   // React to `cognis.advancedMode` toggles by re-rendering the panel in place
   // (≤2s, no window reload). We flip `advancedMode` on the most recent context
   // and re-run `updateStatusBar`; if nothing has been rendered yet, fall back
@@ -1350,6 +1667,10 @@ export function activate(context: vscode.ExtensionContext): void {
   safeRegister("cognis.prepareUninstall", () => runRemoveFromWorkspace("all"));
 
   safeRegister("cognis.reinstallEngine", () => runReinstallEngine());
+
+  // Non-destructive Extension update remediation for the engine-newer /
+  // backend-newer skew (add-only command id; R3.5, R5.3, R7.3).
+  safeRegister("cognis.updateExtension", () => runUpdateExtension());
 
   safeRegister("cognis.uninstallEngine", () => runUninstallEngine());
 
@@ -1410,6 +1731,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (state.lastHealth) {
         updateStatusBar({
           status: deriveStatus(folder.uri.fsPath, state.lastHealth, false),
+          compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
           liveIndexing: state.liveIndexing,
           mcpEnabled: state.mcpEnabled,
           syncPaused: state.syncPaused,
@@ -1424,14 +1746,11 @@ export function activate(context: vscode.ExtensionContext): void {
     await pollHealth();
     startHealthPolling();
 
-    // After an extension update the managed backend can lag behind. Offer a
-    // one-click upgrade so the running backend matches the extension version.
-    void maybeUpgradeBackend();
-
-    // Independently of the version *number*, verify the backend implements the
-    // contract this extension was built against, and warn on a skew before it
-    // manifests as a silent failure.
-    void maybeCheckHandshake();
+    // Single compatibility reconciliation point that runs after the
+    // coordinator has committed a snapshot: the handshake decides when
+    // runnable, managed binary drift is only the fallback, and at most one
+    // notification is shown per Compatibility_Identity this session.
+    void reconcileCompatibility();
 
     indexingActive = true;
     blockingIndexMessage = "Inspecting workspace and checking live indexing…";
@@ -1472,8 +1791,12 @@ export function activate(context: vscode.ExtensionContext): void {
   })();
   context.subscriptions.push({
     dispose: () => {
+      pollGeneration += 1;
+      compatibilityCoordinator?.dispose();
+      compatibilityCoordinator = undefined;
       if (healthPollTimer) {
         clearInterval(healthPollTimer);
+        healthPollTimer = undefined;
       }
       stopAllIndexing();
       void stopAllMcpServers();
@@ -1482,11 +1805,28 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export async function deactivate(): Promise<void> {
+  pollGeneration += 1;
+  compatibilityCoordinator?.dispose();
+  compatibilityCoordinator = undefined;
+  extensionContext = undefined;
   stopAllIndexing();
   // Await (not `void`) so cleanup confirms every MCP server has stopped within
   // its budget before the host finishes tearing the extension down (R10.2, R13.2).
   await stopAllMcpServers();
   if (healthPollTimer) {
     clearInterval(healthPollTimer);
+    healthPollTimer = undefined;
   }
 }
+
+/**
+ * Test-only handle to the module-private compatibility reconciliation entry
+ * point. Production code invokes {@link reconcileCompatibility} exactly once per
+ * activation, so the session dedupe invariant — at most one notification per
+ * {@link CompatibilityIdentity} per activation session (Requirement 4.2) — can
+ * only be exercised by a re-entrant call. This export lets the fast
+ * ``node --test`` harness make that second call to prove the seen-identity set
+ * is actually wired into the notification path (not merely that the identity key
+ * is stable). It is not referenced anywhere in the extension's runtime wiring.
+ */
+export const __test__ = { reconcileCompatibility };

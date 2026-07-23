@@ -23,6 +23,7 @@
 import Module from "node:module";
 import assert from "node:assert/strict";
 import test, { before, after } from "node:test";
+import { FIRST_PROBE_COMPATIBILITY_SNAPSHOT } from "../compatibility";
 
 // ---------------------------------------------------------------------------
 // Shared mutable test state + call recorder
@@ -101,6 +102,7 @@ const vscodeStub: any = {
     onDidDeleteFiles: () => ({ dispose() {} }),
     onDidRenameFiles: () => ({ dispose() {} }),
     onDidChangeConfiguration: () => ({ dispose() {} }),
+    onDidChangeWorkspaceFolders: () => ({ dispose() {} }),
   },
   window: {
     createStatusBarItem() {
@@ -255,6 +257,15 @@ const stubModules: Record<string, any> = {
       reveal() {}
     },
     outcomeLabelForContext: () => "Cognis",
+    // The three remediation action ids the notification can dispatch, mirroring
+    // the real panel's ACTION_COMMANDS map (Requirement 3.6).
+    ACTION_COMMANDS: {
+      installBackend: "cognis.installBackend",
+      updateExtension: "cognis.updateExtension",
+      reinstallEngine: "cognis.reinstallEngine",
+    },
+    deriveCompatibilityHint: () =>
+      "Update needed to keep the Engine and Extension in sync.",
   },
   "./reconcile": { reconcileWorkspaceOnActivate: async () => {} },
   "./handshake": { performHandshake: async () => undefined },
@@ -298,6 +309,7 @@ const stubModules: Record<string, any> = {
     isWorkspaceSyncPaused: () => false,
     refreshPanelContext: async () => ({
       status: "idle",
+      compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
       liveIndexing: st.liveIndexing,
       mcpEnabled: false,
       syncPaused: false,

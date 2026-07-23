@@ -12,6 +12,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.12]
+
+### Fixed
+
+- **Engine/extension version mismatch no longer shows a false `Ready`.** A
+  healthy, indexed, connected workspace whose engine binary version drifts from
+  the extension (e.g. Engine `0.8.10` with Extension `0.8.11`) previously
+  surfaced as **Ready / Pause**. The panel now derives a single compatibility
+  verdict and shows **Needs attention** with an **Update Engine** primary action
+  when a confirmed, still-usable mismatch is present, so the Status Line, Status
+  Bar, and panel control all agree.
+
+### Added
+
+- **Per-workspace compatibility state + coordinator.** A new compatibility layer
+  (`compatibility.ts`, `compatibilityCoordinator.ts`) maps the handshake result
+  to a typed snapshot and caches it per canonical repo root (30s TTL,
+  single-flight, force-refresh, lifecycle-guarded), keeping the last confirmed
+  mismatch across transient `unavailable` probes and clearing it only on a fresh
+  `ok` handshake. Health and compatibility now commit a single immutable snapshot
+  through one pipeline, so the panel and status bar never mix results from
+  independent probes or different workspaces.
+- **`cognis.updateExtension` command (non-destructive).** Remediation for a
+  compatibility mismatch is now unified across the panel primary action and a
+  single de-duplicated notification per compatibility identity per session, with
+  a forced re-probe after a successful update. All existing command ids are
+  preserved.
+
 ## [0.8.11]
 
 ### Fixed

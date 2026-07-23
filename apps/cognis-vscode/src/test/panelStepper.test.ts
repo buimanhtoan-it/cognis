@@ -6,14 +6,41 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  derivePanelView,
-  deriveSetupSteps,
-  outcomeLabelForContext,
-  renderMcpSection,
-  renderStepperSection,
-  type PanelContext,
+  derivePanelView as derivePanelViewWithCompatibility,
+  deriveSetupSteps as deriveSetupStepsWithCompatibility,
+  outcomeLabelForContext as outcomeLabelForContextWithCompatibility,
+  renderMcpSection as renderMcpSectionWithCompatibility,
+  renderStepperSection as renderStepperSectionWithCompatibility,
+  type PanelContext as CompletePanelContext,
 } from "../panel";
+import {
+  FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+  type CompatibilitySnapshot,
+} from "../compatibility";
 import type { HealthReport, PrerequisiteReport } from "../types";
+
+/** Legacy unit fixtures are promoted through one explicit first-probe default. */
+type PanelContext = Omit<CompletePanelContext, "compatibility"> & {
+  compatibility?: CompatibilitySnapshot;
+};
+
+function completePanelContext(ctx: PanelContext): CompletePanelContext {
+  return {
+    compatibility: ctx.compatibility ?? FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+    ...ctx,
+  };
+}
+
+const derivePanelView = (ctx: PanelContext) =>
+  derivePanelViewWithCompatibility(completePanelContext(ctx));
+const deriveSetupSteps = (ctx: PanelContext) =>
+  deriveSetupStepsWithCompatibility(completePanelContext(ctx));
+const outcomeLabelForContext = (ctx: PanelContext) =>
+  outcomeLabelForContextWithCompatibility(completePanelContext(ctx));
+const renderMcpSection = (ctx: PanelContext) =>
+  renderMcpSectionWithCompatibility(completePanelContext(ctx));
+const renderStepperSection = (ctx: PanelContext) =>
+  renderStepperSectionWithCompatibility(completePanelContext(ctx));
 
 function okHealth(): HealthReport {
   const ok = { status: "ok", message: "ok" };
@@ -114,15 +141,22 @@ test("index ready but MCP not connected keeps the AI step active", () => {
 
 test("status bar collapses to a short, stable vocabulary", () => {
   assert.equal(
-    outcomeLabelForContext({ status: "indexing" }),
+    outcomeLabelForContext({
+      status: "indexing",
+      compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+    }),
     "$(sync~spin) Cognis: Indexing"
   );
   assert.equal(
-    outcomeLabelForContext({ status: "notInstalled" }),
+    outcomeLabelForContext({
+      status: "notInstalled",
+      compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+    }),
     "$(circle-slash) Cognis: Not set up"
   );
   assert.equal(
     outcomeLabelForContext({
+      compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
       status: "mcpEnabled",
       health: okHealth(),
       mcpEnabled: true,
@@ -132,6 +166,7 @@ test("status bar collapses to a short, stable vocabulary", () => {
   );
   assert.equal(
     outcomeLabelForContext({
+      compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
       status: "ready",
       health: okHealth(),
       mcpEnabled: false,
@@ -159,14 +194,21 @@ test("backend present (doctor ran) but no health keeps backend step done", () =>
 });
 
 test("fresh machine panel guides the user to install the backend first", () => {
-  const view = derivePanelView({ status: "notInstalled", backendAvailable: false });
+  const view = derivePanelView({
+    status: "notInstalled",
+    compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+    backendAvailable: false,
+  });
   assert.match(view.headline, /Install the Cognis engine/);
   // It must offer a one-click install, not a setup button that would fail.
   assert.equal(view.primary?.id, "installBackend");
 });
 
 test("backend unknown (not yet probed) still shows the plain setup prompt", () => {
-  const view = derivePanelView({ status: "notInstalled" });
+  const view = derivePanelView({
+    status: "notInstalled",
+    compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+  });
   assert.equal(view.headline, "Setup required");
   assert.equal(view.primary?.id, "setup");
 });
@@ -252,7 +294,11 @@ test("an active index op wins even if status was momentarily computed as degrade
 test("configured workspace with a transient health gap does not regress to setup", () => {
   // No active op, health undefined, but already set up — show a non-destructive
   // checking state, never "Set Up for AI"/"Install backend".
-  const view = derivePanelView({ status: "unknown", configured: true });
+  const view = derivePanelView({
+    status: "unknown",
+    compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+    configured: true,
+  });
   assert.equal(view.statusClass, "status-active");
   assert.notEqual(view.primary?.id, "setup");
   assert.notEqual(view.primary?.id, "installBackend");
@@ -260,9 +306,19 @@ test("configured workspace with a transient health gap does not regress to setup
 });
 
 test("fresh (unconfigured) machine still shows Set Up / Install — fix does not over-reach", () => {
-  assert.equal(derivePanelView({ status: "notInstalled" }).primary?.id, "setup");
   assert.equal(
-    derivePanelView({ status: "notInstalled", backendAvailable: false }).primary?.id,
+    derivePanelView({
+      status: "notInstalled",
+      compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+    }).primary?.id,
+    "setup"
+  );
+  assert.equal(
+    derivePanelView({
+      status: "notInstalled",
+      compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+      backendAvailable: false,
+    }).primary?.id,
     "installBackend"
   );
 });
@@ -274,7 +330,13 @@ test("fresh (unconfigured) machine still shows Set Up / Install — fix does not
 // ---------------------------------------------------------------------------
 
 test("MCP section is hidden before the workspace is set up", () => {
-  assert.equal(renderMcpSection({ status: "notInstalled" }), "");
+  assert.equal(
+    renderMcpSection({
+      status: "notInstalled",
+      compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+    }),
+    ""
+  );
 });
 
 test("MCP section: not connected shows the mcp.json setup action + server/config", () => {
@@ -505,6 +567,7 @@ function watchingStatus(): PanelContext["indexStatus"] {
 
 function watchingVersionFailCtx(): PanelContext {
   return {
+    compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
     status: "ready",
     health: versionFailHealth(),
     prerequisites: readyPrereqs(true),

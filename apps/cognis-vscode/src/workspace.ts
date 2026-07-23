@@ -32,6 +32,7 @@ import { getCognisMcpdRuntime } from "./mcpRuntime";
 import { getMcpServerState } from "./mcpServer";
 import { fetchPrerequisites } from "./prerequisites";
 import type { PanelContext } from "./panel";
+import { FIRST_PROBE_COMPATIBILITY_SNAPSHOT } from "./compatibility";
 import {
   deriveStatus,
   getState,
@@ -979,6 +980,7 @@ export async function refreshPanelContext(repoRoot: string): Promise<PanelContex
     const mcpServer = getMcpServerState(repoRoot);
     return {
       status: deriveStatus(repoRoot, report.overall, false),
+      compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
       health: report,
       liveIndexing: current.liveIndexing,
       mcpEnabled: current.mcpEnabled,
@@ -1007,6 +1009,7 @@ export async function refreshPanelContext(repoRoot: string): Promise<PanelContex
     const mcpServer = getMcpServerState(repoRoot);
     return {
       status: configured ? deriveStatus(repoRoot, undefined, false) : "notInstalled",
+      compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
       liveIndexing: current.liveIndexing,
       mcpEnabled: current.mcpEnabled,
       mcpRuntimeCount: mcpRuntime.count,

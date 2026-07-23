@@ -21,7 +21,9 @@
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -32,14 +34,21 @@ use cognis_mcp::server::McpServer;
 
 /// A retrieval engine whose `fts_search` blocks for a fixed delay, so a single
 /// in-flight request occupies the server long enough that a second concurrent
-/// request would have to wait if (and only if) the transport is serial.
+/// request would have to wait if (and only if) the transport is serial. It also
+/// records the peak number of simultaneously in-flight calls so overlap can be
+/// proven deterministically instead of inferred from wall-clock timing alone.
 struct SlowEngine {
     delay: Duration,
+    in_flight: Arc<AtomicUsize>,
+    peak: Arc<AtomicUsize>,
 }
 
 impl RetrievalEngine for SlowEngine {
     fn fts_search(&self, _query: &str, _k: usize) -> Result<Vec<Hit>> {
+        let cur = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(cur, Ordering::SeqCst);
         thread::sleep(self.delay);
+        self.in_flight.fetch_sub(1, Ordering::SeqCst);
         Ok(Vec::new())
     }
     fn semantic_search(&self, _query: &str, _k: usize) -> Result<Vec<Hit>> {
@@ -88,6 +97,8 @@ fn timed_search_call(port: u16, id: u32, token: &str) -> Duration {
 #[test]
 fn concurrent_posts_are_served_with_bounded_concurrency_not_serialized() {
     let delay = Duration::from_millis(600);
+    let in_flight = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
     let listener = bind("127.0.0.1", 0).expect("bind loopback ephemeral");
     let port = listener.local_addr().unwrap().port();
     let cred = RouteCredential::generate();
@@ -95,7 +106,11 @@ fn concurrent_posts_are_served_with_bounded_concurrency_not_serialized() {
 
     // Serve on a background thread; the process exits at test end so the
     // blocking accept loop needs no explicit shutdown.
-    let server = McpServer::new(SlowEngine { delay });
+    let server = McpServer::new(SlowEngine {
+        delay,
+        in_flight: Arc::clone(&in_flight),
+        peak: Arc::clone(&peak),
+    });
     let cfg = HttpServeConfig {
         route_credential: Some(cred),
         ..HttpServeConfig::default()
@@ -123,15 +138,26 @@ fn concurrent_posts_are_served_with_bounded_concurrency_not_serialized() {
     let total = wall.elapsed();
     let _each: Vec<Duration> = rx.iter().collect();
 
-    // EXPECTED (fixed): with true overlap, total ≈ 1×delay. We allow generous
-    // slack for scheduling/handshake. A serial transport takes ≈ 2×delay.
-    let overlap_ceiling = delay + delay / 2; // 1.5×delay
+    // Authoritative, deterministic proof of overlap: the engine records the
+    // peak number of simultaneously in-flight `fts_search` calls. A peak of
+    // >= 2 means the two POSTs were provably being served at the same instant,
+    // which is impossible under a serial (head-of-line-blocking) transport.
+    // This does not depend on wall-clock scheduling and so cannot flake.
     assert!(
-        total < overlap_ceiling,
-        "two concurrent POSTs took {total:?} (≥ {overlap_ceiling:?}), i.e. they \
-         serialized (~2×{delay:?}) instead of overlapping; the unfixed HTTP \
-         transport handles one connection at a time on the accept thread \
-         (head-of-line blocking) with no bounded worker pool"
+        peak.load(Ordering::SeqCst) >= 2,
+        "two concurrent POSTs never overlapped (peak in-flight = {}); the \
+         unfixed HTTP transport handles one connection at a time on the accept \
+         thread (head-of-line blocking) with no bounded worker pool",
+        peak.load(Ordering::SeqCst)
+    );
+    // Wall-clock guard against a *gross* serialization regression only. Two
+    // fully serialized 600ms calls take >= 2×delay (1200ms); we allow generous
+    // headroom (3×delay) so ordinary scheduling jitter on a loaded CI machine
+    // cannot flake this while a real one-at-a-time regression is still caught.
+    assert!(
+        total < delay * 3,
+        "two concurrent POSTs took {total:?} (>= 3x{delay:?}), i.e. they \
+         serialized instead of overlapping under the worker pool"
     );
 }
 

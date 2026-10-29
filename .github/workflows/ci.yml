@@ -1,0 +1,41 @@
+name: ci
+
+# Fast feedback on every push and pull request for the TypeScript VS Code / Cursor extension.
+# The Rust workspace is built and tested by `rust.yml`.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vscode-extension:
+    name: vscode extension (compile · lint · test)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/cognis-mcp/package-lock.json
+
+      - name: Install and compile extension
+        working-directory: apps/cognis-mcp
+        run: |
+          npm ci 2>/dev/null || npm install
+          npm run compile
+          npm run lint
+
+      - name: Extension unit + contract-parity tests
+        working-directory: apps/cognis-mcp
+        run: npm test

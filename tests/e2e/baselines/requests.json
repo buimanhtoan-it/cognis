@@ -1,0 +1,149 @@
+{
+  "generated_at": "2026-06-10T16:15:10.312164+00:00",
+  "scenario": "fresh-install \u2192 set up \u2192 index \u2192 MCP semantic search (sandbox)",
+  "repo": "D:\\PROGRAMING\\cognis\\.benchmarks\\public\\repos\\requests",
+  "repo_provenance": {
+    "url": "https://github.com/psf/requests.git",
+    "commit": "1190afd14fca74292946d62c4c8169880a47ff67",
+    "version": "v2.34.2-6-g1190afd1",
+    "dirty": false,
+    "captured_at": "2026-06-10T16:15:10.800420+00:00"
+  },
+  "mcp_server_name": "cognis-workspace-abf9a1",
+  "embedding_progress": {
+    "phases_seen": [
+      "cold_index",
+      "embedding",
+      "watching"
+    ],
+    "embedding_samples": [
+      {
+        "phase": "embedding",
+        "progress_percent": 70.0,
+        "message": "Index ready \u2014 generating semantic embeddings in the background\u2026"
+      },
+      {
+        "phase": "embedding",
+        "progress_percent": 80.5,
+        "message": "Generating semantic embeddings\u2026 256/729 symbols (search already works)"
+      },
+      {
+        "phase": "embedding",
+        "progress_percent": 91.1,
+        "message": "Generating semantic embeddings\u2026 512/729 symbols (search already works)"
+      },
+      {
+        "phase": "embedding",
+        "progress_percent": 100.0,
+        "message": "Generating semantic embeddings\u2026 729/729 symbols (search already works)"
+      }
+    ],
+    "moved": true
+  },
+  "index_stats": {
+    "symbol": 736,
+    "edge": 25985,
+    "file": 37,
+    "symbol_vec": 736,
+    "db_bytes": 19943424
+  },
+  "health_overall": "ok",
+  "health_index_check": "ok",
+  "symbol_search": {
+    "query": "Session",
+    "names": [
+      "RedirectSession",
+      "Session",
+      "SessionRedirectMixin",
+      "session",
+      "test_DIGEST_AUTH_SETS_SESSION_COOKIES",
+      "test_headers_on_session_with_None_are_not_sent",
+      "test_prepared_from_session",
+      "test_request_cookie_overrides_session_cookie"
+    ],
+    "found_expected": true
+  },
+  "semantic_search": {
+    "query": "retry a failed http request with backoff",
+    "skipped": false,
+    "names": [
+      "test_urllib3_retries",
+      "test_rewind_body_failed_seek",
+      "RetryError",
+      "test_http_error",
+      "test_errors"
+    ],
+    "expected": [],
+    "matched": [],
+    "first_relevant_rank": null,
+    "server_warm_startup_s": 17.327,
+    "first_call_s": 0.137,
+    "hot_call_s": 0.044
+  },
+  "throughput": {
+    "symbols_indexed": 736,
+    "cold_index_seconds": 147.532,
+    "symbols_per_sec": 5.0
+  },
+  "stages": [
+    {
+      "stage": "copy repo into sandbox",
+      "seconds": 0.17,
+      "source": "D:\\PROGRAMING\\cognis\\.benchmarks\\public\\repos\\requests"
+    },
+    {
+      "stage": "cli paths",
+      "seconds": 0.539
+    },
+    {
+      "stage": "cli init",
+      "seconds": 0.467
+    },
+    {
+      "stage": "cli mcp-config",
+      "seconds": 0.47
+    },
+    {
+      "stage": "indexd cold index (full rebuild \u2192 watching)",
+      "seconds": 147.532,
+      "progress_percent": 100.0
+    },
+    {
+      "stage": "cli health",
+      "seconds": 0.621
+    },
+    {
+      "stage": "mcp symbol_search (lexical, cold mcpd)",
+      "seconds": 4.434,
+      "tool_seconds": 0.031,
+      "hit_count": 8
+    },
+    {
+      "stage": "mcp semantic_search (cold first vs hot second)",
+      "seconds": 17.611,
+      "server_warm_startup_s": 17.327,
+      "first_call_s": 0.137,
+      "hot_call_s": 0.044,
+      "hit_count": 5
+    }
+  ],
+  "total_flow_seconds": 171.844,
+  "embedder_load_logs": [
+    "embedder model 'BAAI/bge-small-en-v1.5' loaded from local cache in 0.3s",
+    "indexed 37 files / 736 symbols / 25985 edges in 2.4s (parse_enrich=0.7s resolve_edges=0.8s embed=0.0s write=1.0s)",
+    "indexed 37 files / 736 symbols / 25985 edges in 128.5s (parse_enrich=0.4s resolve_edges=0.8s embed=126.6s write=0.6s)"
+  ],
+  "readiness": {
+    "source": ".benchmarks\\public\\RESULTS.md",
+    "available": true,
+    "headline": "On OBJECTIVE bug-fix ground truth, RRF (lexical+dense fusion) is the strongest ranker; raw structural diffusion (CSAR) does NOT beat it. Readiness gate NOT cleared (objective sample still small / Python-dominated). Framing: 'local, mathematically-grounded retrieval engine in active validation', not 'beats embeddings'.",
+    "gate": {
+      "in_production_engine": "partial \u2014 RRF fusion ported; raw CSAR correctly not",
+      "beats_bm25_dense_rrf_macro": "NO (RRF wins on objective key)",
+      "objective_ground_truth": "partial \u2014 eshop/fastapi/requests; petclinic small",
+      "sample_large_enough": "NO \u2014 needs >=60 cross-language objective queries",
+      "reproducible_from_clone": "YES",
+      "math_proven_sound": "YES (T1/T5/Prop-4)"
+    }
+  }
+}

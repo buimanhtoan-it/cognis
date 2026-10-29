@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc d31ded65c0b70f439fc23879e9d08f0250c69504763afd07091212ec3d3e1393 # shrinks to arguments = GeneratedArguments { query: "A", k: 0, select_second_symbol: false, resolve_selectors: [], direction: "out", depth: 0, task: "A", max_tokens: 0 }, truth = FreshnessTruth { pinned_generation: 0, semantic_generation: 0, pending_vector_count: 0, semantic_source_available: false }

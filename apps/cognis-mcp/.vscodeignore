@@ -1,0 +1,16 @@
+.vscode/**
+.vscode-test/**
+src/**
+out/test/**
+out/test-host/**
+out/test-host-large/**
+.gitignore
+tsconfig.json
+*.vsix
+**/*.ts
+**/*.map
+sim-dist/**
+test-results/**
+playwright-report/**
+tests-e2e/**
+playwright.config.ts

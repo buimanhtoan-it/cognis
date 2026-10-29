@@ -1,0 +1,26 @@
+{
+  "config": {
+    "mcpServers": {
+      "<server>": {
+        "command": "str",
+        "env": {
+          "COGNIS_DB_PATH": "str"
+        }
+      }
+    }
+  },
+  "config_paths": {
+    "claude_macos": "str",
+    "claude_windows": "str",
+    "cursor_user": "str",
+    "cursor_workspace": "str",
+    "vscode_workspace": "str"
+  },
+  "env": {
+    "COGNIS_DB_PATH": "str"
+  },
+  "format": "str",
+  "host": "str",
+  "repo_root": "str",
+  "server_name": "str"
+}

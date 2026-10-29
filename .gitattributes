@@ -1,0 +1,5 @@
+# Shell scripts must use LF so Git Bash on Windows does not break `set` options.
+*.sh text eol=lf
+
+# PowerShell scripts may use CRLF on Windows.
+*.ps1 text eol=crlf

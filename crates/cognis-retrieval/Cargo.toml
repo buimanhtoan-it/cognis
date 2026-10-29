@@ -1,0 +1,17 @@
+[package]
+name = "cognis-retrieval"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "cognis retrieval: Hit, RetrievalLayer, lexical/semantic, RRF fusion, capsule."
+
+[dependencies]
+cognis-core.workspace = true
+cognis-store.workspace = true
+cognis-csar.workspace = true
+cognis-embed.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+rusqlite.workspace = true

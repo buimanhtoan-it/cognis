@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 42401f736ef6453afd0fdb58d9b94b8f14574d6fe421cd48faf6afdcea1a6c88 # shrinks to state = FileCacheState { tree: SourceTree { files: [SourceFileSpec { rel_path: "alpha.py", language: "python", body: Empty }] }, entries: [FileCacheEntry { path: "alpha.py", kind: HashMatchesSymbolsAbsent, row: Some(FileCacheRowState { content_hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", parse_status: Ok, symbols_present: false }) }] }

@@ -1,0 +1,33 @@
+{
+  "capabilities": {
+    "accelerated_vector_search": false,
+    "semantic_backend": false
+  },
+  "cli_commands": [
+    "init",
+    "bootstrap",
+    "health",
+    "paths",
+    "doctor",
+    "mcp-config",
+    "index",
+    "handshake",
+    "digest"
+  ],
+  "contract_version": 1,
+  "engine_version": "str",
+  "mcp_tools": [
+    "diffuse_context",
+    "symbol_lookup",
+    "symbol_search",
+    "discover_symbols",
+    "semantic_search",
+    "resolve_symbols",
+    "dependency_trace",
+    "retrieve_context_capsule",
+    "analyze_patch_impact",
+    "inspect_symbol_complexity",
+    "trace_blast_radius",
+    "suggest_optimal_refactor"
+  ]
+}

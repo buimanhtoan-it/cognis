@@ -1,0 +1,8 @@
+{
+  "combined": "str",
+  "edges": "str",
+  "files": "str",
+  "fts": "str",
+  "symbols": "str",
+  "vector_ids": "str"
+}

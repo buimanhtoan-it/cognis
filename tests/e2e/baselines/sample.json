@@ -1,0 +1,119 @@
+{
+  "generated_at": "2026-06-10T14:32:50.331006+00:00",
+  "scenario": "fresh-install \u2192 set up \u2192 index \u2192 MCP semantic search (sandbox)",
+  "repo": "synthetic sample repo",
+  "mcp_server_name": "cognis-workspace-2636a2",
+  "embedding_progress": {
+    "phases_seen": [
+      "embedding",
+      "watching"
+    ],
+    "embedding_samples": [
+      {
+        "phase": "embedding",
+        "progress_percent": 70.0,
+        "message": "Index ready \u2014 generating semantic embeddings in the background\u2026"
+      }
+    ],
+    "moved": false
+  },
+  "index_stats": {
+    "symbol": 4,
+    "edge": 2,
+    "file": 2,
+    "symbol_vec": 4,
+    "db_bytes": 1712128
+  },
+  "health_overall": "ok",
+  "health_index_check": "ok",
+  "symbol_search": {
+    "query": "verify",
+    "names": [
+      "verify"
+    ],
+    "found_expected": true
+  },
+  "semantic_search": {
+    "query": "validate authentication token",
+    "skipped": false,
+    "names": [
+      "authenticate",
+      "verify",
+      "greet",
+      "createApp"
+    ],
+    "expected": [
+      "authenticate",
+      "verify"
+    ],
+    "matched": [
+      "authenticate",
+      "verify"
+    ],
+    "first_relevant_rank": 1,
+    "server_warm_startup_s": 18.67,
+    "first_call_s": 0.143,
+    "hot_call_s": 0.042
+  },
+  "throughput": {
+    "symbols_indexed": 4,
+    "cold_index_seconds": 19.068,
+    "symbols_per_sec": 0.2
+  },
+  "stages": [
+    {
+      "stage": "cli paths",
+      "seconds": 0.574
+    },
+    {
+      "stage": "cli init",
+      "seconds": 0.664
+    },
+    {
+      "stage": "cli mcp-config",
+      "seconds": 0.614
+    },
+    {
+      "stage": "indexd cold index (full rebuild \u2192 watching)",
+      "seconds": 19.068,
+      "progress_percent": 100.0
+    },
+    {
+      "stage": "cli health",
+      "seconds": 0.675
+    },
+    {
+      "stage": "mcp symbol_search (lexical, cold mcpd)",
+      "seconds": 4.842,
+      "tool_seconds": 0.037,
+      "hit_count": 1
+    },
+    {
+      "stage": "mcp semantic_search (cold first vs hot second)",
+      "seconds": 18.976,
+      "server_warm_startup_s": 18.67,
+      "first_call_s": 0.143,
+      "hot_call_s": 0.042,
+      "hit_count": 4
+    }
+  ],
+  "total_flow_seconds": 45.413,
+  "embedder_load_logs": [
+    "embedder model 'BAAI/bge-small-en-v1.5' loaded from local cache in 0.3s",
+    "indexed 2 files / 4 symbols / 2 edges in 0.1s (parse_enrich=0.0s resolve_edges=0.0s embed=0.0s write=0.0s)",
+    "indexed 2 files / 4 symbols / 2 edges in 0.2s (parse_enrich=0.0s resolve_edges=0.0s embed=0.2s write=0.0s)"
+  ],
+  "readiness": {
+    "source": ".benchmarks\\public\\RESULTS.md",
+    "available": true,
+    "headline": "On OBJECTIVE bug-fix ground truth, RRF (lexical+dense fusion) is the strongest ranker; raw structural diffusion (CSAR) does NOT beat it. Readiness gate NOT cleared (objective sample still small / Python-dominated). Framing: 'local, mathematically-grounded retrieval engine in active validation', not 'beats embeddings'.",
+    "gate": {
+      "in_production_engine": "partial \u2014 RRF fusion ported; raw CSAR correctly not",
+      "beats_bm25_dense_rrf_macro": "NO (RRF wins on objective key)",
+      "objective_ground_truth": "partial \u2014 eshop/fastapi/requests; petclinic small",
+      "sample_large_enough": "NO \u2014 needs >=60 cross-language objective queries",
+      "reproducible_from_clone": "YES",
+      "math_proven_sound": "YES (T1/T5/Prop-4)"
+    }
+  }
+}

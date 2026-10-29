@@ -1,0 +1,54 @@
+# cognis — Real-Time Algorithmic Complexity, Optimization & Change-Impact
+# Guardrail Engine + CSAR Graph-Diffusion Context for AI Coding Agents.
+[workspace]
+resolver = "2"
+members = ["crates/*", "bins/*", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "1"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+sha2 = "0.10"
+proptest = "1"
+criterion = "0.5"
+notify = "6"
+ctrlc = "3"
+tree-sitter = "0.26"
+tree-sitter-python = "0.25"
+tree-sitter-typescript = "0.23"
+tree-sitter-go = "0.25"
+tree-sitter-java = "0.23"
+tree-sitter-c-sharp = "0.23"
+regex = "1"
+
+# Internal crates.
+cognis-core = { path = "crates/cognis-core" }
+cognis-store = { path = "crates/cognis-store" }
+cognis-embed = { path = "crates/cognis-embed" }
+cognis-indexer = { path = "crates/cognis-indexer" }
+cognis-retrieval = { path = "crates/cognis-retrieval" }
+cognis-csar = { path = "crates/cognis-csar" }
+cognis-mcp = { path = "crates/cognis-mcp" }
+cognis-eval = { path = "crates/cognis-eval" }
+cognis-owner = { path = "crates/cognis-owner" }
+cognis-testgen = { path = "crates/cognis-testgen" }
+
+# Multi-call CLI, indexer daemon, and MCP daemon surfaces.
+cognis-cli = { path = "bins/cognis-cli" }
+cognis-indexd = { path = "bins/cognis-indexd" }
+cognis-mcpd = { path = "bins/cognis-mcpd" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = "symbols"

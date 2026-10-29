@@ -1,0 +1,36 @@
+[package]
+name = "cognis-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "cognis MCP: real-time complexity, optimization, impact & retrieval tool surface."
+
+[dependencies]
+cognis-core.workspace = true
+cognis-retrieval.workspace = true
+cognis-csar.workspace = true
+cognis-store.workspace = true
+cognis-embed.workspace = true
+cognis-indexer.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+proptest.workspace = true
+rusqlite = { workspace = true, features = ["bundled"] }
+# Shared property-test generators (cognis-one-toggle-engine task 2.1). Dev-only:
+# nothing in the shipped binary links against it.
+cognis-testgen.workspace = true
+
+[features]
+# Test-only optimization oracle. This deliberately compiles the legacy
+# all-symbol/all-edge scans and must never be enabled by shipped binaries.
+reference-scan = []
+
+# Forward the ONNX embedder backend down to cognis-embed so a release build of
+# the MCP server ships real semantic search. Off by default so the workspace
+# build/test stays offline (no ONNX Runtime native lib required).
+onnx = ["cognis-embed/onnx"]
+onnx-download = ["cognis-embed/onnx-download"]

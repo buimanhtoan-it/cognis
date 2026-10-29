@@ -1,0 +1,63 @@
+[package]
+name = "cognis-embed"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "cognis embeddings: swappable Embedder/Reranker registry + ONNX backend."
+
+[dependencies]
+cognis-core.workspace = true
+sha2.workspace = true
+# Always on: `fingerprint_material` parses `pooling.json` for pooling +
+# normalization mode (Requirement 14.4) even when the ONNX backend is not
+# compiled in.
+serde_json.workspace = true
+
+# `onnx-local` backend (Task 6.2) — gated behind the `onnx` feature so the
+# default workspace build/test stays green with no ONNX Runtime native lib.
+# `ort` is pinned exactly (the 2.0 line is still in rc, the API moves between
+# rc's). `load-dynamic` keeps the *build* offline-friendly (no binary download
+# at build time; the ONNX Runtime shared lib is dlopen'd at runtime); the
+# `onnx-download` feature opts into the bundled static download instead.
+ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = [
+    "std",
+    "ndarray",
+    "api-24",
+] }
+tokenizers = { version = "0.23", optional = true, default-features = false, features = [
+    "fancy-regex",
+] }
+
+[dev-dependencies]
+proptest.workspace = true
+criterion.workspace = true
+
+# Embedding-latency bench (Task 6.3 — the `ort` vs `candle` decision harness).
+# `required-features = ["onnx"]` means a plain `cargo bench`/`cargo build` never
+# compiles it; it only builds when the `onnx` backend is compiled in. The bench
+# itself graceful-skips when the model assets are absent (offline), so it never
+# fabricates numbers — see ADR-0001 and the bench's module docs.
+[[bench]]
+name = "embed_latency"
+harness = false
+required-features = ["_onnx"]
+
+[features]
+# Internal: compile the `onnx-local` backend code + its deps. Strategy-agnostic
+# — it deliberately picks NO ONNX Runtime linking strategy, so a concrete one
+# (below) must be layered on top. Not meant to be selected on its own (ort-sys
+# needs a linking strategy or the build fails). All `#[cfg]` gates key off this
+# so the backend code compiles identically under either strategy.
+_onnx = ["dep:ort", "dep:tokenizers"]
+# Dev/test build: resolve ONNX Runtime as a shared library at *runtime*
+# (`load-dynamic`), so the *build* stays offline (no native-lib download). The
+# host must provide onnxruntime (system lib or `ORT_DYLIB_PATH`) to actually run.
+onnx = ["_onnx", "ort/load-dynamic"]
+# Release build: download + **statically link** ONNX Runtime so the shipped
+# `cognis` is a single self-contained binary (design G2) — no external
+# onnxruntime.dll, and crucially NOT `load-dynamic` (mixing the two yields a
+# binary that silently looks for a dll at runtime and hangs). `download-binaries`
+# fetches the prebuilt lib over HTTPS at build time and therefore requires a TLS
+# backend; `tls-rustls` uses `ring`, which cross-compiles cleanly for the
+# aarch64 release-matrix targets (no system OpenSSL), unlike `tls-native`.
+onnx-download = ["_onnx", "ort/download-binaries", "ort/tls-rustls"]

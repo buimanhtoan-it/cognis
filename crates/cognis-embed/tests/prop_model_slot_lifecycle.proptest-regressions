@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 11875c1a79cb29156833a9b6ae2e2b51296badfe395110da84f8e42c8886841e # shrinks to n_threads = 9, fail_waves = 1, cooldown_ms = 35
+cc 196e9ea2be4870cf38314dcbb2715353f59df5815e62bace40340cac802c1854 # shrinks to n_threads = 9, fail_waves = 1, cooldown_ms = 19

@@ -1,0 +1,6 @@
+# Pins the Rust toolchain for the Cognis workspace.
+# On Windows gnu hosts, building crates that emit import libraries or C
+# (`rusqlite` bundled) requires MinGW-w64 (`dlltool` + `as` + `gcc`) on PATH.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy", "rust-mingw"]

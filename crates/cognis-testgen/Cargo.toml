@@ -1,0 +1,21 @@
+[package]
+name = "cognis-testgen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "cognis test generators: shared proptest strategies for workspace property suites (dev-only, never published)."
+# Dev-only: this crate exists to be a `dev-dependency` of the engine crates and
+# is never part of the shipped single binary. It must never reach crates.io.
+publish = false
+
+[dependencies]
+# Shared generators are proptest `Strategy` values, so proptest is a *normal*
+# dependency here even though every consumer only pulls this crate in as a
+# dev-dependency.
+proptest.workspace = true
+cognis-core.workspace = true
+cognis-store.workspace = true
+# `Edge::meta` is a `serde_json::Value`; `sha2` produces the byte-exact
+# Content_Hash the File_Cache generators have to agree with.
+serde_json.workspace = true
+sha2.workspace = true

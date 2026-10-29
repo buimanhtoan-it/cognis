@@ -1,0 +1,38 @@
+[package]
+name = "cognis-indexd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "cognis indexing daemon: file-watch + incremental indexing."
+
+[lib]
+name = "cognis_indexd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cognis-indexd"
+path = "src/main.rs"
+
+[dependencies]
+cognis-core.workspace = true
+cognis-indexer.workspace = true
+cognis-owner.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+notify.workspace = true
+ctrlc.workspace = true
+
+[dev-dependencies]
+cognis-store.workspace = true
+# Legacy-vec0 integration tests (indexd-vec0-legacy-crash task 4.3): temp repo
+# + `.cognis/uckg.db` fixtures, and a raw connection to read the fixture's real
+# row counts before the heal-on-open pass.
+tempfile = "3"
+rusqlite = { workspace = true }
+
+[features]
+# Forward the ONNX embedder backend so the release daemon indexes with real
+# embeddings. Off by default (offline workspace build/test).
+onnx = ["cognis-indexer/onnx", "cognis-owner/onnx"]
+onnx-download = ["cognis-indexer/onnx-download", "cognis-owner/onnx-download"]

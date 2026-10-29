@@ -1,0 +1,534 @@
+{
+  "name": "cognis-mcp",
+  "displayName": "Cognis MCP",
+  "description": "Real-time algorithmic complexity (Big-O), optimization advisories, CSIA blast-radius guardrails, and CSAR graph-diffusion context for AI coding agents.",
+  "version": "0.1.0",
+  "publisher": "ToanBui",
+  "license": "Apache-2.0",
+  "icon": "media/icon.png",
+  "author": {
+    "name": "ToanBui",
+    "email": "buimanhtoan.it@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/buimanhtoan-it/cognis.git",
+    "directory": "apps/cognis-mcp"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning"
+  ],
+  "keywords": [
+    "mcp",
+    "ai",
+    "guardrails",
+    "complexity",
+    "big-o",
+    "blast radius",
+    "impact analysis",
+    "code optimization",
+    "cursor",
+    "copilot",
+    "antigravity",
+    "code intelligence"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "workspaceContains:.cognis/config.yaml"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cognis",
+          "title": "Cognis",
+          "icon": "media/sidebar.png"
+        }
+      ]
+    },
+    "views": {
+      "cognis": [
+        {
+          "type": "webview",
+          "id": "cognis.controlPanel",
+          "name": "Overview",
+          "icon": "media/sidebar.png"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "cognis.setupWorkspace",
+        "title": "Set Up Workspace",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.installBackend",
+        "title": "Install Engine",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.repairSetup",
+        "title": "Troubleshoot & Repair",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.clearAndReindex",
+        "title": "Rebuild Index (this workspace)",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.connectMcp",
+        "title": "Connect MCP",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.disconnectMcp",
+        "title": "Disconnect MCP",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.startMcpServer",
+        "title": "Start HTTP MCP Server",
+        "category": "Cognis",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "cognis.stopMcpServer",
+        "title": "Stop HTTP MCP Server",
+        "category": "Cognis",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "cognis.pauseSync",
+        "title": "Pause Index Sync",
+        "category": "Cognis",
+        "icon": "$(debug-pause)"
+      },
+      {
+        "command": "cognis.resumeSync",
+        "title": "Resume Index Sync",
+        "category": "Cognis",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "cognis.cancelIndexing",
+        "title": "Cancel Indexing",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.removeFromWorkspace",
+        "title": "Remove from This Workspace",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.prepareUninstall",
+        "title": "Remove Everything & Uninstall",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.forceCleanup",
+        "title": "Force Cleanup (Kill Processes & Delete)",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.reinstallEngine",
+        "title": "Reinstall Engine",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.uninstallEngine",
+        "title": "Uninstall Engine",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.coldRestart",
+        "title": "Cold Restart (Wipe & Rebuild)",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.showHealth",
+        "title": "Show Health",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.openPanel",
+        "title": "Open Overview",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.refreshPrerequisites",
+        "title": "Re-check Prerequisites",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.installAllPrerequisites",
+        "title": "Install Missing Prerequisites",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.showOutput",
+        "title": "Show Activity Log",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.showDiagnostics",
+        "title": "Show Diagnostics Log",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.toggle",
+        "title": "Toggle Cognis",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.startCognis",
+        "title": "Start Cognis",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      },
+      {
+        "command": "cognis.updateExtension",
+        "title": "Update Extension",
+        "category": "Cognis",
+        "icon": "media/command.png"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "cognis.toggle"
+        },
+        {
+          "command": "cognis.showStatus"
+        },
+        {
+          "command": "cognis.showOutput"
+        },
+        {
+          "command": "cognis.showDiagnostics"
+        },
+        {
+          "command": "cognis.setupWorkspace",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.installBackend",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.repairSetup",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.clearAndReindex",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.connectMcp",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.disconnectMcp",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.startMcpServer",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.stopMcpServer",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.pauseSync",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.resumeSync",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.cancelIndexing",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.removeFromWorkspace",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.prepareUninstall",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.forceCleanup",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.reinstallEngine",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.uninstallEngine",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.coldRestart",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.showHealth",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.openPanel",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.refreshPrerequisites",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.installAllPrerequisites",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.startCognis",
+          "when": "config.cognis.advancedMode"
+        },
+        {
+          "command": "cognis.updateExtension",
+          "when": "config.cognis.advancedMode"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "cognis.startMcpServer",
+          "when": "view == cognis.controlPanel && config.cognis.advancedMode && !cognis.mcpServerRunning",
+          "group": "navigation@1"
+        },
+        {
+          "command": "cognis.stopMcpServer",
+          "when": "view == cognis.controlPanel && config.cognis.advancedMode && cognis.mcpServerRunning",
+          "group": "navigation@1"
+        },
+        {
+          "command": "cognis.resumeSync",
+          "when": "view == cognis.controlPanel && config.cognis.advancedMode && cognis.syncPaused",
+          "group": "navigation@2"
+        },
+        {
+          "command": "cognis.pauseSync",
+          "when": "view == cognis.controlPanel && config.cognis.advancedMode && !cognis.syncPaused",
+          "group": "navigation@2"
+        },
+        {
+          "command": "cognis.openPanel",
+          "when": "view == cognis.controlPanel && config.cognis.advancedMode",
+          "group": "overflow@1"
+        },
+        {
+          "command": "cognis.showHealth",
+          "when": "view == cognis.controlPanel && config.cognis.advancedMode",
+          "group": "overflow@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Cognis",
+      "properties": {
+        "cognis.binaryRepo": {
+          "type": "string",
+          "default": "",
+          "description": "Advanced: GitHub repository (owner/name) that publishes the Cognis engine release binaries. Leave empty to use the default Cognis repository."
+        },
+        "cognis.binaryDownloadBaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Advanced: override the base URL the engine binary and its .sha256 checksum are downloaded from (for offline mirrors or pre-release testing). Leave empty to use the matching GitHub Release for this extension version."
+        },
+        "cognis.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Advanced: use a specific prebuilt Cognis engine binary at this path instead of the managed (downloaded) one. Intended for bring-your-own builds and end-to-end testing. Can also be set via the COGNIS_BINARY_PATH environment variable."
+        },
+        "cognis.modelDownloadBaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Advanced: override the base URL the semantic embedding model files (bge-small model.onnx / tokenizer.json / pooling.json) and their .sha256 checksums are downloaded from. Leave empty to use the matching GitHub Release for this extension version."
+        },
+        "cognis.mcpConfigScope": {
+          "type": "string",
+          "enum": [
+            "workspace",
+            "global"
+          ],
+          "default": "workspace",
+          "description": "Where to write MCP client config. workspace (default) writes .cursor/mcp.json inside the target repository so each host starts only the open repo's server (no host × repository fan-out). global merges cognis-<repo-slug> entries into ~/.cursor/mcp.json so multiple indexed repos can stay connected at once; opt in explicitly, as every MCP host then starts a daemon for every indexed repo."
+        },
+        "cognis.autoManageOnActivate": {
+          "type": "boolean",
+          "default": true,
+          "description": "On activation, inspect the workspace, refresh Cognis config, and let cognis-indexd rebuild or watch as needed."
+        },
+        "cognis.autoStartLiveIndexing": {
+          "type": "boolean",
+          "default": true,
+          "description": "During auto-manage, start cognis-indexd when the workspace needs indexing or file watching."
+        },
+        "cognis.autoIndexOnFileChange": {
+          "type": "boolean",
+          "default": true,
+          "description": "When saved files change and live indexing is not running, automatically start cognis-indexd for this workspace."
+        },
+        "cognis.promptBeforeMcpWrite": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask once before writing global MCP client configuration during auto-manage."
+        },
+        "cognis.mcpHost": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "cursor",
+            "vscode",
+            "kiro",
+            "claude"
+          ],
+          "default": "auto",
+          "description": "MCP config target host. Use auto to detect the current editor (Cursor, VS Code, Kiro). Kiro writes .kiro/settings/mcp.json."
+        },
+        "cognis.pollHealthSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "description": "Health poll interval when live indexing is active."
+        },
+        "cognis.mcpSoftTimeoutSeconds": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Override COGNIS_MCP_SOFT_TIMEOUT_S in generated MCP config. 0 keeps Cognis defaults; generated Windows configs use a safer automatic value."
+        },
+        "cognis.mcpHardTimeoutSeconds": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Override COGNIS_MCP_HARD_TIMEOUT_S in generated MCP config. 0 keeps Cognis defaults; generated Windows configs use a safer automatic value."
+        },
+        "cognis.mcpDiscoverSemanticTimeoutSeconds": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Override COGNIS_MCP_DISCOVER_SEMANTIC_TIMEOUT_S in generated MCP config. 0 keeps Cognis defaults; generated Windows configs use a safer automatic value."
+        },
+        "cognis.mcpSemanticCooldownSeconds": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Override COGNIS_MCP_SEMANTIC_COOLDOWN_S in generated MCP config. 0 keeps the Cognis default."
+        },
+        "cognis.mcpWarmSemanticOnStartup": {
+          "type": "boolean",
+          "default": false,
+          "description": "When false (default), generated MCP config explicitly sets COGNIS_MCP_WARM_SEMANTIC_ON_STARTUP=0 for lazy first-demand loading. Enable it to emit =1 and preload the embedder on MCP server start. Direct launches with the variable absent remain eager for compatibility."
+        },
+        "cognis.mcpStdioMode": {
+          "type": "string",
+          "enum": [
+            "proxy",
+            "heavy"
+          ],
+          "default": "proxy",
+          "description": "How editor-owned Cognis MCP stdio servers launch. proxy (default) spawns a model-free thin proxy that forwards JSON-RPC to one heavy repository daemon (host × repository connections cost a thin process, not a heavy one). heavy restores the legacy path where each editor connection is itself a heavy daemon. Can also be set via COGNIS_MCP_STDIO_MODE."
+        },
+        "cognis.mcpSharedHttpEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Reversible sharing gate for direct shared HTTP (one heavy repository daemon served over bounded-concurrent loopback HTTP). Default OFF: Cognis keeps the compatible thin-proxy / per-repository-daemon stdio path. When enabled, shared HTTP is still withheld until every required gate check has evidence of pass (semantic parity, twelve-tool contracts, cancellation/failure, concurrent load/eviction, repository isolation, model-fingerprint isolation, process/private-byte improvement); a failed gate falls back to stdio with no data loss. Can also be set via COGNIS_MCP_SHARED_HTTP=1."
+        },
+        "cognis.logLevel": {
+          "type": "string",
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "default": "info",
+          "description": "Verbosity of the Cognis diagnostics log (Cognis: Show Diagnostics Log). Use debug to capture every CLI call and command with timings when reporting an issue."
+        },
+        "cognis.advancedMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Advanced/Debug mode — for developers only. When on, Cognis reveals the full set of detailed controls and expert commands."
+        },
+        "cognis.guardrails.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable real-time algorithmic complexity (Big-O), optimization advisories (OPT-001..OPT-007), and CSIA blast-radius diagnostics."
+        },
+        "cognis.guardrails.codeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Display inline Big-O Time/Space complexity and caller blast-radius CodeLenses above functions and methods."
+        },
+        "cognis.guardrails.analyzeOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically run inter-procedural Speculative Shadow AST + CSIA patch-impact analysis via MCP when saving files."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "postinstall": "npm run compile",
+    "vscode:prepublish": "npm run clean && npm run compile",
+    "clean": "node -e \"require('node:fs').rmSync('out',{recursive:true,force:true})\"",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "test": "npm run compile && node --test out/test/*.test.js",
+    "test:host": "npm run compile && node out/test-host/runHostTests.js",
+    "test:host:large": "npm run compile && node out/test-host-large/runLargeHostTests.js",
+    "sim:build": "npm run compile && node out/sim/build.js",
+    "test:e2e": "npm run sim:build && playwright test",
+    "lint": "tsc -p ./ --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.17.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^3.9.1",
+    "fast-check": "^3.23.2",
+    "mocha": "^10.8.2",
+    "typescript": "^5.7.0"
+  }
+}

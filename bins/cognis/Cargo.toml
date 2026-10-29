@@ -1,0 +1,35 @@
+[package]
+name = "cognis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "cognis single multi-call binary (busybox-style: cli / mcpd / indexd / owner)."
+
+[[bin]]
+name = "cognis"
+path = "src/main.rs"
+
+[dependencies]
+cognis-cli.workspace = true
+cognis-mcpd.workspace = true
+cognis-indexd.workspace = true
+cognis-owner.workspace = true
+cognis-store.workspace = true
+
+[features]
+# The single shipped artifact's ONNX toggles: forwards to the mcpd (semantic
+# search) and indexd (index-time embeddings) surfaces so one `--features` flag
+# on the release build turns on semantic across the whole binary. Off by
+# default so the ordinary workspace build/test needs no ONNX Runtime.
+#   cargo build --release -p cognis --features onnx-download
+onnx = ["cognis-mcpd/onnx", "cognis-indexd/onnx", "cognis-cli/onnx", "cognis-owner/onnx"]
+onnx-download = [
+    "cognis-mcpd/onnx-download",
+    "cognis-indexd/onnx-download",
+    "cognis-cli/onnx-download",
+    "cognis-owner/onnx-download",
+]
+# Full release build: ship semantic embeddings plus accelerated vec0 search,
+# while keeping the default developer build offline-friendly.
+release-full = ["onnx-download", "cognis-store/sqlite-vec", "cognis-cli/sqlite-vec"]
+default = []

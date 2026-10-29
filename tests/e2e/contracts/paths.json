@@ -1,0 +1,12 @@
+{
+  "audit_log_path": "str",
+  "capsule_cache_dir": "str",
+  "cognis_dir": "str",
+  "config_path": "str",
+  "db_path": "str",
+  "engine_binary": "str",
+  "golden_set_path": "str",
+  "indexd_status_path": "str",
+  "repo_root": "str",
+  "runtime_version": "str"
+}

@@ -1,0 +1,37 @@
+{
+  "keys": [
+    "command",
+    "db_path",
+    "exit_code",
+    "health",
+    "index_path",
+    "overall",
+    "paths",
+    "phases",
+    "repo_root",
+    "runtime_version",
+    "skip_embeddings"
+  ],
+  "health": {
+    "capabilities": {
+      "accelerated_vector_search": "bool",
+      "semantic_backend": "bool"
+    },
+    "pending_vector_count": "int",
+    "semantic_available": "bool",
+    "semantic_generation": "int",
+    "source_generation": "int"
+  },
+  "paths": {
+    "audit_log_path": "str",
+    "capsule_cache_dir": "str",
+    "cognis_dir": "str",
+    "config_path": "str",
+    "db_path": "str",
+    "engine_binary": "str",
+    "golden_set_path": "str",
+    "indexd_status_path": "str",
+    "repo_root": "str",
+    "runtime_version": "str"
+  }
+}

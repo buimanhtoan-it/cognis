@@ -1,0 +1,89 @@
+# Cognis runtime state (local per-repository index, cache, leases, audit log)
+.cognis/
+
+# Editor-local MCP wiring (machine-specific paths)
+.cursor/
+.vscode/
+.kiro/
+.idea/
+
+# Local portable editor binaries (never commit)
+/cursor/
+
+# Generated benchmark / evaluation / diagnostic artifacts
+benchmark-reports/
+.benchmarks/
+audit.log
+audit.log.*
+diagnostics/
+
+# Rust workspace build & distribution staging
+/target/
+/dist/
+
+# VS Code / Cursor extension build & test artifacts
+node_modules/
+apps/cognis-mcp/.vscode/
+apps/cognis-mcp/out/
+apps/cognis-mcp/.vscode-test/
+apps/cognis-mcp/.vscode-test-web/
+apps/cognis-mcp/*.vsix
+
+# Native shared libraries & symbols
+*.dylib
+*.dll
+*.so
+*.pdb
+
+# Local secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+
+# Local logs, scratch helpers & databases
+scratch_*
+*.log
+*.pid
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.duckdb
+*.duckdb-journal
+*.idx
+*.index
+# Checked-in SQLite fixture required by crates/cognis-store tests
+!crates/cognis-store/tests/fixtures/uckg_oracle.db
+
+# OS & editor swap files
+*.swp
+*.swo
+*.bak
+*.tmp
+*.temp
+*.orig
+*.rej
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ONNX model binaries (provisioned at release / runtime; README is tracked)
+assets/models/**/*.onnx
+assets/models/**/tokenizer.json
+assets/models/**/pooling.json
+assets/models/**/*.bin
+assets/models/**/*.txt
+assets/models/**/*.json
+!assets/models/**/README.md
+
+# Optional local embedding parity fixture
+crates/cognis-embed/tests/fixtures/bge_parity_golden.json

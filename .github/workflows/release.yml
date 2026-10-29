@@ -1,0 +1,214 @@
+name: release
+
+# Tag-driven release workflow. Builds the self-contained single `cognis` binary
+# per platform (bundled SQLite + ONNX Runtime), provisions checksum-verified
+# semantic embedding model assets, runs an end-to-end MCP smoke gate, and
+# publishes a GitHub Release.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  dist-binaries:
+    name: dist · ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, cross: false }
+          - { os: macos-14, target: aarch64-apple-darwin, cross: false }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, cross: false }
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Select Xcode (macOS)
+        if: runner.os == 'macOS'
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "15.4"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}-${{ matrix.os }}-v2
+
+      - name: Install cross
+        if: ${{ matrix.cross }}
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build + stage + verify (cross)
+        if: ${{ matrix.cross }}
+        run: cargo xtask verify-release --use-cross --target ${{ matrix.target }} --features release-full
+
+      - name: Build + stage + verify (native)
+        if: ${{ !matrix.cross }}
+        run: cargo xtask verify-release --target ${{ matrix.target }} --features release-full
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cognis-${{ matrix.target }}
+          path: |
+            dist/cognis-${{ matrix.target }}*
+
+  # Provisions `Xenova/bge-small-en-v1.5` (`model.onnx`, `tokenizer.json`,
+  # `pooling.json`) plus `.sha256` sidecars so the extension can download
+  # checksum-verified semantic model assets from the matching GitHub Release.
+  provision-model:
+    name: provision · semantic model
+    runs-on: ubuntu-latest
+    env:
+      HF_REPO: Xenova/bge-small-en-v1.5
+      HF_REV: ea104dacec62c0de699686887e3f920caeb4f3e3
+      MODEL_ID: bge-small-en-v1.5
+    steps:
+      - name: Download + stage model assets
+        run: |
+          set -euo pipefail
+          base="https://huggingface.co/${HF_REPO}/resolve/${HF_REV}"
+          mkdir -p model
+          echo "[model] downloading model.onnx"
+          curl --fail --location --retry 3 --retry-delay 5 \
+            -o "model/${MODEL_ID}-model.onnx" "${base}/onnx/model.onnx"
+          echo "[model] downloading tokenizer.json"
+          curl --fail --location --retry 3 --retry-delay 5 \
+            -o "model/${MODEL_ID}-tokenizer.json" "${base}/tokenizer.json"
+          echo "[model] writing pooling.json (bge: CLS pooling + L2 normalise)"
+          printf '{"pooling":"cls","normalize":true}\n' > "model/${MODEL_ID}-pooling.json"
+
+          echo "[model] sanity-checking downloaded assets"
+          onnx_bytes="$(stat -c%s "model/${MODEL_ID}-model.onnx")"
+          test "$onnx_bytes" -gt 50000000 \
+            || { echo "::error::model.onnx is only ${onnx_bytes} bytes — download likely failed"; exit 1; }
+          grep -q "last_hidden_state" "model/${MODEL_ID}-model.onnx" \
+            || { echo "::error::model.onnx has no last_hidden_state output tensor"; exit 1; }
+          test "$(stat -c%s "model/${MODEL_ID}-tokenizer.json")" -gt 100000 \
+            || { echo "::error::tokenizer.json looks too small — download likely failed"; exit 1; }
+
+          echo "[model] generating sha256 sidecars"
+          cd model
+          for f in "${MODEL_ID}-model.onnx" "${MODEL_ID}-tokenizer.json" "${MODEL_ID}-pooling.json"; do
+            sha256sum "$f" > "$f.sha256"
+            echo "  $(cat "$f.sha256")"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cognis-model
+          path: model/*
+
+  package-vsix:
+    name: dist · vscode extension (.vsix)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/cognis-mcp/package-lock.json
+
+      - name: Install, test, and package VSIX
+        working-directory: apps/cognis-mcp
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run lint
+          npm test
+          npm run package
+          mkdir -p ../../vsix
+          for f in cognis-mcp-*.vsix; do
+            cp "$f" "../../vsix/$f"
+            (cd ../../vsix && sha256sum "$f" > "$f.sha256")
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cognis-vsix
+          path: vsix/*
+
+  semantic-smoke:
+    name: smoke · semantic (shipped linux binary)
+    runs-on: ubuntu-latest
+    needs: [dist-binaries, provision-model]
+    env:
+      COGNIS_SQLITE_VEC_PATH: ""
+    steps:
+      - name: Fetch shipped binary + model artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cognis-*
+          path: art/
+          merge-multiple: true
+
+      - name: Run a real semantic query against the shipped binary
+        run: |
+          set -euo pipefail
+          cp art/cognis-x86_64-unknown-linux-gnu ./cognis
+          chmod +x ./cognis
+          bin="$PWD/cognis"
+
+          echo "== binary is self-contained (no external ONNX Runtime) =="
+          "$bin" --version
+
+          mkdir -p model repo
+          cp art/bge-small-en-v1.5-model.onnx      model/model.onnx
+          cp art/bge-small-en-v1.5-tokenizer.json  model/tokenizer.json
+          cp art/bge-small-en-v1.5-pooling.json    model/pooling.json
+
+          printf 'import time\ndef retry_http_request(url, max_attempts=3, backoff=0.5):\n    """Send an HTTP GET and retry on transient network failure with exponential backoff."""\n    return _send(url)\ndef _send(url):\n    raise ConnectionError("network down")\n' > repo/net.py
+          printf 'import json\ndef to_json(obj):\n    """Serialize a Python object into a compact JSON string."""\n    return json.dumps(obj, sort_keys=True)\n' > repo/serialize.py
+
+          echo "== index with real embeddings + accelerated vec0 =="
+          COGNIS_ONNX_MODEL_DIR="$PWD/model" "$bin" cli --repo-root repo bootstrap | tee boot.log
+          grep -q "accelerated vector search active" boot.log \
+            || { echo "::error::sqlite-vec vec0 acceleration did not activate"; exit 1; }
+          grep -q "symbol vectors present" boot.log \
+            || { echo "::error::no embeddings produced — semantic pipeline broken"; exit 1; }
+
+          echo "== semantic_search over MCP (stdio) =="
+          {
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}'
+            printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"semantic_search","arguments":{"query":"retry a failed network request with exponential backoff","k":3}}}'
+          } | COGNIS_REPO_ROOT="$PWD/repo" COGNIS_DB_PATH="$PWD/repo/.cognis/uckg.db" COGNIS_ONNX_MODEL_DIR="$PWD/model" \
+                timeout 90 "$bin" mcpd > mcp_out.jsonl 2>/dev/null || true
+          pkill -f "$bin owner" || true
+          echo "---- mcp response ----"; cat mcp_out.jsonl
+
+          grep -q "retry_http_request" mcp_out.jsonl \
+            || { echo "::error::semantic_search did not return the expected symbol"; exit 1; }
+          echo "== semantic smoke PASSED =="
+
+  github-release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    needs: [dist-binaries, provision-model, package-vsix, semantic-smoke]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download platform binaries + model assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cognis-*
+          path: binaries/
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            binaries/*
+          generate_release_notes: true

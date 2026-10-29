@@ -1,0 +1,18 @@
+{
+  "capabilities": {
+    "accelerated_vector_search": "bool",
+    "semantic_backend": "bool"
+  },
+  "checks": {
+    "<check>": {
+      "message": "str",
+      "status": "str"
+    }
+  },
+  "overall": "str",
+  "pending_vector_count": "int",
+  "runtime_version": "str",
+  "semantic_available": "bool",
+  "semantic_generation": "int",
+  "source_generation": "int"
+}

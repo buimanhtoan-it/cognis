@@ -1,0 +1,4 @@
+# Workspace cargo configuration.
+# `cargo xtask <cmd>` runs the build and distribution automation crate.
+[alias]
+xtask = "run -p xtask --"

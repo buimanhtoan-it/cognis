@@ -1,0 +1,2112 @@
+import * as path from "node:path";
+import * as vscode from "vscode";
+import { getOutputChannel } from "./cli";
+import { trace, type TraceLevel } from "./diagnostics";
+import {
+  initManagedBinary,
+  installManagedBinary,
+  managedBinDir,
+  uninstallManagedBinary,
+  checkManagedBinaryDrift,
+  BinaryInstallError,
+  formatElapsed,
+} from "./binary";
+import {
+  initManagedModel,
+  installManagedModel,
+  isModelInstalled,
+  managedModelDir,
+  uninstallManagedModel,
+} from "./model";
+import {
+  presentGuidance,
+  setupResultGuidance,
+  showErrorGuidance,
+} from "./guidance";
+import {
+  isLiveIndexing,
+  onDidChangeIndexStatus,
+  stopAllIndexing,
+} from "./indexd";
+import {
+  onDidChangeMcpServerState,
+  startMcpServer,
+  stopAllMcpServers,
+  stopMcpServer,
+} from "./mcpServer";
+import {
+  ACTION_COMMANDS,
+  CognisPanelProvider,
+  deriveCompatibilityHint,
+  outcomeLabelForContext,
+  type PanelContext,
+} from "./panel";
+import { reconcileWorkspaceOnActivate } from "./reconcile";
+import { performHandshake } from "./handshake";
+import {
+  FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+  compatibilityIdentityKey,
+  deriveRemediation,
+  type CompatibilityRemediation,
+} from "./compatibility";
+import {
+  CompatibilityCoordinator,
+  StaleCompatibilityProbeError,
+} from "./compatibilityCoordinator";
+import { canonicalizePath } from "./mcpCanonical";
+import { type HandshakeResult } from "./contract";
+import {
+  addCognisToGitignore,
+  shouldRemindGitignore,
+} from "./gitignore";
+import {
+  fetchPrerequisites,
+  installAllMissing,
+  installPrerequisite,
+} from "./prerequisites";
+import {
+  getState,
+  initStateStorage,
+  isIndexStatusBusy,
+  setIndexStatus,
+  setLiveIndexing,
+  setMcpEnabled,
+} from "./state";
+import { ActivationManager } from "./activation";
+import { DeactivationManager } from "./deactivation";
+import { deriveStatusSnapshot, startStatusSurfaceRefresh } from "./status";
+import { ToggleControl, type ToggleState } from "./toggle";
+import { CognisGuardrailController } from "./guardrails";
+import type { PrerequisiteReport, SetupResult } from "./types";
+import {
+  enableMcpForWorkspace,
+  resolveSharingGate,
+  writeHttpMcpConfig,
+} from "./mcpConfig";
+import {
+  getWorkspaceFolder,
+  isWorkspaceConfigured,
+  isWorkspaceSyncPaused,
+  refreshPanelContext,
+  rehydrateWorkspaceState,
+  clearIndexAndReindex,
+  connectMcp,
+  disableMcp,
+  pauseSync,
+  removeFromWorkspace,
+  forceRemoveFromWorkspace,
+  repairSetup,
+  resumeSync,
+  setupWorkspace,
+  showHealthReport,
+  startLive,
+  stopLive,
+} from "./workspace";
+
+let statusBarItem: vscode.StatusBarItem;
+let panelProvider: CognisPanelProvider;
+let healthPollTimer: ReturnType<typeof setInterval> | undefined;
+let statusSurfaceRefresh: { dispose(): void } | undefined;
+let extensionContext: vscode.ExtensionContext | undefined;
+let compatibilityCoordinator: CompatibilityCoordinator | undefined;
+let lastPrerequisites: PrerequisiteReport | undefined;
+let backendAvailable: boolean | undefined;
+let indexingActive = false;
+let blockingIndexMessage: string | undefined;
+/**
+ * Compatibility_Identity keys already notified during the current activation
+ * session. Reset on every {@link activate} so at most one notification is shown
+ * per identity per session (Requirement 4.2). Purely in-memory; the persistent
+ * per-skew "skip" (Dismiss across sessions) stays in ``globalState``.
+ */
+const seenCompatibilityIdentities = new Set<string>();
+let autoIndexStartPromise: Promise<void> | undefined;
+/**
+ * Monotonic sequence guarding {@link pollHealth} against out-of-order results.
+ *
+ * ``pollHealth`` awaits the engine health CLI before rendering. Timers, MCP/
+ * index events, command handlers, and ``withProgress`` ``finally`` blocks can
+ * all fire it concurrently, so a slow *older* probe could otherwise resolve
+ * after a newer one and overwrite the fresher snapshot with stale data. Each
+ * call bumps this counter and captures its own generation; only the newest
+ * in-flight probe is allowed to publish (older ones drop their result). This is
+ * ordering hardening, not a retry — a dropped probe simply defers to the newer
+ * one already applied.
+ */
+let pollGeneration = 0;
+/**
+ * The most recent {@link PanelContext} handed to {@link updateStatusBar}. Kept
+ * so the ``cognis.advancedMode`` configuration listener can flip
+ * ``advancedMode`` and re-render the panel in place (≤2s, no window reload)
+ * without re-deriving the whole workspace state (R3.3).
+ */
+let lastContext: PanelContext | undefined;
+let toggleControl: ToggleControl | undefined;
+let activationManager: ActivationManager | undefined;
+let deactivationManager: DeactivationManager | undefined;
+
+/**
+ * Read the ``cognis.advancedMode`` setting (default ``false``). Advanced/Debug
+ * mode only controls which panel surface renders; if reading the config throws
+ * for any reason, keep the safe default (``false``) so the panel falls back to
+ * the Minimal_Surface (R3.4).
+ */
+function readAdvancedMode(): boolean {
+  try {
+    return vscode.workspace
+      .getConfiguration("cognis")
+      .get<boolean>("advancedMode", false);
+  } catch {
+    return false;
+  }
+}
+
+function buildIndexingContext(repoRoot: string): PanelContext {
+  const state = getState(repoRoot);
+  return {
+    status: "indexing",
+    compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+    liveIndexing: state.liveIndexing,
+    mcpEnabled: state.mcpEnabled,
+    syncPaused: state.syncPaused,
+    indexStatus: state.indexStatus,
+    indexingMessage: blockingIndexMessage,
+    prerequisites: lastPrerequisites,
+    configured: isWorkspaceConfigured(repoRoot),
+    backendAvailable,
+    advancedMode: readAdvancedMode(),
+  };
+}
+
+async function fetchPanelContext(repoRoot: string): Promise<PanelContext> {
+  const context = await refreshPanelContext(repoRoot, {
+    transition: activationManager?.currentPhase,
+  });
+  return {
+    ...context,
+    compatibility: context.compatibility,
+    prerequisites: lastPrerequisites,
+    configured: isWorkspaceConfigured(repoRoot),
+    backendAvailable,
+    advancedMode: readAdvancedMode(),
+  };
+}
+
+/**
+ * Re-fetch the prerequisite checklist (via `cognis-cli doctor`) and refresh the
+ * panel. Cached so every panel render can show the checklist without re-running
+ * the CLI on each poll.
+ *
+ * A `doctor` report is also our cheapest proof that the engine binary is
+ * actually runnable: if it returns a report the backend is reachable; if it
+ * returns undefined the binary isn't installed yet (fresh machine), which the
+ * panel surfaces as "Install the Cognis backend".
+ */
+async function refreshPrerequisites(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    return;
+  }
+  lastPrerequisites = await fetchPrerequisites(folder.uri.fsPath);
+  backendAvailable = lastPrerequisites !== undefined;
+  await pollHealth();
+}
+
+/**
+ * Mirror the panel's runtime state into VS Code context keys so the
+ * ``view/title`` toggle buttons (Start/Stop MCP, Pause/Resume sync) show the
+ * action that matches the current state. These keys are ephemeral and are
+ * re-evaluated on every render via {@link updateStatusBar}.
+ */
+function setPanelContextKeys(ctx: PanelContext): void {
+  const running =
+    ctx.mcpServerPhase === "running" || ctx.mcpServerPhase === "starting";
+  void vscode.commands.executeCommand(
+    "setContext",
+    "cognis.mcpServerRunning",
+    running
+  );
+  void vscode.commands.executeCommand(
+    "setContext",
+    "cognis.syncPaused",
+    Boolean(ctx.syncPaused)
+  );
+}
+
+function updateStatusBar(context: PanelContext): void {
+  lastContext = context;
+  statusBarItem.text = outcomeLabelForContext(context);
+  statusBarItem.tooltip = "Cognis: click for indexing and MCP setup status";
+  statusBarItem.show();
+  setPanelContextKeys(context);
+  panelProvider?.updateContext(context);
+}
+
+function expectedEngineVersion(): string | undefined {
+  return extensionContext?.extension?.packageJSON?.version as string | undefined;
+}
+
+async function pollHealth(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    statusSurfaceRefresh?.dispose();
+    statusSurfaceRefresh = undefined;
+    return;
+  }
+  const repoRoot = folder.uri.fsPath;
+  startStatusRefresh(repoRoot);
+  // Claim a generation before every possible publication path. In particular,
+  // this invalidates already-awaited health/compatibility work when an indexing
+  // render, workspace switch, or later poll takes over.
+  const generation = ++pollGeneration;
+  // Don't let background health polls overwrite "Indexing…" while bootstrap/sync runs.
+  if (indexingActive) {
+    const indexingContext = Object.freeze(buildIndexingContext(repoRoot));
+    if (generation !== pollGeneration) {
+      return;
+    }
+    const currentFolder = getWorkspaceFolder();
+    if (
+      !currentFolder ||
+      canonicalizePath(currentFolder.uri.fsPath) !== canonicalizePath(repoRoot)
+    ) {
+      return;
+    }
+    updateStatusBar(indexingContext);
+    return;
+  }
+
+  const coordinator = compatibilityCoordinator;
+  if (!coordinator) {
+    return;
+  }
+
+  try {
+    // Health and compatibility belong to one publish cycle for this canonical
+    // root. They may execute concurrently, but neither is published alone.
+    const [healthContext, compatibility] = await Promise.all([
+      fetchPanelContext(repoRoot),
+      coordinator.getOrProbe(repoRoot, expectedEngineVersion()),
+    ]);
+    // Preserve the existing latest-wins guard after *all* awaited work. A stale
+    // coordinator rejection, deactivation, or workspace switch cannot publish.
+    if (generation !== pollGeneration) {
+      return;
+    }
+    const currentFolder = getWorkspaceFolder();
+    if (
+      !currentFolder ||
+      canonicalizePath(currentFolder.uri.fsPath) !== canonicalizePath(repoRoot)
+    ) {
+      return;
+    }
+    const context = Object.freeze({
+      ...healthContext,
+      compatibility,
+    });
+    updateStatusBar(context);
+  } catch (err) {
+    if (err instanceof StaleCompatibilityProbeError) {
+      return;
+    }
+    const fallbackContext = await fetchPanelContext(repoRoot);
+    if (generation !== pollGeneration) {
+      return;
+    }
+    const currentFolder = getWorkspaceFolder();
+    if (
+      !currentFolder ||
+      canonicalizePath(currentFolder.uri.fsPath) !== canonicalizePath(repoRoot)
+    ) {
+      return;
+    }
+    updateStatusBar(
+      Object.freeze({
+        ...fallbackContext,
+        compatibility: FIRST_PROBE_COMPATIBILITY_SNAPSHOT,
+      })
+    );
+  }
+}
+
+/**
+ * Force a fresh compatibility probe for the current workspace and republish.
+ *
+ * A successful remediation that can change the engine (install/reinstall) or a
+ * workspace switch must not trust the cached ≤30s snapshot: the engine version
+ * just changed, so the TTL would otherwise keep showing the stale verdict. We
+ * bypass the TTL with a forced generation (R2.5) so the coordinator re-runs
+ * ``performHandshake`` once, then hand off to {@link pollHealth}, whose own
+ * non-forced ``getOrProbe`` reuses that just-committed fresh snapshot (no second
+ * CLI handshake — the cache is now warm) and publishes it alongside health in a
+ * single frozen context. A superseded/deactivated probe rejects with
+ * {@link StaleCompatibilityProbeError}; that is expected latest-wins behaviour,
+ * not an error, so we swallow it and let the newer publish path win.
+ */
+async function forceCompatibilityReprobe(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  const coordinator = compatibilityCoordinator;
+  if (!folder || !coordinator) {
+    return;
+  }
+  try {
+    await coordinator.getOrProbe(folder.uri.fsPath, expectedEngineVersion(), {
+      force: true,
+    });
+  } catch (err) {
+    if (!(err instanceof StaleCompatibilityProbeError)) {
+      throw err;
+    }
+    return;
+  }
+  await pollHealth();
+}
+
+async function ensureLiveIndexingForWorkspaceChange(
+  uri?: vscode.Uri
+): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    return;
+  }
+  if (uri) {
+    const owner = vscode.workspace.getWorkspaceFolder(uri);
+    if (!owner || owner.uri.fsPath !== folder.uri.fsPath) {
+      return;
+    }
+  }
+
+  const config = vscode.workspace.getConfiguration("cognis");
+  if (!config.get<boolean>("autoIndexOnFileChange", true)) {
+    return;
+  }
+
+  const repoRoot = folder.uri.fsPath;
+  if (!isWorkspaceConfigured(repoRoot) || isLiveIndexing(repoRoot)) {
+    return;
+  }
+  // Respect an explicit user pause: don't resurrect the daemon on file save.
+  if (isWorkspaceSyncPaused(repoRoot)) {
+    return;
+  }
+  if (autoIndexStartPromise) {
+    await autoIndexStartPromise;
+    return;
+  }
+
+  autoIndexStartPromise = (async () => {
+    const output = getOutputChannel();
+    output.appendLine(
+      "[auto-index] Workspace files changed; starting live indexing daemon."
+    );
+    try {
+      await startLive();
+      startHealthPolling();
+      await pollHealth();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      output.appendLine(`[auto-index] ${message}`);
+    } finally {
+      autoIndexStartPromise = undefined;
+    }
+  })();
+
+  await autoIndexStartPromise;
+}
+
+function startHealthPolling(): void {
+  const seconds = vscode.workspace
+    .getConfiguration("cognis")
+    .get<number>("pollHealthSeconds", 30);
+  if (healthPollTimer) {
+    clearInterval(healthPollTimer);
+  }
+  healthPollTimer = setInterval(() => {
+    void pollHealth();
+  }, seconds * 1000);
+}
+
+function startStatusRefresh(repoRoot: string): void {
+  statusSurfaceRefresh?.dispose();
+  statusSurfaceRefresh = startStatusSurfaceRefresh({
+    repoRoot,
+    onDidChange: () => {
+      void pollHealth();
+    },
+  });
+}
+
+async function withProgress<T>(
+  title: string,
+  task: (
+    progress: vscode.Progress<{ message?: string }>,
+    token: vscode.CancellationToken
+  ) => Promise<T>
+): Promise<T | undefined> {
+  indexingActive = true;
+  const folder = getWorkspaceFolder();
+  if (folder) {
+    updateStatusBar(buildIndexingContext(folder.uri.fsPath));
+  }
+  try {
+    return await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title, cancellable: true },
+      async (progress, token) => {
+        const reportingProgress: vscode.Progress<{ message?: string }> = {
+          report: (value) => {
+            blockingIndexMessage = value.message;
+            if (folder) {
+              updateStatusBar(buildIndexingContext(folder.uri.fsPath));
+            }
+            progress.report(value);
+          },
+        };
+        // Trace every progress-wrapped flow uniformly: start, ok+duration, or
+        // failure — so a bug in any flow is reconstructable from the log.
+        return trace.span("flow", title, () => task(reportingProgress, token));
+      }
+    );
+  } finally {
+    indexingActive = false;
+    blockingIndexMessage = undefined;
+    await pollHealth();
+  }
+}
+
+async function reportSetupResult(result: SetupResult): Promise<void> {
+  const guidance = setupResultGuidance(result);
+  if (guidance) {
+    await presentGuidance(guidance);
+  }
+}
+
+interface DestructiveTargets {
+  workspaceDatabase: string;
+  workspaceData: string;
+  managedBinary: string;
+  managedModel: string;
+}
+
+function destructiveTargets(repoRoot?: string): DestructiveTargets {
+  const workspaceData = repoRoot
+    ? path.join(repoRoot, ".cognis")
+    : "the current workspace's .cognis directory";
+  return {
+    workspaceDatabase: repoRoot
+      ? path.join(workspaceData, "uckg.db")
+      : "the current workspace's .cognis/uckg.db",
+    workspaceData,
+    managedBinary: managedBinDir() ?? "the extension-managed Cognis binary directory",
+    managedModel: managedModelDir() ?? "the extension-managed Cognis semantic model directory",
+  };
+}
+
+async function runSetupWorkspace(): Promise<void> {
+  try {
+    const result = await withProgress("Cognis: Set Up Workspace", (p, t) =>
+      setupWorkspace(p, t)
+    );
+    if (result) {
+      startHealthPolling();
+      await maybeRemindGitignore();
+      await reportSetupResult(result);
+    }
+  } catch (err) {
+    await showErrorGuidance(err, "Set Up Workspace");
+  }
+}
+
+/**
+ * After setup, keep ``.cognis/`` out of version control automatically.
+ *
+ * The directory holds the local index DB, caches, and audit log — machine
+ * specific files that should never be committed. Rather than asking, we just
+ * add the entry when we're inside a git repo and it isn't ignored yet, then
+ * show a non-blocking notice (with a quick way to view the change). Idempotent.
+ */
+async function maybeRemindGitignore(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    return;
+  }
+  const repoRoot = folder.uri.fsPath;
+  if (!shouldRemindGitignore(repoRoot)) {
+    return;
+  }
+  const written = addCognisToGitignore(repoRoot);
+  if (!written) {
+    getOutputChannel().appendLine(
+      "[gitignore] Could not update .gitignore automatically. Check file permissions."
+    );
+    return;
+  }
+  const choice = await vscode.window.showInformationMessage(
+    "Added `.cognis/` to .gitignore so the local index, caches, and audit log aren't committed.",
+    "View .gitignore"
+  );
+  if (choice === "View .gitignore") {
+    try {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(written));
+      await vscode.window.showTextDocument(doc);
+    } catch {
+      // Non-fatal: the entry is already written regardless of whether we can
+      // open the editor.
+    }
+  }
+}
+
+async function runRepairSetup(): Promise<void> {
+  try {
+    const result = await withProgress("Cognis: Repair Setup", (p, t) =>
+      repairSetup(p, t)
+    );
+    if (result) {
+      startHealthPolling();
+      await reportSetupResult(result);
+    }
+  } catch (err) {
+    await showErrorGuidance(err, "Repair Setup");
+  }
+}
+
+async function runClearAndReindex(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    await showErrorGuidance(
+      new Error("Open a workspace folder before clearing the Cognis index."),
+      "Clear & Re-index"
+    );
+    return;
+  }
+  const targets = destructiveTargets(folder.uri.fsPath);
+  // Destructive action: deletes the stored index and forces a full rebuild.
+  const confirmation = await vscode.window.showWarningMessage(
+    `Clear the Cognis index for this workspace and re-index from scratch? This deletes ` +
+      `the Workspace_Database at ${targets.workspaceDatabase}, its WAL/SHM sidecars, and ` +
+      `the capsule cache under ${targets.workspaceData}. Your config and MCP wiring are ` +
+      "kept, then the index is rebuilt. Re-indexing a large repo can take a few minutes.",
+    { modal: true },
+    "Clear & Re-index"
+  );
+  if (confirmation !== "Clear & Re-index") {
+    return;
+  }
+  try {
+    const result = await withProgress("Cognis: Clear & Re-index", (p, t) =>
+      clearIndexAndReindex(p, t)
+    );
+    if (result) {
+      startHealthPolling();
+      await reportSetupResult(result);
+    }
+  } catch (err) {
+    await showErrorGuidance(err, "Clear & Re-index");
+  }
+}
+
+/**
+ * Connect MCP: write the workspace ``mcp.json`` on disk for the current editor
+ * and open it. Concrete wiring (no copy-paste guide) — see {@link connectMcp}.
+ */
+async function runConnectMcp(): Promise<void> {
+  try {
+    await connectMcp();
+  } catch (err) {
+    await showErrorGuidance(err, "Connect MCP");
+  }
+}
+
+/**
+ * Disconnect MCP: the non-destructive counterpart to Connect MCP. Removes only
+ * this repo's Cognis entry from the editor's ``mcp.json`` (global + workspace
+ * scope) via {@link disableMcp}, keeping the local ``.cognis`` index, source
+ * code, and other workspaces' MCP entries untouched. The panel reflects the
+ * disconnected state on the next health poll (≤2s).
+ */
+async function runDisconnectMcp(): Promise<void> {
+  try {
+    await disableMcp();
+    await pollHealth();
+  } catch (err) {
+    await showErrorGuidance(err, "Disconnect MCP");
+  }
+}
+
+/**
+ * Cancel a running index build. Reuses {@link stopLive}, which stops the live
+ * indexing daemon for this workspace (kill by pid/proc, waiting up to 5s for the
+ * process to exit). This is non-destructive: the existing ``.cognis`` index
+ * (including anything written before the cancel) and source code are kept, so
+ * the partial index stays queryable. The panel returns to idle on the next
+ * health poll.
+ */
+async function runCancelIndexing(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    return;
+  }
+  try {
+    await stopLive();
+    await pollHealth();
+  } catch (err) {
+    await showErrorGuidance(err, "Cancel indexing");
+  }
+}
+
+/**
+ * Start the standalone HTTP MCP server and make it usable in one click:
+ * pre-flight the workspace, start the server, write the url-form mcp.json so the
+ * editor connects to it, then tell the user exactly which file changed and that
+ * a window reload is needed (offering the Reload button).
+ *
+ * Shared HTTP is gated (Requirement 2.9 / Property 10): the reversible
+ * sharing flag defaults OFF, and even when ON every required evidence check
+ * must pass. A closed/failed gate retains the compatible thin-proxy /
+ * per-repository-daemon stdio path with no data loss (preservation 3.8) —
+ * we never rewrite mcp.json to a dead or unapproved HTTP URL.
+ */
+async function runStartMcpServer(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    return;
+  }
+  const repoRoot = folder.uri.fsPath;
+  trace.info("flow", "Start MCP server requested", { repoRoot });
+
+  // Pre-flight: warn with the exact next action instead of failing opaquely.
+  if (!isWorkspaceConfigured(repoRoot)) {
+    const pick = await vscode.window.showWarningMessage(
+      "Set up Cognis for this workspace before starting the MCP server (it needs an index to serve).",
+      "Set Up Workspace"
+    );
+    if (pick === "Set Up Workspace") {
+      await runSetupWorkspace();
+    }
+    return;
+  }
+
+  // Reversible sharing gate (default OFF). Keep sharing disabled until the
+  // flag is on *and* all evidence checks pass; fall back to the compatible
+  // stdio path with no data loss (Requirements 2.9, 3.8).
+  const gate = resolveSharingGate(repoRoot);
+  if (!gate.sharingEnabled) {
+    getOutputChannel().appendLine(
+      `[mcp-http] sharing gate closed — ${gate.summary}` +
+        (gate.fallbackReason ? ` (${gate.fallbackReason})` : "")
+    );
+    try {
+      // Ensure the editor-managed stdio (thin-proxy / heavy) path is present
+      // so MCP access is never disabled by a closed gate (preservation 3.8).
+      const { configPath } = await enableMcpForWorkspace(repoRoot);
+      setMcpEnabled(repoRoot, true);
+      await pollHealth();
+      const reason = gate.flagEnabled
+        ? "Shared HTTP gate checks have not all passed yet; Cognis kept the compatible stdio path (no data loss)."
+        : "Shared HTTP is disabled by default (cognis.mcpSharedHttpEnabled). Cognis kept the compatible thin-proxy / per-repository-daemon stdio path.";
+      await vscode.window.showInformationMessage(
+        `${reason} MCP config: ${configPath}.`
+      );
+    } catch (err) {
+      await showErrorGuidance(err, "Retain stdio MCP path");
+    }
+    return;
+  }
+
+  try {
+    const state = await startMcpServer(repoRoot);
+    if (state.phase === "error" || !state.url) {
+      // Failed start must not leave the editor on a dead URL — fall back to
+      // the compatible stdio path with no data loss (preservation 3.8).
+      getOutputChannel().appendLine(
+        `[mcp-http] shared HTTP start failed; falling back to stdio: ${
+          state.lastError ?? "no URL"
+        }`
+      );
+      try {
+        await enableMcpForWorkspace(repoRoot);
+      } catch (fallbackErr) {
+        getOutputChannel().appendLine(
+          `[mcp-http] stdio fallback failed: ${
+            fallbackErr instanceof Error
+              ? fallbackErr.message
+              : String(fallbackErr)
+          }`
+        );
+      }
+      await showErrorGuidance(
+        new Error(state.lastError ?? "the server did not report a URL"),
+        "Start MCP server"
+      );
+      return;
+    }
+    // Make it usable: point the editor's mcp.json at the running server.
+    // writeHttpMcpConfig re-checks the gate (fail-closed).
+    const { configPath, written, gate: writeGate } = writeHttpMcpConfig(
+      repoRoot,
+      state.url
+    );
+    if (!written) {
+      // Gate flipped closed between resolve and write, or evidence vanished —
+      // stop the just-started server and retain stdio (no data loss).
+      getOutputChannel().appendLine(
+        `[mcp-http] gate refused HTTP config write — ${writeGate.summary}; reverting to stdio`
+      );
+      await stopMcpServer(repoRoot, { force: true });
+      try {
+        await enableMcpForWorkspace(repoRoot);
+      } catch (fallbackErr) {
+        getOutputChannel().appendLine(
+          `[mcp-http] stdio fallback failed: ${
+            fallbackErr instanceof Error
+              ? fallbackErr.message
+              : String(fallbackErr)
+          }`
+        );
+      }
+      await vscode.window.showWarningMessage(
+        "Shared HTTP gate closed during start; Cognis retained the compatible stdio path (no data loss)."
+      );
+      return;
+    }
+    setMcpEnabled(repoRoot, true);
+    trace.info("flow", "MCP server running", { url: state.url, configPath });
+    await pollHealth();
+    const choice = await vscode.window.showInformationMessage(
+      `Cognis MCP server running at ${state.url}. Updated ${configPath} to use it. ` +
+        "Reload the window so your editor connects.",
+      "Reload Window"
+    );
+    if (choice === "Reload Window") {
+      void vscode.commands.executeCommand("workbench.action.reloadWindow");
+    }
+  } catch (err) {
+    // Any unexpected failure: best-effort retain the stdio path so MCP stays
+    // available (preservation 3.8).
+    try {
+      await enableMcpForWorkspace(repoRoot);
+    } catch {
+      // already reporting the primary error below
+    }
+    await showErrorGuidance(err, "Start MCP server");
+  }
+}
+
+/**
+ * Stop the HTTP server and revert mcp.json to the editor-managed (stdio) form,
+ * so the editor keeps working (it auto-spawns stdio) instead of pointing at
+ * a dead URL. Tells the user a reload applies the change.
+ */
+async function runStopMcpServer(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    return;
+  }
+  const repoRoot = folder.uri.fsPath;
+  trace.info("flow", "Stop MCP server requested", { repoRoot });
+  // Explicit user Stop — terminate regardless of the reference count.
+  await stopMcpServer(repoRoot, { force: true });
+  let reverted = false;
+  try {
+    await enableMcpForWorkspace(repoRoot);
+    reverted = true;
+  } catch (err) {
+    getOutputChannel().appendLine(
+      `[mcp-http] could not revert mcp.json to stdio: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+  }
+  await pollHealth();
+  const detail = reverted
+    ? "Reverted mcp.json to the editor-managed (stdio) config so your editor keeps working. Reload the window to apply."
+    : "Could not rewrite mcp.json automatically — open the Cognis output log for details.";
+  const choice = await vscode.window.showInformationMessage(
+    `Cognis MCP server stopped. ${detail}`,
+    "Reload Window"
+  );
+  if (choice === "Reload Window") {
+    void vscode.commands.executeCommand("workbench.action.reloadWindow");
+  }
+}
+
+async function runPauseSync(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    await showErrorGuidance(
+      new Error("Open a workspace folder before pausing index sync."),
+      "Pause sync"
+    );
+    return;
+  }
+  try {
+    await withProgress("Cognis: Pause index sync", async () => pauseSync());
+    await pollHealth();
+    await vscode.window.showInformationMessage(
+      "Index sync paused. Cognis keeps answering against the last-synced index but " +
+        "stops re-indexing file changes until you resume."
+    );
+  } catch (err) {
+    await showErrorGuidance(err, "Pause sync");
+  }
+}
+
+async function runResumeSync(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    await showErrorGuidance(
+      new Error("Open a workspace folder before resuming index sync."),
+      "Resume sync"
+    );
+    return;
+  }
+  try {
+    await withProgress("Cognis: Resume index sync", async () => resumeSync());
+    startHealthPolling();
+    await pollHealth();
+    await vscode.window.showInformationMessage(
+      "Index sync resumed. Cognis is watching this workspace for changes again."
+    );
+  } catch (err) {
+    await showErrorGuidance(err, "Resume sync");
+  }
+}
+
+/**
+ * Lifecycle "remove" action: stop indexing, disconnect MCP, and delete the
+ * local ``.cognis/`` directory after an explicit confirmation. Mirrors the
+ * "remove the container" mental model so users can cleanly back out.
+ *
+ * @param scope "workspace" removes only this repo's wiring; "all" also purges
+ *   every cognis-* entry from the shared global MCP config (uninstall prep).
+ */
+async function runRemoveFromWorkspace(scope: "workspace" | "all" = "workspace"): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    await showErrorGuidance(
+      new Error("Open a workspace folder before removing Cognis."),
+      "Remove from workspace"
+    );
+    return;
+  }
+  const purgeAllMcp = scope === "all";
+  const targets = destructiveTargets(folder.uri.fsPath);
+  const confirmMessage = purgeAllMcp
+    ? `Remove Cognis everywhere and prepare to uninstall? This stops this workspace's ` +
+      `live indexing process, deletes the Workspace_Database at ${targets.workspaceDatabase} ` +
+      `and all other data under ${targets.workspaceData}, removes EVERY Cognis MCP server ` +
+      `entry from your editor config (all repos), deletes the managed engine data at ` +
+      `${targets.managedBinary}, and deletes the semantic model at ${targets.managedModel}. ` +
+      "Your source code is not touched."
+    : `Remove Cognis from this workspace? This stops this workspace's live indexing ` +
+      `process, disconnects its MCP server, deletes the Workspace_Database at ` +
+      `${targets.workspaceDatabase}, and deletes all other data under ${targets.workspaceData} ` +
+      "(caches, config, and audit log). Your source code is not touched. You can run " +
+      "Set Up Workspace again later to recreate it.";
+  const confirmLabel = purgeAllMcp ? "Remove Everything" : "Remove";
+  const confirmation = await vscode.window.showWarningMessage(
+    confirmMessage,
+    { modal: true },
+    confirmLabel
+  );
+  if (confirmation !== confirmLabel) {
+    return;
+  }
+  try {
+    const result = await withProgress(
+      purgeAllMcp ? "Cognis: Prepare for uninstall" : "Cognis: Remove from workspace",
+      async () => removeFromWorkspace({ purgeAllMcp })
+    );
+    if (!result) {
+      return;
+    }
+    // Re-probe the backend/prereqs next poll instead of trusting stale state.
+    lastPrerequisites = undefined;
+    const parts: string[] = [];
+    if (result.cognisDirRemoved) {
+      parts.push("deleted the local .cognis index");
+    }
+    if (purgeAllMcp && result.purgedConfigPaths.length > 0) {
+      parts.push(
+        `removed all Cognis MCP entries from ${result.purgedConfigPaths.join(", ")}`
+      );
+    } else if (result.mcpRemoved) {
+      parts.push(`disconnected MCP from ${result.configPath}`);
+    }
+    // "Remove everything" also uninstalls the engine binary + model Cognis
+    // installed so the user gets a clean machine without touching a terminal.
+    if (purgeAllMcp) {
+      try {
+        const binary = await uninstallManagedBinary();
+        if (binary.removed) {
+          parts.push("uninstalled the Cognis engine binary");
+        }
+      } catch (err) {
+        getOutputChannel().appendLine(
+          `[remove] binary uninstall warning: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+      if (uninstallManagedModel()) {
+        parts.push("removed the semantic model");
+      }
+    }
+    await refreshPrerequisites();
+    let summary =
+      parts.length > 0
+        ? `Removed Cognis: ${parts.join("; ")}. Reload your editor or MCP host to apply.`
+        : "Cognis was not configured for this workspace.";
+    if (purgeAllMcp) {
+      summary += " You can now uninstall the extension.";
+    }
+    await vscode.window.showInformationMessage(summary);
+    await pollHealth();
+  } catch (err) {
+    await showErrorGuidance(err, "Remove from workspace");
+  }
+}
+
+/**
+ * Force cleanup action: the escape hatch for when the graceful
+ * {@link runRemoveFromWorkspace} fails because a daemon (indexd/mcpd) is still
+ * holding an exclusive lock on ``uckg.db`` — the classic Windows "the process
+ * cannot access the file" / "directory not empty" error after a crash or
+ * reload. This is the automated version of the manual "find the process
+ * holding the .db, Stop-Process it, then delete .cognis" recovery: it
+ * force-kills every pid Cognis recorded for this repo (leases + status file +
+ * live ``cognis_mcpd`` processes) and then deletes ``.cognis`` with retries.
+ *
+ * @param scope "workspace" force-removes only this repo's wiring; "all" also
+ *   purges every cognis-* entry from the shared global MCP config and
+ *   uninstalls the engine (uninstall prep).
+ */
+async function runForceCleanup(scope: "workspace" | "all" = "workspace"): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    await showErrorGuidance(
+      new Error("Open a workspace folder before cleaning up Cognis."),
+      "Force cleanup"
+    );
+    return;
+  }
+  const purgeAllMcp = scope === "all";
+  const targets = destructiveTargets(folder.uri.fsPath);
+  const confirmMessage = purgeAllMcp
+    ? `Force cleanup everywhere? This force cleanup terminates the recorded Cognis ` +
+      `indexd/mcpd process trees for this workspace, deletes the Workspace_Database at ` +
+      `${targets.workspaceDatabase} and all other data under ${targets.workspaceData}, ` +
+      `removes EVERY Cognis MCP server entry from your editor config (all repos), deletes ` +
+      `the managed engine data at ${targets.managedBinary}, and deletes the semantic model ` +
+      `at ${targets.managedModel}. Use this when a normal Remove failed because the database ` +
+      "was locked. Your source code is not touched."
+    : `Force cleanup this workspace? This force cleanup terminates the recorded Cognis ` +
+      `indexd/mcpd process trees for this workspace, disconnects its MCP server, deletes ` +
+      `the Workspace_Database at ${targets.workspaceDatabase}, and deletes all other data ` +
+      `under ${targets.workspaceData}. Use this when a normal Remove failed because the ` +
+      "database was locked. Your source code is not touched.";
+  const confirmLabel = purgeAllMcp ? "Force Clean Everything" : "Force Clean";
+  const confirmation = await vscode.window.showWarningMessage(
+    confirmMessage,
+    { modal: true },
+    confirmLabel
+  );
+  if (confirmation !== confirmLabel) {
+    return;
+  }
+  try {
+    const result = await withProgress(
+      purgeAllMcp ? "Cognis: Force cleanup (prepare to uninstall)" : "Cognis: Force cleanup",
+      async () => forceRemoveFromWorkspace({ purgeAllMcp })
+    );
+    if (!result) {
+      return;
+    }
+    // Re-probe the backend/prereqs next poll instead of trusting stale state.
+    lastPrerequisites = undefined;
+    const parts: string[] = [];
+    if (result.killedPids.length > 0) {
+      parts.push(
+        `force-stopped ${result.killedPids.length} process${
+          result.killedPids.length === 1 ? "" : "es"
+        } (pid ${result.killedPids.join(", ")})`
+      );
+    }
+    if (result.cognisDirRemoved) {
+      parts.push("deleted the local .cognis index");
+    }
+    if (purgeAllMcp && result.purgedConfigPaths.length > 0) {
+      parts.push(
+        `removed all Cognis MCP entries from ${result.purgedConfigPaths.join(", ")}`
+      );
+    } else if (result.mcpRemoved) {
+      parts.push(`disconnected MCP from ${result.configPath}`);
+    }
+    if (purgeAllMcp) {
+      try {
+        const binary = await uninstallManagedBinary();
+        if (binary.removed) {
+          parts.push("uninstalled the Cognis engine binary");
+        }
+      } catch (err) {
+        getOutputChannel().appendLine(
+          `[force-cleanup] binary uninstall warning: ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        );
+      }
+      if (uninstallManagedModel()) {
+        parts.push("removed the semantic model");
+      }
+    }
+    await refreshPrerequisites();
+    let summary =
+      parts.length > 0
+        ? `Force cleanup done: ${parts.join("; ")}. Reload your editor or MCP host to apply.`
+        : "Nothing to clean up — Cognis was not running or configured for this workspace.";
+    if (!result.cognisDirRemoved) {
+      summary =
+        "Force cleanup could not delete .cognis — a process may still be holding it. " +
+        "Close other editors/terminals using this folder and try again, or delete " +
+        ".cognis manually.";
+    }
+    if (purgeAllMcp && result.cognisDirRemoved) {
+      summary += " You can now uninstall the extension.";
+    }
+    await vscode.window.showInformationMessage(summary);
+    await pollHealth();
+  } catch (err) {
+    await showErrorGuidance(err, "Force cleanup");
+  }
+}
+
+/**
+ * One-click backend install: fetch the prebuilt single ``cognis`` binary for
+ * this platform, checksum-verified — no Python, pip, or compiler (Requirement
+ * 1.1). We re-probe afterwards so the panel advances on its own.
+ */
+async function runInstallBackend(): Promise<void> {
+  await runInstallBinaryBackend();
+}
+
+/**
+ * One-click "Start Cognis" flow behind the Unified_Control's ``off`` state.
+ *
+ * Reuses the existing routines sequentially to turn Cognis on for this
+ * workspace (R1.5):
+ *   1. ensure the engine binary is installed (``runInstallBackend`` when
+ *      ``backendAvailable === false``),
+ *   2. set the workspace up when it isn't ``configured`` yet
+ *      (``runSetupWorkspace``),
+ *   3. start live indexing, and
+ *   4. connect MCP (``runConnectMcp``).
+ *
+ * The sequence stops early on the first step that fails or is cancelled in a
+ * user-visible way. The reused routines already surface their own detailed
+ * error guidance; between steps we re-check state (``backendAvailable`` /
+ * ``isWorkspaceConfigured``) and, on a stall, show a short "not finished"
+ * message and halt — without deleting or modifying the user's source or the
+ * local ``.cognis`` index (R6.5, R9.2).
+ */
+async function runStartCognis(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    await showErrorGuidance(
+      new Error("Open a workspace folder before starting Cognis."),
+      "Start Cognis"
+    );
+    return;
+  }
+  const repoRoot = folder.uri.fsPath;
+
+  // Stop early: surface an actionable "not finished" notice and leave the
+  // source tree + local .cognis index untouched (R6.5, R9.2).
+  const stopEarly = (detail: string): void => {
+    trace.warn("flow", `Start Cognis stopped early: ${detail}`);
+    void vscode.window.showWarningMessage(
+      `Cognis isn't fully started yet — ${detail} Your code and local index are ` +
+        "unchanged; run “Start Cognis” again to continue."
+    );
+  };
+
+  // 1. Ensure the engine binary is installed (fresh machine). Read the module
+  // flag through helpers so its value is re-observed after the awaited install
+  // re-probes prerequisites (a plain `if` would let the type narrow to stale).
+  const engineKnownMissing = (): boolean => backendAvailable === false;
+  const engineReady = (): boolean => backendAvailable === true;
+  if (engineKnownMissing()) {
+    await runInstallBackend();
+    // runInstallBackend re-probes prerequisites and updates backendAvailable;
+    // if the engine still isn't runnable, stop before touching the workspace.
+    if (!engineReady()) {
+      stopEarly("the Cognis engine isn't installed.");
+      return;
+    }
+  }
+
+  // 2. Set the workspace up if it hasn't been configured yet.
+  if (!isWorkspaceConfigured(repoRoot)) {
+    await runSetupWorkspace();
+    if (!isWorkspaceConfigured(repoRoot)) {
+      stopEarly("workspace setup did not complete.");
+      return;
+    }
+  }
+
+  // 3. Start live indexing (idempotent — skip when the daemon already runs).
+  if (!isLiveIndexing(repoRoot)) {
+    try {
+      await withProgress("Cognis: Start live indexing", async () => startLive());
+      startHealthPolling();
+    } catch (err) {
+      await showErrorGuidance(err, "Start Cognis");
+      stopEarly("live indexing could not start.");
+      return;
+    }
+  }
+
+  // 4. Connect MCP so the editor can reach the index (handles its own errors).
+  await runConnectMcp();
+
+  await pollHealth();
+}
+
+/**
+ * Fetch + verify the single ``cognis`` binary and advance setup. Surfaces a
+ * clear message when no binary is published for the platform or the
+ * download/verification fails.
+ */
+async function runInstallBinaryBackend(): Promise<void> {
+  try {
+    const outcome = await withProgress("Cognis: Install backend", (p, t) =>
+      installManagedBinary(p, t)
+    );
+    if (!outcome) {
+      return;
+    }
+    await refreshPrerequisites();
+    // The engine binary just changed on disk, so any cached compatibility
+    // verdict is stale. Force a fresh probe (bypassing the ≤30s TTL) so the
+    // Panel/Status Bar reflect the newly installed engine version instead of
+    // the pre-install mismatch (R2.5, R5.5). Covers both Install Engine and
+    // Reinstall Engine, since the latter finishes through this routine.
+    await forceCompatibilityReprobe();
+    const totalMs = outcome.timings.reduce((sum, t) => sum + t.ms, 0);
+
+    // Fetch the semantic model (best-effort). Semantic search needs the
+    // bge-small weights; download them now so `diffuse_context` returns real
+    // hits. A failure here is non-fatal — the engine degrades to lexical +
+    // structural until the model is present.
+    let semanticNote = " Semantic search is active.";
+    if (!isModelInstalled()) {
+      try {
+        await withProgress("Cognis: Download semantic model", (p, t) =>
+          installManagedModel(p, t)
+        );
+      } catch (err) {
+        getOutputChannel().appendLine(
+          `[model] install skipped: ${err instanceof Error ? err.message : String(err)}`
+        );
+        semanticNote =
+          " Semantic search will activate once the model finishes downloading " +
+          "(run “Cognis: Install backend” again to retry); lexical + structural search work now.";
+      }
+    }
+
+    const next = await vscode.window.showInformationMessage(
+      `Cognis engine installed (${outcome.triple}) in ${formatElapsed(totalMs)}.${semanticNote} ` +
+        "Set up this workspace now?",
+      "Set Up Workspace",
+      "Later"
+    );
+    if (next === "Set Up Workspace") {
+      await runSetupWorkspace();
+    }
+  } catch (err) {
+    if (err instanceof BinaryInstallError) {
+      const choice = await vscode.window.showErrorMessage(
+        err.userMessage,
+        "Show Output"
+      );
+      if (choice === "Show Output") {
+        void vscode.commands.executeCommand("cognis.showOutput");
+      }
+      return;
+    }
+    await showErrorGuidance(err, "Install backend");
+  }
+}
+
+/**
+ * Reinstall just the engine: delete the managed binary + semantic model, then
+ * re-download + checksum-verify fresh copies. Fixes a corrupt, stale, or
+ * version-mismatched engine without touching the index or MCP wiring. The
+ * install uses the Windows-safe swap, so a still-running engine is replaced
+ * rather than failing with EPERM.
+ */
+async function runReinstallEngine(): Promise<void> {
+  const targets = destructiveTargets();
+  const confirm = await vscode.window.showWarningMessage(
+    `Reinstall the Cognis engine? This deletes the managed engine data at ` +
+      `${targets.managedBinary} and the semantic model at ${targets.managedModel}, then ` +
+      "fetches fresh, checksum-verified copies from the release. Your workspace index " +
+      "and MCP config are kept.",
+    { modal: true },
+    "Reinstall Engine"
+  );
+  if (confirm !== "Reinstall Engine") {
+    return;
+  }
+  try {
+    await withProgress("Cognis: Reinstall engine — removing", async () => {
+      try {
+        await uninstallManagedBinary();
+      } catch (err) {
+        getOutputChannel().appendLine(
+          `[reinstall] binary remove warning: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+      uninstallManagedModel();
+    });
+  } catch (err) {
+    await showErrorGuidance(err, "Reinstall engine");
+    return;
+  }
+  lastPrerequisites = undefined;
+  // Re-download binary + model (also offers Set Up Workspace on success).
+  await runInstallBinaryBackend();
+}
+
+/**
+ * Update Extension: the non-destructive remediation for the ``engine-newer`` /
+ * ``backend-newer`` skew, where the installed Engine is ahead of this Extension
+ * (Requirement 3.5). It opens the Cognis entry in the editor's Extensions view
+ * so the user can review and apply the pending Extension update through the
+ * editor's own update flow.
+ *
+ * It MUST NOT auto-downgrade or modify the installed Engine, the ``.cognis``
+ * index, the MCP config, or source code (Requirement 5.3): this handler only
+ * reveals the Extensions view and never touches the engine binary or workspace
+ * state. We resolve the extension identifier from the live extension context so
+ * the deep-link matches whatever publisher/name this build ships under, and
+ * fall back to the known id when the context isn't available yet. Opening the
+ * Extensions view is best-effort — if the primary deep-link command isn't
+ * available on this host we fall back to a plain search — so a remediation
+ * click never dead-ends.
+ */
+async function runUpdateExtension(): Promise<void> {
+  const extensionId = extensionContext?.extension?.id ?? "ToanBui.cognis-mcp";
+  try {
+    // Preferred: open the Cognis extension's page directly in the Extensions
+    // view so the user sees the Update button when one is pending.
+    await vscode.commands.executeCommand("extension.open", extensionId);
+  } catch {
+    try {
+      // Fallback for hosts that don't expose ``extension.open``: focus the
+      // Extensions view filtered to the Cognis extension by id.
+      await vscode.commands.executeCommand(
+        "workbench.extensions.search",
+        `@id:${extensionId}`
+      );
+    } catch (err) {
+      await showErrorGuidance(err, "Update Extension");
+    }
+  }
+}
+
+/**
+ * Uninstall the engine: the non-destructive inverse of Install Engine. Deletes
+ * only the downloaded engine binary + semantic model. The workspace index
+ * (`.cognis`), MCP config, and source code are all kept. If the user cancels
+ * the confirmation, nothing changes. On failure, existing state is preserved
+ * and an error indicator is shown.
+ */
+async function runUninstallEngine(): Promise<void> {
+  const targets = destructiveTargets();
+  const confirm = await vscode.window.showWarningMessage(
+    `Uninstall the Cognis engine? This deletes the managed engine data at ` +
+      `${targets.managedBinary} and the semantic model at ${targets.managedModel}. ` +
+      "Your workspace index (.cognis) and MCP config are kept.",
+    { modal: true },
+    "Uninstall Engine"
+  );
+  if (confirm !== "Uninstall Engine") {
+    return;
+  }
+  try {
+    await uninstallManagedBinary();
+    uninstallManagedModel();
+    lastPrerequisites = undefined;
+    await refreshPrerequisites();
+  } catch (err) {
+    await showErrorGuidance(err, "Uninstall engine");
+  }
+}
+
+/**
+ * Cold restart: the one-click recovery from a corrupted/stale state. Wipes
+ * everything Cognis manages — this workspace's `.cognis` index, ALL cognis MCP
+ * entries, and the downloaded engine binary + model — then rebuilds from
+ * scratch: re-download the engine + model and re-index the workspace fresh.
+ * Source code is never touched.
+ */
+async function runColdRestart(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  if (!folder) {
+    await showErrorGuidance(
+      new Error("Open a workspace folder before restarting Cognis."),
+      "Cold restart"
+    );
+    return;
+  }
+  const targets = destructiveTargets(folder.uri.fsPath);
+  const confirm = await vscode.window.showWarningMessage(
+    `Cold restart Cognis? This stops this workspace's live indexing process, deletes ` +
+      `the Workspace_Database at ${targets.workspaceDatabase} and all other data under ` +
+      `${targets.workspaceData}, removes ALL Cognis MCP entries from your editor, deletes ` +
+      `the managed engine data at ${targets.managedBinary}, and deletes the semantic model ` +
+      `at ${targets.managedModel}. It then re-downloads everything and sets the workspace ` +
+      "up fresh. Your source code is not touched.",
+    { modal: true },
+    "Cold Restart"
+  );
+  if (confirm !== "Cold Restart") {
+    return;
+  }
+  try {
+    // 1. Full wipe: stops live indexing, deletes .cognis, purges every cognis
+    //    MCP entry (removeFromWorkspace stops the daemon first to free the DB).
+    await withProgress("Cognis: Cold restart — cleaning up", async () =>
+      removeFromWorkspace({ purgeAllMcp: true })
+    );
+    try {
+      await uninstallManagedBinary();
+    } catch (err) {
+      getOutputChannel().appendLine(
+        `[cold-restart] binary remove warning: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+    uninstallManagedModel();
+    lastPrerequisites = undefined;
+
+    // 2. Rebuild: fresh binary + model, then set the workspace up from scratch.
+    const outcome = await withProgress("Cognis: Cold restart — installing engine", (p, t) =>
+      installManagedBinary(p, t)
+    );
+    if (!outcome) {
+      return;
+    }
+    if (!isModelInstalled()) {
+      try {
+        await withProgress("Cognis: Cold restart — downloading model", (p, t) =>
+          installManagedModel(p, t)
+        );
+      } catch (err) {
+        getOutputChannel().appendLine(
+          `[cold-restart] model install skipped: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+    await refreshPrerequisites();
+    await runSetupWorkspace();
+    await vscode.window.showInformationMessage(
+      "Cognis cold restart complete — engine + model reinstalled and the workspace re-indexed from scratch. " +
+        "Reload the window so your editor picks up the fresh MCP server."
+    );
+  } catch (err) {
+    await showErrorGuidance(err, "Cold restart");
+  }
+}
+
+/**
+ * Single compatibility reconciliation point (Requirement 4.1). Runs *after*
+ * the {@link CompatibilityCoordinator} has committed a snapshot and merges the
+ * two formerly independent activation prompts (``maybeUpgradeBackend`` +
+ * ``maybeCheckHandshake``) into one decision:
+ *
+ *   1. The committed handshake snapshot is the deciding source whenever it is
+ *      runnable (``phase === "confirmed"``). A confirmed non-``ok`` verdict is
+ *      the authoritative version-skew signal.
+ *   2. Managed binary drift is only a *fallback* when the handshake is
+ *      unavailable (``phase !== "confirmed"`` — fresh machine, unreachable
+ *      backend, or a superseded probe), so the two mechanisms can never both
+ *      fire for the same stale binary.
+ *
+ * At most one notification is shown per {@link CompatibilityIdentity} per
+ * activation session: the session-scoped {@link seenCompatibilityIdentities}
+ * set dedupes re-entrant reconciliations within one activation, while the
+ * existing per-skew ``globalState`` "skip" key preserves the cross-session
+ * Dismiss behaviour untouched (refined in task 5.2).
+ */
+async function reconcileCompatibility(): Promise<void> {
+  const folder = getWorkspaceFolder();
+  const coordinator = compatibilityCoordinator;
+  if (!folder || !coordinator) {
+    return;
+  }
+  let snapshot;
+  try {
+    snapshot = await coordinator.getOrProbe(
+      folder.uri.fsPath,
+      expectedEngineVersion()
+    );
+  } catch (err) {
+    if (err instanceof StaleCompatibilityProbeError) {
+      return;
+    }
+    throw err;
+  }
+  // Handshake is the deciding source when it produced a verdict.
+  if (snapshot.phase === "confirmed") {
+    await notifyHandshakeMismatch(snapshot.result);
+    return;
+  }
+  // Fallback only when the handshake is unavailable: managed binary drift.
+  await notifyManagedBinaryDrift();
+}
+
+/**
+ * Notify a confirmed handshake mismatch, deduped to one notification per
+ * {@link CompatibilityIdentity} per activation session. Silent for an ``ok``
+ * verdict or when the kind carries no remediation. Preserves the existing
+ * per-skew ``globalState`` Dismiss so a dismissed identity stays silent across
+ * sessions until the identity (kind or version pair) changes.
+ *
+ * The notification is the reminder surface, not the source of truth: its single
+ * remediation button MUST match the Panel's Compatibility_Primary_Action,
+ * derived from the same {@link deriveRemediation} table the Panel uses, so the
+ * button label and the command it invokes track the current Compatibility_Kind
+ * (Requirement 3.6):
+ *   - Update Engine    -> ``cognis.installBackend``  (non-destructive)
+ *   - Update Extension -> ``cognis.updateExtension`` (non-destructive; command
+ *     lands in task 5.4, referenced consistently here via ACTION_COMMANDS)
+ *   - Repair Engine    -> ``cognis.reinstallEngine`` (destructive; routed
+ *     through the existing modal confirmation in {@link runReinstallEngine})
+ * plus a ``Show Diagnostics`` action (``cognis.showDiagnostics``) and
+ * ``Dismiss`` (Requirement 4.3).
+ *
+ * The message body uses the Backend-free {@link deriveCompatibilityHint}
+ * vocabulary so no user-visible text says "Backend" (Requirement 6.1).
+ *
+ * Dismiss ONLY suppresses re-showing the notification for this exact
+ * Compatibility_Identity (via the per-skew ``globalState`` key); it never
+ * touches the committed CompatibilitySnapshot, so the Panel/Status Bar verdict
+ * is unaffected (Requirement 4.4). The snapshot is owned by the coordinator and
+ * republished by ``pollHealth``; nothing in this path clears it.
+ */
+async function notifyHandshakeMismatch(
+  result: HandshakeResult
+): Promise<void> {
+  if (result.compatibility === "ok") {
+    return;
+  }
+  // The notification's remediation is the Panel's Compatibility_Primary_Action:
+  // both derive from the same 1:1 table, so kind ⇒ (label, command) never drift.
+  const remediation = deriveRemediation(result);
+  if (!remediation) {
+    return;
+  }
+  // Backend-free message body (Engine/Extension vocabulary only) — the same
+  // caption the Panel shows for this remediation.
+  const message = deriveCompatibilityHint(result);
+  if (!message) {
+    return;
+  }
+  // One notification per identity per activation session.
+  const identityKey = compatibilityIdentityKey(result);
+  if (seenCompatibilityIdentities.has(identityKey)) {
+    return;
+  }
+  // For engine-build skew the actionable identity is the engine version pair,
+  // not the (unchanged) contract version — key the skip on that so a later
+  // engine bump re-prompts instead of staying silenced.
+  const skewId =
+    result.compatibility === "engine-outdated" ||
+    result.compatibility === "engine-newer"
+      ? `${result.engineVersion ?? "x"}->${result.expectedEngineVersion ?? "x"}`
+      : `${result.backendContractVersion ?? "x"}->${result.expectedContractVersion}`;
+  const skipKey = `cognis.skipHandshakeWarning.${result.compatibility}.${skewId}`;
+  if (extensionContext?.globalState.get<boolean>(skipKey)) {
+    return;
+  }
+  seenCompatibilityIdentities.add(identityKey);
+
+  // The remediation button label matches the Panel; its command resolves via
+  // the shared ACTION_COMMANDS map so notification and Panel invoke the same id.
+  const remediationLabel = remediation.label;
+  const remediationCommand = ACTION_COMMANDS[remediation.actionId];
+  const choice = await vscode.window.showWarningMessage(
+    message,
+    remediationLabel,
+    "Show Diagnostics",
+    "Dismiss"
+  );
+  if (choice === remediationLabel) {
+    await runCompatibilityRemediation(remediation.actionId, remediationCommand);
+  } else if (choice === "Show Diagnostics") {
+    void vscode.commands.executeCommand("cognis.showDiagnostics");
+  } else if (choice === "Dismiss") {
+    // Suppress ONLY the notification for this exact identity across sessions.
+    // The committed CompatibilitySnapshot (Panel/Status Bar verdict) is left
+    // entirely untouched — Dismiss is a notification-only action (R4.4).
+    await extensionContext?.globalState.update(skipKey, true);
+  }
+}
+
+/**
+ * Dispatch the chosen Compatibility_Primary_Action to the correct handler,
+ * matching the Panel's mapping exactly (Requirement 3.6), and guarantee that a
+ * *successful* remediation of ANY kind ends in a forced re-probe within ≤5s so
+ * a return to ``ok`` clears the warning and the Panel drops back to the
+ * operational control (Requirement 4.6):
+ *
+ *   - ``Update Engine`` (``installBackend``) and ``Repair Engine``
+ *     (``reinstallEngine``) reuse the in-process routines. Both finish through
+ *     {@link runInstallBinaryBackend}, which already forces the re-probe on a
+ *     successful install (R2.5); Repair Engine additionally keeps its modal
+ *     confirmation, and a cancelled modal makes no change (the mismatch is
+ *     retained, nothing is dismissed).
+ *   - ``Update Extension`` (``updateExtension``) invokes the registered command
+ *     id — shared with the Panel via {@link ACTION_COMMANDS} so the two
+ *     surfaces never diverge — then forces its own re-probe here (the editor
+ *     update path has no in-process install routine to piggy-back on). When the
+ *     updated versions now match, the fresh probe commits ``ok`` and the
+ *     warning clears; when they still differ (or the update is deferred to a
+ *     reload), the probe re-commits the mismatch so the Panel keeps prompting.
+ *
+ * On a remediation that FAILS or is CANCELLED the committed Confirmed_Mismatch
+ * is retained (only a confirmed ``ok`` clears it — coordinator invariant) and
+ * NOTHING records a Dismiss skip key here: the per-identity skip is written only
+ * on the explicit ``Dismiss`` button (see {@link notifyHandshakeMismatch}), so a
+ * failed attempt still re-prompts (Requirement 4.7 / 5.5). A failed Update
+ * Extension surfaces an error indicator and leaves the mismatch in place.
+ */
+async function runCompatibilityRemediation(
+  actionId: CompatibilityRemediation["actionId"],
+  command: string
+): Promise<void> {
+  switch (actionId) {
+    case "installBackend":
+      // runInstallBackend → runInstallBinaryBackend forces the re-probe on a
+      // successful install; a failed/cancelled install keeps the mismatch.
+      await runInstallBackend();
+      return;
+    case "reinstallEngine":
+      // Destructive: routed through the existing modal-confirmed routine, which
+      // also finishes through the install routine's forced re-probe on success.
+      // Cancelling the modal makes no change and records no Dismiss.
+      await runReinstallEngine();
+      return;
+    case "updateExtension":
+      // Non-destructive. Dispatch the registered command through the same id the
+      // Panel uses, then force a fresh (TTL-bypassing) probe so a now-matching
+      // version returns to ``ok`` and the Panel drops the warning (R4.6). If the
+      // command fails, surface an error, keep the mismatch, and record no
+      // Dismiss so a later attempt still prompts (R4.7 / R5.5).
+      try {
+        await vscode.commands.executeCommand(command);
+      } catch (err) {
+        await showErrorGuidance(err, "Update Extension");
+        return;
+      }
+      await forceCompatibilityReprobe();
+      return;
+  }
+}
+
+/**
+ * Fallback path used only when the handshake is unavailable: detect a managed
+ * engine binary that's older than the extension and offer a one-click upgrade.
+ * Remembers a "skip this version" choice so it doesn't nag. Silent when nothing
+ * is installed or versions match.
+ */
+async function notifyManagedBinaryDrift(): Promise<void> {
+  const binaryDrift = checkManagedBinaryDrift();
+  if (!binaryDrift.outdated || !binaryDrift.installed || !binaryDrift.expected) {
+    return;
+  }
+  const installed = binaryDrift.installed;
+  const expected = binaryDrift.expected;
+
+  const skipKey = `cognis.skipBackendUpgrade.${expected}`;
+  if (extensionContext?.globalState.get<boolean>(skipKey)) {
+    return;
+  }
+  const choice = await vscode.window.showInformationMessage(
+    `Cognis was updated to ${expected}, but its backend is still ${installed}. ` +
+      "Upgrade the backend so features and fixes match?",
+    "Upgrade backend",
+    "Later",
+    "Skip this version"
+  );
+  if (choice === "Skip this version") {
+    await extensionContext?.globalState.update(skipKey, true);
+    return;
+  }
+  if (choice === "Upgrade backend") {
+    await runInstallBackend();
+  }
+}
+
+export function activate(context: vscode.ExtensionContext): void {
+  extensionContext = context;
+  pollGeneration += 1;
+  lastContext = undefined;
+  seenCompatibilityIdentities.clear();
+  compatibilityCoordinator?.dispose();
+  compatibilityCoordinator = new CompatibilityCoordinator(performHandshake);
+  initStateStorage(context);
+  activationManager = new ActivationManager({
+    onPhase: (repoRoot, phase) => {
+      if (!lastContext) {
+        return;
+      }
+      const state = getState(repoRoot);
+      const snapshot = deriveStatusSnapshot({
+        repoRoot,
+        health: lastContext.health,
+        healthReadFailed: lastContext.health === undefined,
+        mcpEnabled: state.mcpEnabled,
+        configured: isWorkspaceConfigured(repoRoot),
+        transition: phase,
+      });
+      updateStatusBar({ ...lastContext, status: snapshot.workspaceStatus });
+    },
+  });
+  deactivationManager = new DeactivationManager({
+    onPhase: (repoRoot, phase) => {
+      if (!lastContext) {
+        return;
+      }
+      const state = getState(repoRoot);
+      const snapshot = deriveStatusSnapshot({
+        repoRoot,
+        health: lastContext.health,
+        healthReadFailed: lastContext.health === undefined,
+        mcpEnabled: state.mcpEnabled,
+        configured: isWorkspaceConfigured(repoRoot),
+        transition: phase,
+      });
+      updateStatusBar({ ...lastContext, status: snapshot.workspaceStatus });
+    },
+  });
+  context.subscriptions.push({
+    dispose: () => activationManager?.dispose(),
+  });
+  toggleControl = new ToggleControl({
+    workspaceState: context.workspaceState,
+    transition: {
+      activate: async (workspace, signal) => {
+        await activationManager?.turnOn(workspace, signal);
+      },
+      deactivate: async (workspace, signal) => {
+        activationManager?.beginTransition(workspace);
+        try {
+          await deactivationManager?.turnOff(workspace, signal);
+        } finally {
+          activationManager?.endTransition(workspace);
+        }
+      },
+    },
+    reportStatus: (workspace, _displayed: ToggleState) => {
+      const state = getState(workspace);
+      deriveStatusSnapshot({
+        repoRoot: workspace,
+        health: lastContext?.health,
+        healthReadFailed: lastContext?.health === undefined,
+        mcpEnabled: state.mcpEnabled,
+        configured: isWorkspaceConfigured(workspace),
+        transition:
+          activationManager?.currentPhase ?? deactivationManager?.currentPhase,
+      });
+    },
+  });
+  const extVersion = context.extension?.packageJSON?.version as string | undefined;
+  trace.init(context, extVersion);
+  const configuredLevel = vscode.workspace
+    .getConfiguration("cognis")
+    .get<string>("logLevel", "info");
+  trace.setMinLevel(
+    (["debug", "info", "warn", "error"].includes(configuredLevel)
+      ? configuredLevel
+      : "info") as TraceLevel
+  );
+  trace.info("activate", "Cognis extension activating", { extVersion });
+  initManagedBinary(context, extVersion);
+  initManagedModel(context, extVersion);
+  panelProvider = new CognisPanelProvider(
+    context.extensionUri,
+    context.extension?.packageJSON?.version
+  );
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      CognisPanelProvider.viewType,
+      panelProvider
+    )
+  );
+
+  statusBarItem = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Left,
+    100
+  );
+  statusBarItem.command = "cognis.openPanel";
+  context.subscriptions.push(statusBarItem);
+
+  const output = getOutputChannel();
+  context.subscriptions.push(output);
+
+  const guardrailController = new CognisGuardrailController();
+  context.subscriptions.push(guardrailController);
+
+  // Register a command with partial-failure tolerance (R7.5): if one
+  // registration throws (e.g. a duplicate id or a host quirk), log a
+  // diagnostics warning and keep activating so the remaining commands still
+  // register. Activation never aborts because a single command failed.
+  const safeRegister = (
+    id: string,
+    handler: (...args: any[]) => any
+  ): void => {
+    try {
+      context.subscriptions.push(vscode.commands.registerCommand(id, handler));
+    } catch (err) {
+      trace.warn("activate", `command ${id} failed to register: ${String(err)}`);
+      // Continue activation with partial functionality.
+    }
+  };
+
+  safeRegister("cognis.showOutput", () => {
+    output.show(true);
+  });
+
+  safeRegister("cognis.toggle", async () => {
+    const folder = getWorkspaceFolder();
+    if (!folder || !toggleControl) {
+      await vscode.window.showWarningMessage("Open a folder to toggle Cognis.");
+      return;
+    }
+    const root = folder.uri.fsPath;
+    const next = toggleControl.displayed(root) === "On" ? "Off" : "On";
+    await toggleControl.set(root, next);
+  });
+
+  safeRegister("cognis.showDiagnostics", async () => {
+    const file = trace.logFilePath();
+    if (!file) {
+      await vscode.window.showWarningMessage(
+        "Diagnostics log is not ready yet. Try again in a moment."
+      );
+      return;
+    }
+    try {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+      await vscode.window.showTextDocument(doc);
+    } catch {
+      await vscode.window.showWarningMessage(
+        `Could not open the diagnostics log at ${file}.`
+      );
+    }
+  });
+
+  context.subscriptions.push(
+    onDidChangeIndexStatus(({ repoRoot, status }) => {
+      const folder = getWorkspaceFolder();
+      if (!folder || folder.uri.fsPath !== repoRoot) {
+        return;
+      }
+      setIndexStatus(repoRoot, status);
+      if (status && getState(repoRoot).liveIndexing !== status.active) {
+        setLiveIndexing(repoRoot, status.active);
+      }
+      if (indexingActive || isIndexStatusBusy(status)) {
+        updateStatusBar(buildIndexingContext(repoRoot));
+        return;
+      }
+      const state = getState(repoRoot);
+      // A background index-status change must refresh ONLY the index-derived
+      // fields — it must not blow away the rest of the last full snapshot
+      // (health, mcpServer phase/url/name/error, configured, backendAvailable,
+      // prerequisites, version). Re-deriving a sparse PanelContext from a
+      // handful of state flags caused the panel to momentarily forget MCP/
+      // health state until the next 30s poll, flipping "Connected" back to
+      // "Off / Start Cognis" and mislabelling the title-bar toggles. Merge over
+      // the last rendered context so unrelated fields survive; only when we've
+      // never rendered do we fall back to a fresh full poll.
+      if (lastContext) {
+        const statusSnapshot = deriveStatusSnapshot({
+          repoRoot,
+          health: lastContext.health,
+          healthReadFailed: lastContext.health === undefined,
+          mcpEnabled: Boolean(lastContext.mcpEnabled),
+          configured: true,
+        });
+        updateStatusBar({
+          ...lastContext,
+          status: statusSnapshot.workspaceStatus,
+          liveIndexing: state.liveIndexing,
+          syncPaused: state.syncPaused,
+          indexStatus: state.indexStatus,
+          advancedMode: readAdvancedMode(),
+        });
+        return;
+      }
+      void pollHealth();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      if (document.uri.scheme !== "file") {
+        return;
+      }
+      void ensureLiveIndexingForWorkspaceChange(document.uri);
+    })
+  );
+  context.subscriptions.push(
+    vscode.workspace.onDidCreateFiles((event) => {
+      void ensureLiveIndexingForWorkspaceChange(event.files[0]);
+    })
+  );
+  context.subscriptions.push(
+    vscode.workspace.onDidDeleteFiles((event) => {
+      void ensureLiveIndexingForWorkspaceChange(event.files[0]);
+    })
+  );
+  context.subscriptions.push(
+    vscode.workspace.onDidRenameFiles((event) => {
+      void ensureLiveIndexingForWorkspaceChange(event.files[0]?.newUri);
+    })
+  );
+
+  // Workspace switch/close: never reuse a stale root's compatibility verdict.
+  // Every removed root is evicted from the coordinator so its cached snapshot
+  // can never be published for a different root (R2.7). If the *current* root
+  // changed as a result, force a fresh probe for the new root — its engine may
+  // differ from the one we last verified — and publish it via pollHealth. A
+  // pure render never triggers this; only an actual folder change does
+  // (R2.6, R5.5).
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders((event) => {
+      const coordinator = compatibilityCoordinator;
+      if (coordinator) {
+        for (const removed of event.removed) {
+          coordinator.evict(removed.uri.fsPath);
+        }
+      }
+      // A switch invalidates any in-flight publish targeting the old root.
+      pollGeneration += 1;
+      void forceCompatibilityReprobe();
+    })
+  );
+
+  // React to `cognis.advancedMode` toggles by re-rendering the panel in place
+  // (≤2s, no window reload). We flip `advancedMode` on the most recent context
+  // and re-run `updateStatusBar`; if nothing has been rendered yet, fall back
+  // to a fresh health poll. This is a plain event listener (not a command), so
+  // it's pushed directly rather than via `safeRegister` (R3.3, R3.4).
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (!e.affectsConfiguration("cognis.advancedMode")) {
+        return;
+      }
+      const advancedMode = readAdvancedMode();
+      if (lastContext) {
+        updateStatusBar({ ...lastContext, advancedMode });
+      } else {
+        void pollHealth();
+      }
+    })
+  );
+
+  safeRegister("cognis.setupWorkspace", () => runSetupWorkspace());
+
+  // Unified_Control "Start Cognis" one-click flow, registered in the same
+  // partial-failure-tolerant group as every other command (R1.6, R7.3).
+  safeRegister("cognis.startCognis", () => runStartCognis());
+
+  safeRegister("cognis.repairSetup", () => runRepairSetup());
+
+  safeRegister("cognis.clearAndReindex", () => runClearAndReindex());
+
+  safeRegister("cognis.connectMcp", () => runConnectMcp());
+
+  safeRegister("cognis.disconnectMcp", () => runDisconnectMcp());
+
+  safeRegister("cognis.cancelIndexing", () => runCancelIndexing());
+
+  safeRegister("cognis.pauseSync", () => runPauseSync());
+
+  safeRegister("cognis.resumeSync", () => runResumeSync());
+
+  safeRegister("cognis.installBackend", () => runInstallBackend());
+
+  safeRegister("cognis.removeFromWorkspace", () =>
+    runRemoveFromWorkspace("workspace")
+  );
+
+  safeRegister("cognis.prepareUninstall", () => runRemoveFromWorkspace("all"));
+
+  safeRegister("cognis.forceCleanup", () => runForceCleanup("workspace"));
+
+  safeRegister("cognis.reinstallEngine", () => runReinstallEngine());
+
+  // Non-destructive Extension update remediation for the engine-newer /
+  // backend-newer skew (add-only command id; R3.5, R5.3, R7.3).
+  safeRegister("cognis.updateExtension", () => runUpdateExtension());
+
+  safeRegister("cognis.uninstallEngine", () => runUninstallEngine());
+
+  safeRegister("cognis.coldRestart", () => runColdRestart());
+
+  safeRegister("cognis.showHealth", async () => {
+    try {
+      await showHealthReport();
+    } catch (err) {
+      await showErrorGuidance(err, "Health report");
+    }
+  });
+
+  safeRegister("cognis.startMcpServer", () => runStartMcpServer());
+
+  safeRegister("cognis.stopMcpServer", () => runStopMcpServer());
+
+  context.subscriptions.push(
+    onDidChangeMcpServerState(({ repoRoot }) => {
+      const folder = getWorkspaceFolder();
+      if (folder && folder.uri.fsPath === repoRoot) {
+        void pollHealth();
+      }
+    })
+  );
+
+  safeRegister("cognis.openPanel", () => {
+    panelProvider.reveal();
+  });
+
+  safeRegister("cognis.refreshPrerequisites", () => refreshPrerequisites());
+
+  safeRegister("cognis.installPrerequisite", async (itemId?: string) => {
+    const folder = getWorkspaceFolder();
+    if (!folder || !itemId) {
+      return;
+    }
+    const item = lastPrerequisites?.items.find((i) => i.id === itemId);
+    if (!item) {
+      return;
+    }
+    installPrerequisite(folder.uri.fsPath, item.install_target);
+  });
+
+  safeRegister("cognis.installAllPrerequisites", () => {
+    const folder = getWorkspaceFolder();
+    if (!folder || !lastPrerequisites) {
+      return;
+    }
+    installAllMissing(folder.uri.fsPath, lastPrerequisites.combined_install_target);
+  });
+
+  void (async () => {
+    await rehydrateWorkspaceState();
+    const folder = getWorkspaceFolder();
+    if (folder) {
+      const state = getState(folder.uri.fsPath);
+      if (isIndexStatusBusy(state.indexStatus)) {
+        updateStatusBar(buildIndexingContext(folder.uri.fsPath));
+      }
+      if (activationManager) {
+        context.subscriptions.push(
+          activationManager.watchCoupling(folder.uri.fsPath)
+        );
+      }
+    }
+    // Populate the prerequisite checklist early so the panel can show it (and
+    // gate setup) before the user takes any action.
+    await refreshPrerequisites();
+    await pollHealth();
+    startHealthPolling();
+
+    // Single compatibility reconciliation point that runs after the
+    // coordinator has committed a snapshot: the handshake decides when
+    // runnable, managed binary drift is only the fallback, and at most one
+    // notification is shown per Compatibility_Identity this session.
+    void reconcileCompatibility();
+
+    indexingActive = true;
+    blockingIndexMessage = "Inspecting workspace and checking live indexing…";
+    if (folder) {
+      updateStatusBar(buildIndexingContext(folder.uri.fsPath));
+    }
+    const silentProgress: vscode.Progress<{ message?: string }> = {
+      report: (value) => {
+        blockingIndexMessage = value.message;
+        if (folder) {
+          updateStatusBar(buildIndexingContext(folder.uri.fsPath));
+        }
+      },
+    };
+    const noCancelToken: vscode.CancellationToken = {
+      isCancellationRequested: false,
+      onCancellationRequested: () => ({ dispose: () => {} }),
+    };
+    void (async () => {
+      try {
+        await reconcileWorkspaceOnActivate(
+          context,
+          silentProgress,
+          noCancelToken
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message !== "Cancelled") {
+          getOutputChannel().appendLine(`[reconcile] ${message}`);
+          await showErrorGuidance(err, "Auto-manage on activate");
+        }
+      } finally {
+        indexingActive = false;
+        blockingIndexMessage = undefined;
+        await pollHealth();
+      }
+    })();
+  })();
+  context.subscriptions.push({
+    dispose: () => {
+      pollGeneration += 1;
+      compatibilityCoordinator?.dispose();
+      compatibilityCoordinator = undefined;
+      if (healthPollTimer) {
+        clearInterval(healthPollTimer);
+        healthPollTimer = undefined;
+      }
+      stopAllIndexing();
+      void stopAllMcpServers();
+    },
+  });
+}
+
+export async function deactivate(): Promise<void> {
+  pollGeneration += 1;
+  compatibilityCoordinator?.dispose();
+  compatibilityCoordinator = undefined;
+  extensionContext = undefined;
+  stopAllIndexing();
+  // Await (not `void`) so cleanup confirms every MCP server has stopped within
+  // its budget before the host finishes tearing the extension down (R10.2, R13.2).
+  await stopAllMcpServers();
+  if (healthPollTimer) {
+    clearInterval(healthPollTimer);
+    healthPollTimer = undefined;
+  }
+  statusSurfaceRefresh?.dispose();
+  statusSurfaceRefresh = undefined;
+  activationManager?.dispose();
+  activationManager = undefined;
+  toggleControl = undefined;
+}
+
+/**
+ * Test-only handle to the module-private compatibility reconciliation entry
+ * point. Production code invokes {@link reconcileCompatibility} exactly once per
+ * activation, so the session dedupe invariant — at most one notification per
+ * {@link CompatibilityIdentity} per activation session (Requirement 4.2) — can
+ * only be exercised by a re-entrant call. This export lets the fast
+ * ``node --test`` harness make that second call to prove the seen-identity set
+ * is actually wired into the notification path (not merely that the identity key
+ * is stable). It is not referenced anywhere in the extension's runtime wiring.
+ */
+export const __test__ = { reconcileCompatibility };

@@ -1,0 +1,20 @@
+{
+  "active": "bool",
+  "inflight_count": "int",
+  "inflight_files": [
+    "str"
+  ],
+  "last_error": "str",
+  "message": "str",
+  "pending_count": "int",
+  "pending_files": [
+    "str"
+  ],
+  "phase": "str",
+  "pid": "int",
+  "progress_percent": "float",
+  "recent_files": [
+    "str"
+  ],
+  "updated_at": "float"
+}

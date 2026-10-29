@@ -1,0 +1,9 @@
+# `cross` configuration for Linux cross-compile targets in the release matrix.
+# The default `cross` images include a C toolchain, so `rusqlite`'s `bundled`
+# feature (which compiles SQLite + FTS5 from C source into the binary) builds
+# inside the container without system SQLite.
+[target.aarch64-unknown-linux-gnu]
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:0.2.5"
+
+[build.env]
+passthrough = ["CARGO_NET_OFFLINE"]

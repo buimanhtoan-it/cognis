@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b1ea72989708530f358ae8f53028e8ae6649720260c9b970be63304f77de8829 # shrinks to plan = DivergencePlan { seed: 0, stable_key_changes: [Symbols], side_only_rows: [(VectorIds, Right)] }
